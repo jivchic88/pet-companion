@@ -15,7 +15,7 @@ import { bowlHome, initToys, mountToys, moveBowl, resetToys, rollBall, unmountTo
 
 // Версия модуля — та же, что в package.json (npm version обновляет её здесь: scripts/sync-version.mjs; README и CHANGELOG
 // сверяет npm run check). Версии форматов данных — v1 в ключах (storageKeys).
-export const VERSION = '0.1.3';
+export const VERSION = '0.1.4';
 
 // Местная дата «ГГГГ-ММ-ДД» — граница дня лакомства и сценок; по ней сайт считает progress().today (README, «Интерфейс»).
 export const localDay = R.localDay;

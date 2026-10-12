@@ -1,6 +1,6 @@
 # pet-companion — питомец для сайта
 
-Версия **0.1.3** (номер — в `package.json`; история — [CHANGELOG.md](CHANGELOG.md)).
+Версия **0.1.4** (номер — в `package.json`; история — [CHANGELOG.md](CHANGELOG.md)).
 
 > **In English, briefly.** A calm cat or dog companion that lives next to a web page and reacts to the site’s confirmed
 > learning activity. Plain browser ES modules + CSS, inline SVG art, no runtime dependencies, no network, no build step.
