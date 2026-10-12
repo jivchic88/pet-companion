@@ -7,6 +7,7 @@
 Исправление типов; поведение питомца, рисунки, стили, тексты, ключи и форматы хранения — как в 0.1.3.
 
 - Входы стилей `pet-companion/pet.css`, `pet-companion/dog.css`, `pet-companion/pet-base.css` теперь корректно подключаются в TypeScript с `noUncheckedSideEffectImports` (`moduleResolution` — `bundler`, `node16`, `nodenext`): в 0.1.3 у них не было деклараций, и без общей декларации `*.css` в проекте сайта каждый импорт стиля давал `TS2307: Cannot find module`. Декларация `pet/css.d.mts` — пустой модуль (стиль не экспортирует значений, это не CSS Modules); в `exports` у стилей условие `types`, сборщик и Node получают те же файлы `.css`. Другие пути внутри пакета по-прежнему закрыты.
+- Выпуск (в пакет не входит): `npm version` больше не убирает пустую строку после заголовка версии в CHANGELOG (`scripts/sync-version.mjs`).
 
 ## 0.1.3 — 2026-10-12
 
