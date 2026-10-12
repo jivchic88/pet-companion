@@ -29,8 +29,9 @@ async function replace(file, pattern, next, what) {
 }
 
 const changelog = await readFile(at('CHANGELOG.md'), 'utf8');
-if (/^## Не выпущено\s*$/m.test(changelog)) {
-  await writeFile(at('CHANGELOG.md'), changelog.replace(/^## Не выпущено\s*$/m, `## ${version} — ${today}`));
+// Только пробелы до конца строки: \s захватил бы и перевод строки — заголовок слипся бы с текстом раздела.
+if (/^## Не выпущено[ \t]*$/m.test(changelog)) {
+  await writeFile(at('CHANGELOG.md'), changelog.replace(/^## Не выпущено[ \t]*$/m, `## ${version} — ${today}`));
 } else if (/^## (\d+\.\d+\.\d+)/m.exec(changelog)?.[1] !== version) {
   fail(`в CHANGELOG.md нет раздела «## Не выпущено» и последняя запись — не ${version}: опишите изменения до выпуска`);
 }
