@@ -24,6 +24,7 @@
 | --- | --- |
 | `pet/pet.mjs` | подключение и оболочка: `mountPet`, `localDay`, `VERSION` — единственная публичная точка входа |
 | `pet/pet.d.mts` | типы публичного интерфейса |
+| `pet/css.d.mts` | типы входов стилей для TypeScript: стиль подключают ради побочного эффекта, значений он не экспортирует |
 | `pet/pet.css`, `pet/dog.css` | стили питомца (обязательны) |
 | `pet/pet-base.css` | вид кнопок и защита от общих правил сайта по тегам — для сайта без своих классов кнопок (раздел «Стили») |
 | `pet/pet-rules.mjs`, `pet/pet-place.mjs`, `pet/pet-move.mjs`, `pet/pet-play.mjs`, `pet/pet-toys.mjs`, `pet/pet-room.mjs`, `pet/cat-art.mjs`, `pet/dog-art.mjs` | внутренние модули (правила, места, перенос, жесты, игрушки, комната, рисунки SVG строками): `pet.mjs` загружает их относительными путями. Не публичный интерфейс — могут меняться в любой версии |
@@ -110,7 +111,7 @@ import 'pet-companion/dog.css';
 </script>
 ```
 
-**Типы.** `pet/pet.d.mts` описывает `mountPet`, настройки, экземпляр, `localDay` и `VERSION`; TypeScript находит их по входу пакета (`moduleResolution` — `bundler`, `node16` или `nodenext`), а при копировании папки — рядом с `pet.mjs`.
+**Типы.** `pet/pet.d.mts` описывает `mountPet`, настройки, экземпляр, `localDay` и `VERSION`; TypeScript находит их по входу пакета (`moduleResolution` — `bundler`, `node16` или `nodenext`), а при копировании папки — рядом с `pet.mjs`. У входов стилей — своя декларация `pet/css.d.mts` (условие `types` в `exports`; сборщик по тем же входам получает настоящий `.css`): импорт стилей выше проходит проверку типов и с `noUncheckedSideEffectImports`, без общей декларации `declare module '*.css'` в проекте сайта. Значений стиль не экспортирует — это не CSS Modules.
 
 ## Интерфейс
 

@@ -1,7 +1,9 @@
 // Упакованный пакет — так, как его получат сайты (npm run test:package; нужен установленный Google Chrome): npm pack во
 // временную папку, повтор — те же байты; состав архива — явный список (ни проверок, ни фикстур, ни служебных файлов);
-// установка архива в чистый временный проект без сети; Node: публичные входы, стили по exports, внутренние модули
-// закрыты; TypeScript: типы входа (bundler и nodenext), ошибки неверных вызовов. Браузер, всё по http под вложенным
+// установка архива в чистый временный проект без сети; Node: публичные входы, стили по exports, внутренние модули и
+// несуществующий стиль закрыты; TypeScript (bundler и nodenext, noUncheckedSideEffectImports, без общих деклараций CSS у
+// проекта): вход и три стиля подключаются, неверные вызовы — ошибки, несуществующий стиль и внутренние пути закрыты,
+// стиль не экспортирует значений. Браузер, всё по http под вложенным
 // адресом, внешних запросов нет: (1) архив распакован системным tar как есть — example.html из папки package/ (кот,
 // уголок, «Поиграть», собака, хранение в своём пространстве и после перезагрузки, отключение и повторное подключение,
 // отказ подключения без остатков; телефон — «Скрыть» → перезагрузка → «Показать», «Приходит по зову»); (2) пакет из
@@ -23,7 +25,7 @@ const NAME = pkg.name;
 const VERSION = pkg.version;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.json': 'application/json' };
 const START = new Date('2026-10-12T10:00:00');
-const RUNTIME = ['cat-art.mjs', 'dog-art.mjs', 'dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs'];
+const RUNTIME = ['cat-art.mjs', 'css.d.mts', 'dog-art.mjs','dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs'];
 const EXPECTED = ['CHANGELOG.md', 'LICENSE', 'README.md', 'example.html', 'package.json', ...RUNTIME.map((file) => `pet/${file}`)].sort();
 // Ничего из этого не должно попасть в архив.
 const FORBIDDEN = /(^|\/)(test|tests|fixtures|scripts|examples|node_modules|\.github|\.git)(\/|$)|\.env|secret|token|password|progress|\.tgz$|lock/i;
@@ -286,16 +288,22 @@ try {
     const pet = await import('${NAME}');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    console.log(JSON.stringify({ keys: Object.keys(pet).sort(), version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts'].map((name) => resolve('${NAME}/' + name));
+    console.log(JSON.stringify({ keys: Object.keys(pet).sort(), version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: project });
   const node = JSON.parse(stdout);
   check('Node: вход — mountPet, localDay, VERSION; версия пакета', JSON.stringify(node.keys) === '["VERSION","localDay","mountPet"]' && node.version === VERSION && node.day === '2026-10-12', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
 
-  // TypeScript: типы входа.
+  // TypeScript: полное подключение, как в README, — вход и три стиля. У проекта нет общих деклараций CSS (declare module
+  // '*.css', vite/client): стили находит сам пакет, иначе noUncheckedSideEffectImports даёт TS2307.
   await writeFile(
     path.join(project, 'site.mts'),
     `import { localDay, mountPet, VERSION, type Pet, type PetOptions } from '${NAME}';
+import '${NAME}/pet-base.css';
+import '${NAME}/pet.css';
+import '${NAME}/dog.css';
 const head = document.createElement('header');
 const options: PetOptions = { storage: 'site', places: { logo: (el) => head.append(el), top: (el) => head.prepend(el) }, progress: () => ({ marks: 1, today: 0, limit: 3 }), step: () => null, zone: (device, id) => (device === 'phone' && id === 'top' ? { left: 0, top: 0, width: 10, height: 10 } : null) };
 const pet: Pet = mountPet(options);
@@ -320,16 +328,33 @@ pet.notify('saved', { counted: true });
 export { version, flags };
 `,
   );
+  // Закрытые пути: строка — ожидаемая ошибка. Импорт значения из стиля — ошибка: декларация не обещает CSS Modules.
+  await writeFile(
+    path.join(project, 'paths.mts'),
+    `import '${NAME}/missing.css';
+import '${NAME}/pet/pet.css';
+import '${NAME}/pet/css.d.mts';
+import '${NAME}/pet/pet-rules.mjs';
+import styles from '${NAME}/pet.css';
+export { styles };
+`,
+  );
+  const PATH_ERRORS = ['1 TS2307', '2 TS2307', '3 TS2307', '4 TS2307', '5 TS1192'];
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
   for (const [module, resolution] of [
     ['nodenext', 'nodenext'],
     ['esnext', 'bundler'],
   ]) {
-    const result = await run(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'es2022', '--lib', 'es2022,dom', '--module', module, '--moduleResolution', resolution, 'site.mts'], { cwd: project }).then(
-      () => '',
-      (error) => error.stdout || error.message,
-    );
-    check(`TypeScript (${resolution}): типы входа подходят, неверные вызовы — ошибки`, result === '', result);
+    const types = (file) =>
+      run(process.execPath, [tsc, '--noEmit', '--strict', '--target', 'es2022', '--lib', 'es2022,dom', '--module', module, '--moduleResolution', resolution, '--noUncheckedSideEffectImports', file], { cwd: project }).then(
+        () => '',
+        (error) => error.stdout || error.message,
+      );
+    const result = await types('site.mts');
+    check(`TypeScript (${resolution}, noUncheckedSideEffectImports): вход и три стиля подключаются, неверные вызовы — ошибки`, result === '', result);
+    const closed = await types('paths.mts');
+    const errors = [...closed.matchAll(/^paths\.mts\((\d+),\d+\): error (TS\d+)/gm)].map(([, line, code]) => `${line} ${code}`);
+    check(`TypeScript (${resolution}): несуществующий стиль и внутренние пути — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);
   }
 
   // Браузер.

@@ -2,7 +2,8 @@
 // mountPet, localDay, VERSION и три стиля; модуль замкнут (импорты — только своя папка, без сети и динамических
 // импортов); CSS без внешних файлов, переменные темы с рабочими значениями; package.json без зависимостей и скриптов
 // установки, exports и files согласованы; пример README = example.html; ссылки руководства — только на файлы пакета;
-// типы описывают те же экспорты; лицензия заполнена; в файлах пакета нет следов приложения-источника.
+// типы описывают те же экспорты, у стилей — своя декларация без значений; лицензия заполнена; в файлах пакета нет
+// следов приложения-источника.
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -59,7 +60,7 @@ test('CSS: без внешних файлов; переменные темы --p
   assert.ok(used.size >= 10, [...used].join(','));
 });
 
-test('package.json: без зависимостей и скриптов установки; exports — публичные входы, их файлы в files; стили — sideEffects', async () => {
+test('package.json: без зависимостей и скриптов установки; exports — публичные входы с типами, их файлы в files; стили — sideEffects', async () => {
   for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies']) assert.equal(pkg[field], undefined, field);
   for (const script of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack', 'preuninstall', 'uninstall', 'postuninstall']) assert.equal(pkg.scripts?.[script], undefined, script);
   assert.equal(pkg.type, 'module');
@@ -67,7 +68,9 @@ test('package.json: без зависимостей и скриптов уста
   assert.deepEqual(pkg.exports['.'], { types: './pet/pet.d.mts', default: './pet/pet.mjs' });
   assert.equal(pkg.main, './pet/pet.mjs');
   assert.equal(pkg.types, './pet/pet.d.mts');
-  for (const name of ['pet.css', 'dog.css', 'pet-base.css']) assert.equal(pkg.exports[`./${name}`], `./pet/${name}`);
+  // Стиль: TypeScript берёт декларацию (условие types — первым), сборщик и Node — сам файл .css.
+  for (const name of ['pet.css', 'dog.css', 'pet-base.css']) assert.deepEqual(pkg.exports[`./${name}`], { types: './pet/css.d.mts', default: `./pet/${name}` });
+  for (const [entry, target] of Object.entries(pkg.exports)) if (typeof target === 'object') assert.deepEqual(Object.keys(target), ['types', 'default'], entry);
   assert.deepEqual(pkg.files, ['pet/', 'example.html', 'CHANGELOG.md']);
   assert.deepEqual(pkg.sideEffects, ['*.css']);
   assert.ok(pkg.license && pkg.license !== 'UNLICENSED', 'license');
@@ -86,10 +89,12 @@ test('руководство: пример = example.html; импорты — и
   }
 });
 
-test('типы: pet.d.mts объявляет те же экспорты, что pet.mjs', async () => {
+test('типы: pet.d.mts объявляет те же экспорты, что pet.mjs; css.d.mts — стиль без значений', async () => {
   const types = await read('pet/pet.d.mts');
   const declared = [...types.matchAll(/^export declare (?:const|function) (\w+)/gm)].map((match) => match[1]).sort();
   assert.deepEqual(declared, Object.keys(Pet).sort());
+  // Ни default, ни имён классов (это не CSS Modules), ни declare module '*.css' для всего проекта сайта.
+  assert.equal(strip(await read('pet/css.d.mts')).trim(), 'export {};');
 });
 
 test('лицензия заполнена; в файлах пакета нет следов приложения-источника', async () => {

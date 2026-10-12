@@ -30,9 +30,18 @@
       "types": "./pet/pet.d.mts",
       "default": "./pet/pet.mjs"
     },
-    "./pet.css": "./pet/pet.css",
-    "./dog.css": "./pet/dog.css",
-    "./pet-base.css": "./pet/pet-base.css",
+    "./pet.css": {
+      "types": "./pet/css.d.mts",
+      "default": "./pet/pet.css"
+    },
+    "./dog.css": {
+      "types": "./pet/css.d.mts",
+      "default": "./pet/dog.css"
+    },
+    "./pet-base.css": {
+      "types": "./pet/css.d.mts",
+      "default": "./pet/pet-base.css"
+    },
     "./package.json": "./package.json"
   },
   "files": [
