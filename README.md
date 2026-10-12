@@ -15,7 +15,6 @@
 Три способа — одни и те же файлы одной версии:
 
 - **npm** (сайт со сборщиком или с `node_modules` на сервере): `npm install pet-companion` — раздел «Подключение из npm».
-  Пока версия не опубликована в каталоге npm, тот же пакет ставится из выпуска на GitHub: `npm install https://github.com/jivchic88/pet-companion/releases/download/v0.1.3/pet-companion-0.1.3.tgz`.
 - **Архив выпуска** (сайт без npm и сборки): файл `pet-companion-<версия>.tgz` — на странице выпуска (Releases) репозитория или из реестра командой `npm pack pet-companion@<версия>`. Это тот же архив, что в npm: внутри папка `package/` с `pet/`, `example.html`, README, CHANGELOG, LICENSE. Скопируйте `package/pet/` на сайт — раздел «Быстрый старт».
 - **Папка из установленного пакета:** `node_modules/pet-companion/pet/` можно скопировать на сайт целиком (например, в `/vendor/pet/`). Скопированные файлы не правят — обновляют целиком (раздел «Версии и обновление»).
 
