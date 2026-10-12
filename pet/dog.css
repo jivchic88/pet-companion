@@ -1,0 +1,800 @@
+/* Собака: позы и движения пса Тоби. Графика — dog-art.mjs, общая оболочка — pet.mjs и pet.css. Каждое правило —
+   только для svg с data-kind='dog' (классы dog-*, переменные --dg-*). Только transform и opacity. */
+
+.cat-art[data-kind='dog'] .dog-mouth-open,
+.cat-art[data-kind='dog'] .dog-mouth-yawn {
+  display: none;
+}
+
+.cat-art[data-kind='dog']:is([data-pose='greet'], [data-pose='joy'], [data-pose='paw'], [data-pose='fed']) .dog-mouth-open,
+.cat-art[data-kind='dog'][data-pose='yawn'] .dog-mouth-yawn {
+  display: inline;
+}
+
+.cat-art[data-kind='dog']:is([data-pose='greet'], [data-pose='joy'], [data-pose='paw'], [data-pose='fed'], [data-pose='yawn']) .dog-mouth-calm {
+  display: none;
+}
+
+/* Пластика: позы сменяются переходом, точки вращения — суставы рисунка. */
+.cat-art[data-kind='dog'] :is(.dog-head, .dog-ear-l, .dog-ear-r, .dog-brow-l, .dog-brow-r, .dog-tail, .dog-paw-up, .dog-scarf, .dog-look, .dog-pupil) {
+  transition: transform var(--dg-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+
+.cat-art[data-kind='dog'] :is(.dog-lid-up, .dog-lid-down) {
+  transition: transform var(--dg-lid, 0.26s) cubic-bezier(0.4, 0.1, 0.3, 1);
+}
+
+.cat-art[data-kind='dog'] :is(.dog-happy, .dog-sleep, .dog-leg-l, .dog-paw-up, .dog-lie, .dog-lie-front, .dog-sit) {
+  transition:
+    opacity var(--dg-fade, 0.42s) ease,
+    transform var(--dg-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+
+/* Отдых без «призрака»: лежащее тело проявляется раньше, сидящее гаснет потом; при пробуждении — наоборот. */
+.cat-art[data-kind='dog'] :is(.dog-lie, .dog-lie-front) {
+  transition-delay: 0.32s, 0s;
+}
+
+.cat-art[data-kind='dog'][data-pose='rest'] :is(.dog-lie, .dog-lie-front) {
+  transition-delay: 0s, 0s;
+}
+
+.cat-art[data-kind='dog'][data-pose='rest'] .dog-sit {
+  transition-delay: 0.32s, 0s;
+}
+
+/* Весь пёс смещается только в лакомстве (к миске и обратно): --dg-all-x/--dg-all-y, переходом. */
+.cat-art[data-kind='dog'] .dog-all {
+  transform-origin: 102px 188px;
+  transform: translate(var(--dg-all-x, 0), var(--dg-all-y, 0));
+  transition: transform var(--dg-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+
+.cat-art[data-kind='dog'] .dog-head {
+  transform-origin: 100px 112px;
+  transform: translate(var(--dg-head-x, 0), var(--dg-head-y, 0)) rotate(var(--dg-head-r, 0deg));
+}
+
+.cat-art[data-kind='dog'] .dog-ear-l {
+  transform-origin: 74px 40px;
+  transform: rotate(var(--dg-ear-l, 0deg));
+}
+
+.cat-art[data-kind='dog'] .dog-ear-r {
+  transform-origin: 126px 40px;
+  transform: rotate(var(--dg-ear-r, 0deg));
+}
+
+.cat-art[data-kind='dog'] .dog-brow-l {
+  transform-origin: 80.5px 48px;
+  transform: translateY(var(--dg-brow-y, 0)) rotate(var(--dg-brow-l, 0deg));
+}
+
+.cat-art[data-kind='dog'] .dog-brow-r {
+  transform-origin: 119.5px 48px;
+  transform: translateY(var(--dg-brow-y, 0)) rotate(var(--dg-brow-r, 0deg));
+}
+
+.cat-art[data-kind='dog'] .dog-lid-up {
+  transform: translateY(var(--dg-lid-up, 3px));
+}
+
+.cat-art[data-kind='dog'] .dog-lid-down {
+  transform: translateY(var(--dg-lid-down, 0px));
+}
+
+.cat-art[data-kind='dog'] .dog-look {
+  transform: translate(var(--dg-look-x, 0), var(--dg-look-y, 0));
+}
+
+.cat-art[data-kind='dog'] .dog-pupil {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(var(--dg-pupil, 1));
+}
+
+.cat-art[data-kind='dog'] .dog-happy {
+  opacity: var(--dg-happy, 0);
+}
+
+.cat-art[data-kind='dog'] .dog-sleep {
+  opacity: var(--dg-sleep, 0);
+}
+
+.cat-art[data-kind='dog'] .dog-leg-l {
+  opacity: var(--dg-leg-o, 1);
+}
+
+.cat-art[data-kind='dog'] .dog-tail {
+  transform-origin: 148px 178px;
+  transform: rotate(var(--dg-tail, 0deg));
+}
+
+.cat-art[data-kind='dog'] .dog-paw-up {
+  transform-origin: 92px 130px;
+  transform: rotate(var(--dg-paw, 0deg));
+  opacity: var(--dg-paw-o, 0);
+}
+
+.cat-art[data-kind='dog'] .dog-scarf {
+  transform-origin: 100px 104px;
+  transform: translateY(var(--dg-scarf-y, 0)) scaleY(var(--dg-scarf-s, 1));
+}
+
+.cat-art[data-kind='dog'] .dog-sit {
+  transform-origin: 102px 188px;
+  transform: scaleY(var(--dg-sit-s, 1));
+  opacity: var(--dg-sit-o, 1);
+}
+
+.cat-art[data-kind='dog'] :is(.dog-lie, .dog-lie-front) {
+  opacity: var(--dg-lie-o, 0);
+}
+
+/* Спокойствие: сидит, веки чуть опущены, правое ухо чуть приподнято. */
+.cat-art[data-kind='dog'][data-pose='calm'] {
+  --dg-lid-up: 0px;
+  --dg-lid-down: -1px;
+  --dg-ear-r: -6deg;
+}
+
+/* Внимание (экраны практики, ввод): собран, мягкий наклон головы, ухо приподнято, брови вверх. */
+.cat-art[data-kind='dog'][data-pose='attentive'] {
+  --dg-lid-up: 0px;
+  --dg-head-r: -7deg;
+  --dg-head-y: -2px;
+  --dg-ear-l: 5deg;
+  --dg-ear-r: -24deg;
+  --dg-brow-y: -2px;
+}
+
+/* Приветствие: поднимает голову, улыбается, ухо вверх, короткое виляние хвостом. */
+.cat-art[data-kind='dog'][data-pose='greet'] {
+  --dg-lid-up: 24px;
+  --dg-happy: 1;
+  --dg-head-y: -3px;
+  --dg-head-r: 5deg;
+  --dg-ear-l: 9deg;
+  --dg-ear-r: -16deg;
+  --dg-brow-y: -1.5px;
+  --dg-tail: -8deg;
+}
+
+/* Радость после сохранения: глаза-дуги, улыбка с языком, уши вверх, хвост виляет. */
+.cat-art[data-kind='dog'][data-pose='joy'] {
+  --dg-lid-up: 24px;
+  --dg-happy: 1;
+  --dg-head-y: -3px;
+  --dg-head-r: -4deg;
+  --dg-ear-l: 13deg;
+  --dg-ear-r: -22deg;
+  --dg-brow-y: -2px;
+  --dg-tail: -12deg;
+}
+
+/* Поддержка после трудной практики: тёплый взгляд, голова набок, уши мягко вниз, брови домиком. */
+.cat-art[data-kind='dog'][data-pose='support'] {
+  --dg-lid-up: 2px;
+  --dg-lid-down: -3px;
+  --dg-head-r: -9deg;
+  --dg-ear-l: -2deg;
+  --dg-ear-r: 2deg;
+  --dg-brow-y: -1px;
+  --dg-brow-l: -10deg;
+  --dg-brow-r: 10deg;
+  --dg-look-y: 1px;
+  --dg-tail: 7deg;
+}
+
+/* Поглаживание: прищур, голова к руке, уши расслаблены, хвост мягко покачивается. */
+.cat-art[data-kind='dog'][data-pose='pet'] {
+  --dg-lid-up: 24px;
+  --dg-happy: 1;
+  --dg-head-r: 10deg;
+  --dg-head-x: 1px;
+  --dg-ear-l: -2deg;
+  --dg-ear-r: 3deg;
+  --dg-tail: -5deg;
+}
+
+/* Новая вещь: смотрит вниз в сторону вещи, голова набок, ухо вверх. */
+.cat-art[data-kind='dog'][data-pose='unlock'] {
+  --dg-lid-up: 0px;
+  --dg-look-x: -2.6px;
+  --dg-look-y: 2.6px;
+  --dg-pupil: 1.1;
+  --dg-head-r: -8deg;
+  --dg-head-y: 1px;
+  --dg-ear-l: 7deg;
+  --dg-ear-r: -22deg;
+  --dg-brow-y: -2px;
+  --dg-tail: -6deg;
+}
+
+/* Ожидание после ошибки сохранения — нейтрально и внимательно, без улыбки и слов. */
+.cat-art[data-kind='dog'][data-pose='wait'] {
+  --dg-lid-up: 2px;
+  --dg-head-r: 4deg;
+  --dg-ear-l: 2deg;
+  --dg-ear-r: -3deg;
+  --dg-look-y: 1px;
+}
+
+/* Отдых: лёг, голова на лапах, глаза закрыты, уши распластались, хвост обёрнут. */
+.cat-art[data-kind='dog'][data-pose='rest'] {
+  --dg-sit-s: 0.8;
+  --dg-sit-o: 0;
+  --dg-lie-o: 1;
+  --dg-head-y: 60px;
+  --dg-head-r: -3deg;
+  --dg-scarf-y: 55px;
+  --dg-scarf-s: 0.7;
+  --dg-lid-up: 24px;
+  --dg-sleep: 1;
+  --dg-ear-l: 12deg;
+  --dg-ear-r: -12deg;
+  --dg-move: 0.9s;
+  --dg-fade: 0.7s;
+}
+
+.cat-art[data-kind='dog'][data-view='portrait'][data-pose='rest'] {
+  --dg-head-y: 0px;
+  --dg-scarf-y: 0px;
+  --dg-scarf-s: 1;
+}
+
+/* Редкая сценка в покое: зевок. */
+.cat-art[data-kind='dog'][data-pose='yawn'] {
+  --dg-lid-up: 24px;
+  --dg-sleep: 1;
+  --dg-head-y: -3px;
+  --dg-head-r: -4deg;
+  --dg-ear-l: 7deg;
+  --dg-ear-r: -8deg;
+}
+
+/* «Дай лапу»: левая передняя лапа поднята подушечками вперёд, голова набок, улыбка. */
+.cat-art[data-kind='dog'][data-pose='paw'] {
+  --dg-paw-o: 1;
+  --dg-leg-o: 0;
+  --dg-lid-up: 0px;
+  --dg-head-r: -8deg;
+  --dg-ear-l: 6deg;
+  --dg-ear-r: -18deg;
+  --dg-brow-y: -1.5px;
+  --dg-tail: -6deg;
+}
+
+/* Сцена «Поиграть» (с 2026-10-10): миску придвинули — принюхивается (голова к миске, data-toward — с какой стороны),
+   отодвинули или после лимита — смотрит, мячик — наклоняет голову, ухо вверх, виляет хвостом. */
+.cat-art[data-kind='dog'][data-pose='sniff'] {
+  --dg-head-y: 5px;
+  --dg-head-r: -9deg;
+  --dg-look-x: -2.6px;
+  --dg-look-y: 2.6px;
+  --dg-lid-up: 2px;
+  --dg-ear-l: 6deg;
+  --dg-ear-r: -10deg;
+  --dg-brow-y: -1.5px;
+  --dg-tail: -6deg;
+}
+
+.cat-art[data-kind='dog'][data-pose='watch'] {
+  --dg-look-x: -2.6px;
+  --dg-look-y: 1.5px;
+  --dg-head-r: -4deg;
+  --dg-lid-up: 1px;
+  --dg-ear-r: -6deg;
+}
+
+.cat-art[data-kind='dog'][data-pose='ball'] {
+  --dg-lid-up: 0px;
+  --dg-look-x: -2.8px;
+  --dg-look-y: 2.4px;
+  --dg-pupil: 1.12;
+  --dg-head-r: -10deg;
+  --dg-ear-l: 8deg;
+  --dg-ear-r: -20deg;
+  --dg-brow-y: -2px;
+  --dg-tail: -6deg;
+}
+
+.cat-art[data-kind='dog']:is([data-pose='sniff'], [data-pose='watch'], [data-pose='ball'])[data-toward='right'] {
+  --dg-look-x: 2.6px;
+  --dg-head-r: 8deg;
+  --dg-ear-l: 12deg;
+  --dg-ear-r: -6deg;
+}
+
+/* Лакомство (с 2026-10-08): бодро подбегает к миске, ест с виляющим хвостом; без анимации — та же поза. */
+.cat-art[data-kind='dog'][data-pose='feed'] {
+  --dg-all-x: calc(var(--feed-x, 0px) - 30px);
+  --dg-all-y: calc(var(--feed-y, 0px) + 12px);
+  --dg-head-y: 46px;
+  --dg-head-r: -9deg;
+  --dg-scarf-y: 30px;
+  --dg-scarf-s: 0.85;
+  --dg-lid-up: 24px;
+  --dg-happy: 1;
+  --dg-ear-l: 6deg;
+  --dg-ear-r: -8deg;
+  --dg-tail: -10deg;
+  --dg-move: 0.42s;
+}
+
+/* Довольный после лакомства: улыбка с языком, уши вверх, хвост ходит ходуном. */
+.cat-art[data-kind='dog'][data-pose='fed'] {
+  --dg-lid-up: 24px;
+  --dg-happy: 1;
+  --dg-head-y: -3px;
+  --dg-head-r: 6deg;
+  --dg-ear-l: 12deg;
+  --dg-ear-r: -20deg;
+  --dg-brow-y: -2px;
+  --dg-tail: -12deg;
+}
+
+/* Покой после лакомства — до конца дня: веки чуть ниже, ухо приподнято, хвост расслаблен. */
+.cat-art[data-kind='dog'][data-pose='content'] {
+  --dg-lid-up: 9px;
+  --dg-lid-down: -2px;
+  --dg-ear-l: 3deg;
+  --dg-ear-r: -12deg;
+  --dg-brow-y: -1px;
+  --dg-tail: -5deg;
+}
+
+/* Устроился (новое место, раскрылся, с 2026-10-09): наклон головы, ухо вверх, хвост виляет; потягивание — pet.css. */
+.cat-art[data-kind='dog'][data-pose='settle'] {
+  --dg-lid-up: 6px;
+  --dg-head-r: -8deg;
+  --dg-head-y: -1px;
+  --dg-ear-l: 6deg;
+  --dg-ear-r: -20deg;
+  --dg-brow-y: -1.5px;
+  --dg-tail: -8deg;
+}
+
+.cat-art[data-kind='dog'][data-view='portrait'][data-pose='feed'] {
+  --dg-all-x: 0px;
+  --dg-all-y: 0px;
+  --dg-head-y: 4px;
+  --dg-head-r: -4deg;
+  --dg-scarf-y: 0px;
+  --dg-scarf-s: 1;
+}
+
+/* ---------- одиночные движения и короткие жесты ---------- */
+
+@keyframes dog-blink {
+  45%,
+  55% {
+    transform: translateY(22px);
+  }
+}
+
+@keyframes dog-ear-lift {
+  35% {
+    transform: rotate(calc(var(--dg-ear-r, 0deg) - 20deg));
+  }
+  65% {
+    transform: rotate(calc(var(--dg-ear-r, 0deg) + 3deg));
+  }
+}
+
+@keyframes dog-tilt {
+  30%,
+  70% {
+    transform: translate(var(--dg-head-x, 0), var(--dg-head-y, 0)) rotate(calc(var(--dg-head-r, 0deg) - 9deg));
+  }
+}
+
+@keyframes dog-look-around {
+  25%,
+  42% {
+    transform: translate(-2.6px, 0.4px);
+  }
+  62%,
+  80% {
+    transform: translate(2.6px, 0.4px);
+  }
+}
+
+@keyframes dog-wag {
+  25% {
+    transform: rotate(calc(var(--dg-tail, 0deg) - 15deg));
+  }
+  75% {
+    transform: rotate(calc(var(--dg-tail, 0deg) + 9deg));
+  }
+}
+
+@keyframes dog-pat {
+  25% {
+    transform: rotate(calc(var(--dg-tail, 0deg) - 11deg));
+  }
+  75% {
+    transform: rotate(calc(var(--dg-tail, 0deg) + 6deg));
+  }
+}
+
+/* Копия dog-pat: анимацию перезапускает только смена имени (тест сверяет кадры). */
+@keyframes dog-pat-again {
+  25% {
+    transform: rotate(calc(var(--dg-tail, 0deg) - 11deg));
+  }
+  75% {
+    transform: rotate(calc(var(--dg-tail, 0deg) + 6deg));
+  }
+}
+
+@keyframes dog-nod {
+  40% {
+    transform: translate(var(--dg-head-x, 0), calc(var(--dg-head-y, 0px) - 3px)) rotate(var(--dg-head-r, 0deg));
+  }
+}
+
+@keyframes dog-paw-shake {
+  30% {
+    transform: rotate(calc(var(--dg-paw, 0deg) + 6deg));
+  }
+  65% {
+    transform: rotate(calc(var(--dg-paw, 0deg) - 3deg));
+  }
+}
+
+@keyframes dog-slow-blink {
+  40%,
+  62% {
+    transform: translateY(20px);
+  }
+}
+
+/* Отдельное свойство scale, не transform: снятие дыхания не отменяет переход сдвига к миске (лакомство). */
+@keyframes dog-breathe {
+  50% {
+    scale: 1 1.012;
+  }
+}
+
+.cat-art[data-kind='dog'][data-micro='blink'] .dog-lid-up {
+  animation: dog-blink 0.24s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-micro='ear'] .dog-ear-r {
+  animation: dog-ear-lift 0.6s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-micro='tilt'] .dog-head {
+  animation: dog-tilt 1.3s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-micro='tail'] .dog-tail {
+  animation: dog-wag 0.4s ease-in-out 2;
+}
+
+.cat-art[data-kind='dog'][data-micro='look'] .dog-look {
+  animation: dog-look-around 1.6s ease-in-out;
+}
+
+/* Виляние: обычное движение — быстрее и дольше; «Спокойное» — один-два медленных взмаха. */
+.cat-art[data-kind='dog'][data-pose='greet'][data-motion='normal'] .dog-tail {
+  animation: dog-wag 0.36s ease-in-out 0.1s 3;
+}
+
+.cat-art[data-kind='dog'][data-pose='joy'][data-motion='normal'] .dog-tail {
+  animation: dog-wag 0.34s ease-in-out 0.05s 4;
+}
+
+.cat-art[data-kind='dog'][data-pose='joy'][data-motion='normal'] .dog-head {
+  animation: dog-nod 0.5s ease-out 0.1s;
+}
+
+.cat-art[data-kind='dog'][data-pose='unlock'][data-motion='normal'] .dog-tail {
+  animation: dog-wag 0.4s ease-in-out 0.3s 2;
+}
+
+.cat-art[data-kind='dog']:is([data-pose='greet'], [data-pose='joy'])[data-motion='calm'] .dog-tail {
+  animation: dog-wag 0.7s ease-in-out 0.1s 2;
+}
+
+/* Поглаживание: два мягких взмаха («Спокойное» — один), короче тихого отклика (calmPet, 0,7 с) — поза сменится без
+   рывка; data-again (pet.mjs) — взмахи заново. */
+.cat-art[data-kind='dog'][data-pose='pet'][data-motion='normal'] .dog-tail {
+  animation: dog-pat 0.32s ease-in-out 2;
+}
+
+.cat-art[data-kind='dog'][data-pose='pet'][data-motion='calm'] .dog-tail {
+  animation: dog-pat 0.64s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-pose='pet'][data-again] .dog-tail {
+  animation-name: dog-pat-again;
+}
+
+.cat-art[data-kind='dog'][data-pose='paw'][data-motion='normal'] .dog-paw-up {
+  animation: dog-paw-shake 0.6s ease-in-out 0.4s;
+}
+
+.cat-art[data-kind='dog'][data-pose='support']:not([data-motion='none']) .dog-lid-up {
+  animation: dog-slow-blink 1.3s ease-in-out 0.25s;
+}
+
+/* Сцена «Поиграть»: принюхивается дважды, за мячиком виляет хвостом — короче своих реакций (поза сменится без рывка). */
+@keyframes dog-sniff {
+  50% {
+    transform: translate(var(--dg-head-x, 0), calc(var(--dg-head-y, 0px) + 2px)) rotate(var(--dg-head-r, 0deg));
+  }
+}
+
+.cat-art[data-kind='dog'][data-pose='sniff']:not([data-motion='none']) .dog-head {
+  animation: dog-sniff 0.28s ease-in-out 0.45s 2;
+}
+
+.cat-art[data-kind='dog'][data-pose='ball'][data-motion='normal'] .dog-tail {
+  animation: dog-wag 0.32s ease-in-out 0.1s 3;
+}
+
+.cat-art[data-kind='dog'][data-pose='ball'][data-motion='calm'] .dog-tail {
+  animation: dog-wag 0.6s ease-in-out 0.1s;
+}
+
+/* Дыхание — едва заметно и ступенчато; только в обычном режиме (data-breathe ставит pet.mjs). */
+.cat-art[data-kind='dog'][data-motion='normal'][data-breathe] .dog-all {
+  animation: dog-breathe 4.8s steps(24) infinite;
+}
+
+/* Лакомство: дыхание не мешает подбежать к миске и вернуться. */
+.cat-art[data-kind='dog']:is([data-pose='feed'], [data-pose='fed'])[data-breathe] .dog-all {
+  animation: none;
+}
+
+@keyframes dog-nibble {
+  50% {
+    transform: translate(var(--dg-head-x, 0), calc(var(--dg-head-y, 0px) + 3px)) rotate(calc(var(--dg-head-r, 0deg) - 2deg));
+  }
+}
+
+.cat-art[data-kind='dog'][data-pose='feed']:not([data-motion='none']) .dog-head {
+  animation: dog-nibble 0.3s ease-in-out 0.55s 6;
+}
+
+.cat-art[data-kind='dog'][data-pose='feed'][data-motion='normal'] .dog-tail {
+  animation: dog-wag 0.3s ease-in-out 0.4s 7;
+}
+
+.cat-art[data-kind='dog'][data-pose='fed'][data-motion='normal'] .dog-tail {
+  animation: dog-wag 0.32s ease-in-out 0.1s 5;
+}
+
+.cat-art[data-kind='dog'][data-pose='fed'][data-motion='calm'] .dog-tail {
+  animation: dog-wag 0.7s ease-in-out 0.1s 2;
+}
+
+.cat-art[data-kind='dog'][data-pose='fed'][data-motion='normal'] .dog-head {
+  animation: dog-nod 0.5s ease-out 0.35s;
+}
+
+.cat-art[data-kind='dog'][data-motion='calm'] {
+  --dg-move: 0.8s;
+  --dg-lid: 0.4s;
+}
+
+@media (hover: hover) {
+  :is(.cat-dock-btn, .cat-side-face):hover .cat-art[data-kind='dog']:is([data-pose='calm'], [data-pose='attentive']) {
+    --dg-ear-l: 7deg;
+    --dg-ear-r: -24deg;
+    --dg-head-r: -7deg;
+    --dg-lid-up: 0px;
+    --dg-brow-y: -2px;
+  }
+}
+
+/* ---------- сценка «приносит мячик» (с 2026-10-10; общее устройство сценок — pet.css) ----------
+   Т. Замечает мячик у лапы, наклоняется, берёт в пасть, показывает, кладёт перед лапами и виляет хвостом; мячик —
+   временный реквизит (dog-art.mjs), в конце гаснет. Голова не выходит за рамку рисунка (места его не обрезают). */
+.cat-art[data-kind='dog'] .dog-fetch {
+  opacity: 0;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] {
+  --dg-fx: -12px;
+  --dg-fy: 52px;
+  --dg-ft: -6deg;
+  --dg-fr: -10deg;
+  --dg-show: 7deg;
+  --dg-bx: -30px;
+  --dg-by: 71px;
+  --dg-bd: 84px;
+}
+
+/* Портрет: пола не видно — мячик поднимается снизу и опускается внутри рамки, голова почти на месте. */
+.cat-art[data-kind='dog'][data-view='portrait'][data-scene='fetch'] {
+  --dg-fx: 0px;
+  --dg-fy: 6px;
+  --dg-ft: -2deg;
+  --dg-fr: -2deg;
+  --dg-show: 1deg;
+  --dg-bx: -24px;
+  --dg-by: 26px;
+  --dg-bd: 26px;
+}
+
+@keyframes dog-fetch-head {
+  12% {
+    transform: translate(var(--dg-head-x, 0px), var(--dg-head-y, 0px)) rotate(calc(var(--dg-head-r, 0deg) + var(--dg-ft)));
+  }
+  30%,
+  34% {
+    transform: translate(calc(var(--dg-head-x, 0px) + var(--dg-fx)), calc(var(--dg-head-y, 0px) + var(--dg-fy))) rotate(calc(var(--dg-head-r, 0deg) + var(--dg-fr)));
+  }
+  48%,
+  62% {
+    transform: translate(var(--dg-head-x, 0px), calc(var(--dg-head-y, 0px) - 3px)) rotate(calc(var(--dg-head-r, 0deg) + var(--dg-show) * var(--sc, 1)));
+  }
+  72% {
+    transform: translate(var(--dg-head-x, 0px), calc(var(--dg-head-y, 0px) + var(--dg-fy) * 0.3)) rotate(var(--dg-head-r, 0deg));
+  }
+  86% {
+    transform: translate(var(--dg-head-x, 0px), calc(var(--dg-head-y, 0px) - 2px)) rotate(calc(var(--dg-head-r, 0deg) + var(--dg-show) * 0.6 * var(--sc, 1)));
+  }
+}
+
+@keyframes dog-fetch-ball {
+  0% {
+    transform: translate(var(--dg-bx), var(--dg-by));
+    opacity: 0;
+  }
+  8%,
+  30% {
+    transform: translate(var(--dg-bx), var(--dg-by));
+    opacity: 1;
+  }
+  34% {
+    transform: translate(var(--dg-fx), calc(var(--dg-fy) + 4px));
+  }
+  48%,
+  62% {
+    transform: translate(0, -3px);
+  }
+  72% {
+    transform: translate(0, calc(var(--dg-fy) * 0.3 + 2px));
+  }
+  77%,
+  82%,
+  90% {
+    transform: translate(0, var(--dg-bd));
+    opacity: 1;
+  }
+  79% {
+    transform: translate(0, calc(var(--dg-bd) - 5px));
+  }
+  100% {
+    transform: translate(0, var(--dg-bd));
+    opacity: 0;
+  }
+}
+
+@keyframes dog-fetch-look {
+  8%,
+  32% {
+    transform: translate(-2.6px, 2.6px);
+  }
+  70%,
+  78% {
+    transform: translate(0, 2.6px);
+  }
+}
+
+@keyframes dog-fetch-show {
+  26%,
+  76% {
+    opacity: var(--fr-o);
+  }
+  32%,
+  70% {
+    opacity: var(--to-o);
+  }
+}
+
+@keyframes dog-fetch-happy {
+  42%,
+  68% {
+    transform: translateY(var(--dg-lid-up, 3px));
+  }
+  48%,
+  62% {
+    transform: translateY(24px);
+  }
+}
+
+@keyframes dog-fetch-smile {
+  44%,
+  66% {
+    opacity: 0;
+  }
+  48%,
+  62% {
+    opacity: 1;
+  }
+}
+
+@keyframes dog-fetch-tail {
+  46%,
+  64%,
+  78%,
+  96% {
+    transform: rotate(var(--dg-tail, 0deg));
+  }
+  50%,
+  58%,
+  82%,
+  90% {
+    transform: rotate(calc(var(--dg-tail, 0deg) - 15deg * var(--sc, 1)));
+  }
+  54%,
+  62%,
+  86%,
+  94% {
+    transform: rotate(calc(var(--dg-tail, 0deg) + 8deg * var(--sc, 1)));
+  }
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-mouth-open {
+  display: inline;
+  opacity: 0;
+  --fr-o: 0;
+  --to-o: 1;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-mouth-calm {
+  --fr-o: 1;
+  --to-o: 0;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-head {
+  animation: dog-fetch-head 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-fetch {
+  animation: dog-fetch-ball 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-look {
+  animation: dog-fetch-look 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] :is(.dog-mouth-open, .dog-mouth-calm) {
+  animation: dog-fetch-show 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-lid-up {
+  animation: dog-fetch-happy 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-happy {
+  animation: dog-fetch-smile 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'] .dog-tail {
+  animation: dog-fetch-tail 4.2s ease-in-out;
+}
+
+/* Без анимации — держит мячик у пасти: голова гордо набок, глаза-дуги, хвост поднят. */
+.cat-art[data-kind='dog'][data-scene='fetch'][data-motion='none'] {
+  --dg-head-r: 6deg;
+  --dg-head-y: -3px;
+  --dg-lid-up: 24px;
+  --dg-happy: 1;
+  --dg-ear-l: 10deg;
+  --dg-ear-r: -18deg;
+  --dg-tail: -12deg;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'][data-motion='none'] :is(.dog-fetch, .dog-mouth-open) {
+  opacity: 1;
+}
+
+.cat-art[data-kind='dog'][data-scene='fetch'][data-motion='none'] .dog-mouth-calm {
+  opacity: 0;
+}

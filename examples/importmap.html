@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- Пакет из npm без сборщика: страница лежит в корне проекта рядом с node_modules/, сервер отдаёт обе. Карта импортов
+     связывает имя пакета с его входом; стили — по прямым путям. Остальное — как в example.html. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Мой сайт</title>
+    <link rel="stylesheet" href="./node_modules/pet-companion/pet/pet-base.css" />
+    <link rel="stylesheet" href="./node_modules/pet-companion/pet/pet.css" />
+    <link rel="stylesheet" href="./node_modules/pet-companion/pet/dog.css" />
+    <script type="importmap">
+      { "imports": { "pet-companion": "./node_modules/pet-companion/pet/pet.mjs" } }
+    </script>
+  </head>
+  <body>
+    <header id="head" style="position: relative"><span id="title">Мой сайт</span></header>
+    <main><button id="done" type="button">Урок пройден</button></main>
+    <script type="module">
+      import { localDay, mountPet } from 'pet-companion';
+
+      // Знаки сайта с местной датой; сегодня — по localDay (та же граница дня, что у лакомства питомца).
+      const marks = [];
+      const today = () => marks.filter((day) => day === localDay()).length;
+      const head = document.getElementById('head');
+      const pet = mountPet({
+        storage: 'mysite',
+        places: {
+          logo: (el) => head.append(el),
+          top: (el) => head.prepend(el),
+          float: (el) => document.body.append(el),
+        },
+        progress: () => ({ marks: marks.length, today: today(), limit: 3 }),
+      });
+      if (!pet.mounted) console.info('Питомец не подключён — причина выше в консоли');
+
+      document.getElementById('done').addEventListener('click', () => {
+        marks.push(localDay());
+        pet.notify('saved', { key: `lesson-${marks.length}`, counted: true, first: today() === 1 });
+      });
+    </script>
+  </body>
+</html>

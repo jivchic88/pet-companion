@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Стенд питомца</title>
+    <link rel="icon" href="data:," />
+    <!-- Проверочный стенд модуля pet/ (test/browser.mjs): условный сайт со своей разметкой и стилями. Его отдаёт только
+         сервер проверки. -->
+    <link rel="stylesheet" href="/pet/pet-base.css" />
+    <link rel="stylesheet" href="/pet/pet.css" />
+    <link rel="stylesheet" href="/pet/dog.css" />
+    <style>
+      /* Свои классы сайта с распространёнными именами (.btn, .muted, .visually-hidden): модуль их не меняет (проверка
+         сверяет стили до и после). */
+      body {
+        margin: 0;
+        font: 16px/1.5 Georgia, serif;
+        color: #222;
+        background: #fafafa;
+      }
+      .site-head {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 64px;
+        padding: 0 72px 0 16px;
+        background: #2d3e50;
+        color: #fff;
+      }
+      .site-title {
+        flex: 1 1 auto;
+        margin: 0;
+        font-size: 18px;
+      }
+      .site-layout {
+        display: flex;
+        min-height: calc(100vh - 64px);
+      }
+      .site-side {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        width: 232px;
+        padding: 16px;
+        background: #eef;
+      }
+      .site-main {
+        flex: 1;
+        padding: 24px;
+      }
+      .btn {
+        padding: 4px 8px;
+        border: 2px solid #c00;
+        background: #fee;
+        color: #900;
+        font-family: monospace;
+      }
+      .muted {
+        color: #080;
+        font-style: italic;
+      }
+      .visually-hidden {
+        color: #00f;
+      }
+      h2 {
+        color: #a0a;
+        font-size: 30px;
+      }
+      @media (max-width: 860px) {
+        .site-side {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-head" id="site-head">
+      <h1 class="site-title" id="site-title">Учебный сайт</h1>
+      <button class="btn" id="site-menu" type="button">Меню</button>
+    </header>
+    <div class="site-layout">
+      <aside class="site-side" id="site-side">
+        <p class="muted">Боковая панель сайта</p>
+        <p id="site-side-end">Низ панели</p>
+      </aside>
+      <main class="site-main" id="site-main">
+        <h2>Урок</h2>
+        <p class="muted">Текст урока.</p>
+        <label>Ответ <input id="site-input" type="text" /></label>
+        <button class="btn" id="site-check" type="button">Проверить</button>
+        <span class="visually-hidden">Текст сайта</span>
+      </main>
+    </div>
+    <dialog id="site-dialog">
+      <p class="muted">Меню сайта</p>
+      <nav id="site-menu-list"></nav>
+      <button type="button" data-close>Закрыть</button>
+    </dialog>
+    <script type="module">
+      import { VERSION, mountPet } from '/pet/pet.mjs';
+
+      const $ = (id) => document.getElementById(id);
+      const dialog = $('site-dialog');
+      $('site-menu').addEventListener('click', () => dialog.showModal());
+      dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
+
+      // Знаки и шаг считает сайт; питомец только читает их.
+      const state = { marks: 0, today: 0 };
+      const stand = {
+        VERSION,
+        pet: null,
+        goes: [],
+        // Места сайта; сценарий может заменить одно из них (stand.mount({ places: { ...stand.places(), logo } })).
+        places: () => ({
+          sidebar: (el) => $('site-side-end').before(el),
+          logo: (el) => $('site-head').append(el),
+          top: (el) => $('site-head').insertBefore(el, $('site-title')),
+          float: (el) => document.body.append(el),
+          restore: (el) => $('site-menu-list').append(el),
+        }),
+        // Настройки подключения сайта; mountPet — из этой копии модуля или другой (две копии на странице).
+        options: (options = {}) => ({
+          storage: 'stand',
+          places: stand.places(),
+          home: (panel) => (panel ? panel.querySelector('[data-close]') : $('site-menu')),
+          progress: () => ({ marks: state.marks, today: state.today, limit: 3 }),
+          step: () => ({ type: 'lesson', kind: 'Урок', title: 'Урок 2: дроби', action: 'Открыть урок', href: '#lesson-2' }),
+          go: (href) => stand.goes.push(href),
+          ...options,
+        }),
+        mount(options = {}, mount = mountPet) {
+          stand.pet = mount(stand.options(options));
+          return stand.pet;
+        },
+        set(marks, today) {
+          state.marks = marks;
+          state.today = today;
+          stand.pet.update();
+        },
+      };
+      window.stand = stand;
+      if (!new URLSearchParams(location.search).has('manual')) stand.mount();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,134 @@
+/* Питомец: вид кнопок и служебных классов по умолчанию (options.classes не задан) — для сайта без своих. Подключать до
+   pet.css. Сайт со своими классами кнопок (options.classes) этот файл не подключает (README, «Стили»). Только
+   классы pet-* и элементы питомца — посторонние элементы сайта не меняются. */
+
+:where(.cat-dock, .cat-side, .cat-face, .cat-float, .cat-bar, .cat-sheet, .cat-sections-return, .pet-zones, .pet-ghost),
+:where(.cat-dock, .cat-side, .cat-face, .cat-float, .cat-bar, .cat-sheet, .cat-sections-return, .pet-zones, .pet-ghost) * {
+  box-sizing: border-box;
+}
+
+.cat-sheet {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.cat-sheet :where(h2, h3, p, ol) {
+  margin: 0;
+}
+
+/* Общие правила сайта по тегам (h2, button, input, …) не меняют вид питомца там, где он их не задаёт сам: основа шрифта
+   окна — своя (не body сайта), у заголовков — шрифт, начертание, цвет и высота строки окна, у кнопок и подписей — без
+   регистра и разрядки сайта. Сайт со своими classes (без этого файла) защищает питомца сам (README, «Стили»). */
+.cat-sheet :is(h2, h3) {
+  color: inherit;
+  font-family: inherit;
+  font-style: normal;
+  font-weight: 700;
+  line-height: inherit;
+}
+
+:is(.cat-dock, .cat-side, .cat-float, .cat-bar, .cat-sheet, .cat-sections-return, .pet-zones) :is(button, input, h2, h3, p, label, a, legend, summary),
+:is(.cat-face, .cat-fold) {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* Кнопки и поля — минимальная ширина, внешние отступы и размер шрифта браузера по умолчанию (revert), а не из правил
+   button и input сайта: сильнее правил по тегу, слабее классов модуля (.cat-call, .cat-play-open, поле имени и др.). */
+html :where(.cat-dock, .cat-side, .cat-float, .cat-bar, .cat-sheet, .cat-sections-return, .pet-zones) button,
+html button:where(.cat-face, .cat-fold) {
+  min-width: revert;
+}
+
+html :where(.cat-sheet) input {
+  margin: revert;
+  font-size: revert;
+}
+
+.pet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 10px 20px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--pet-accent);
+  color: var(--pet-accent-ink);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pet-btn:hover {
+  filter: brightness(1.06);
+}
+
+.pet-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.pet-btn-alt {
+  border-color: var(--pet-line);
+  background: var(--pet-surface);
+  color: var(--pet-ink);
+}
+
+.pet-btn-small {
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 14px;
+}
+
+.pet-link {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--pet-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pet-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--pet-line);
+  border-radius: 999px;
+  background: var(--pet-surface-2);
+  color: var(--pet-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+:is(.pet-btn, .pet-link, .pet-close):focus-visible {
+  outline: 2px solid var(--pet-accent);
+  outline-offset: 2px;
+}
+
+.pet-muted {
+  color: var(--pet-ink-2);
+  font-size: 14px;
+}
+
+.pet-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -1,0 +1,57 @@
+{
+  "name": "pet-companion",
+  "version": "0.1.3",
+  "description": "Кот или собака рядом со страницей: спокойный спутник, который радуется подтверждённым занятиям сайта. ES-модули и CSS без зависимостей и сборки.",
+  "keywords": [
+    "pet",
+    "companion",
+    "cat",
+    "dog",
+    "svg",
+    "esm",
+    "browser",
+    "gamification"
+  ],
+  "license": "MIT",
+  "author": "jivchic88",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jivchic88/pet-companion.git"
+  },
+  "homepage": "https://github.com/jivchic88/pet-companion#readme",
+  "bugs": {
+    "url": "https://github.com/jivchic88/pet-companion/issues"
+  },
+  "type": "module",
+  "main": "./pet/pet.mjs",
+  "types": "./pet/pet.d.mts",
+  "exports": {
+    ".": {
+      "types": "./pet/pet.d.mts",
+      "default": "./pet/pet.mjs"
+    },
+    "./pet.css": "./pet/pet.css",
+    "./dog.css": "./pet/dog.css",
+    "./pet-base.css": "./pet/pet-base.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "pet/",
+    "example.html",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": [
+    "*.css"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/browser.mjs",
+    "test:package": "node test/package.mjs",
+    "version": "node scripts/sync-version.mjs && git add pet/pet.mjs README.md CHANGELOG.md",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0",
+    "typescript": "5.9.3"
+  }
+}
