@@ -12,6 +12,9 @@
 
 ## Установка
 
+> **Версия 0.1.4 пока не в каталоге npm.** Она доступна в выпуске GitHub `v0.1.4`; `npm install pet-companion` сейчас устанавливает 0.1.3 — в ней у входов стилей нет типов (CHANGELOG, 0.1.4). Установить 0.1.4 через npm — из архива выпуска:
+> `npm install https://github.com/jivchic88/pet-companion/releases/download/v0.1.4/pet-companion-0.1.4.tgz`
+
 Три способа — одни и те же файлы одной версии:
 
 - **npm** (сайт со сборщиком или с `node_modules` на сервере): `npm install pet-companion` — раздел «Подключение из npm».
