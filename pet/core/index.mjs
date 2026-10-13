@@ -97,6 +97,7 @@ function core({ storage, progress, clock, random, scheduler, log }) {
   let effects = [];
   let reason = null;
   let warnings = []; // предупреждения фиксации — в журнал после неё
+  let faults = []; // сбои оркестровки сессии (отказ планировщика, clock.nextDay) — noteFaults
   let gone = false; // обновление 'destroyed' закрыто
   let dying = false;
   const listeners = [];
@@ -153,10 +154,23 @@ function core({ storage, progress, clock, random, scheduler, log }) {
     scheduler,
     sense: () => sense(),
     emit: (effect) => effects.push(effect),
-    warn: (message, error) => warnings.push([message, error]),
+    fault: (message, error) => faults.push([message, error]),
     run: (name, body) => task(name, body),
     refresh: () => hostRefresh(working ?? { applied: false, save: null }),
   });
+
+  // Сбои оркестровки, отмеченные сессией (она их не бросает и уже сняла то, что без задачи зависло бы): эффект warning
+  // internal и журнал после фиксации; отключённое ядро — только журнал. Возвращает, были ли сбои.
+  function noteFaults() {
+    if (!faults.length) return false;
+    const list = faults;
+    faults = [];
+    for (const [message, error] of list) {
+      if (status !== 'destroyed') effects.push({ type: 'warning', code: 'internal', message: error === undefined ? message : `${message}: ${describe(error)}` });
+      warnings.push([message, error]);
+    }
+    return true;
+  }
 
   function saveOf(key) {
     const own = keys[key];
@@ -346,16 +360,18 @@ function core({ storage, progress, clock, random, scheduler, log }) {
   }
 
   // Конец фазы работы: следствия изменений настроек (своей команды или поглощённого изменения другой вкладки) — до
-  // снимка: другой питомец или «скрыт», движение, реплики (§ 8.6). Затем журнал и одно обновление.
+  // снимка: другой питомец или «скрыт», движение, реплики (§ 8.6). Их сбой и сбои оркестровки, отмеченные после результата
+  // команды (здесь, в отключении), — эффектом warning internal этого обновления и журналом. Затем журнал и одно обновление.
   function close() {
     if (gone) return;
     if (status !== 'destroyed') {
       try {
         session.reconcile(sense());
       } catch (error) {
-        warnings.push(['следствия изменения настроек не применены', error]);
+        faults.push(['следствия изменения настроек не применены', error]);
       }
     }
+    noteFaults();
     flushWarnings();
     if (status === 'destroyed') {
       gone = true;
@@ -438,8 +454,11 @@ function core({ storage, progress, clock, random, scheduler, log }) {
         mark(name);
         try {
           if (fault) throw fault.error;
-          return body(step);
+          const result = body(step);
+          // Сбой оркестровки после применения (отказ планировщика): изменение и запись остаются, результат — честный.
+          return noteFaults() && result.ok ? { ...result, degraded: true } : result;
         } catch (error) {
+          noteFaults();
           if (!step.applied) {
             warnQuiet(`сбой команды ${name}`, error);
             return fail('internal', `Внутренний сбой: ${describe(error)}`);
@@ -550,7 +569,8 @@ function core({ storage, progress, clock, random, scheduler, log }) {
   // Подтверждённое занятие: счёт хоста уже включает знак. Спрятан, не на виду, до start или detail === null — только числа.
   // Иначе решение: радость или поддержка, праздник новой ступени (не в «Поиграть» и редакторе) с отметкой увиденной,
   // продолжение с новой вещью, подсказка про миску. Увиденная ступень — сверенная (act): уже увиденная или непонятная до
-  // команды — без праздника. Реакцию играет сессия: повтор key в экземпляре — без реакции (duplicate). Сценку выбирает
+  // команды — без праздника. Реакцию играет сессия: повтор key в экземпляре — без реакции (duplicate); в фоне решение то же
+  // (числа, праздник с отметкой ступени, учёт key), но реакция не играет и не откладывается. Сценку выбирает
   // отображение (PL04.2) по scene; реакции занятия — ключ события (event) для сигналов конвейеру сценки.
   const notify = (type, detail, sight) =>
     act('notify', (step) => {
@@ -753,8 +773,10 @@ function core({ storage, progress, clock, random, scheduler, log }) {
       { sync: false },
     );
 
-  // Видимость приложения (веб — visibilitychange): фон снимает реакцию, облако, сценку и задачи; возврат — дремота после
-  // 3 мин без действий, счёт, день и лакомство заново (со сверкой хранения), задачи заново; приветствия нет.
+  // Видимость приложения (веб — visibilitychange): фон снимает реакцию и отложенную, облако, сценку и задачи; пока фон,
+  // реакции не начинаются и не откладываются (события, снятие тишины, прямые отклики), задачи не ставятся — решения,
+  // числа и записи идут как всегда. Возврат — дремота после 3 мин без действий, счёт, день и лакомство заново (со сверкой
+  // хранения), задачи заново; ничего не доигрывается, приветствия нет.
   const setVisible = (value) =>
     act('setVisible', (step) => {
       if (!bool(value)) return fail('invalid-argument', 'visible — boolean.');

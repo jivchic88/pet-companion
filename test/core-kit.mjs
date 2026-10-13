@@ -261,12 +261,13 @@ export function make(storage, { counts = host(), time = clock(), log = journal()
 }
 
 // Ядро PL04.1 с ручным временем: часы calendar, ручной планировщик, заданный random; журнал обновлений (seen) и эффектов.
-// storage — уже загруженный координатор (по умолчанию — свой веб в отдельном пространстве с initial).
-export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal() } = {}) {
+// storage — уже загруженный координатор (по умолчанию — свой веб в отдельном пространстве с initial); scheduler(plan) —
+// порт планировщика поверх ручного (например, отказывающий), по умолчанию — сам ручной.
+export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal(), scheduler = (plan) => plan.port } = {}) {
   const site = storage ? null : web(initial);
   if (site) assert.equal(site.storage.load(), 'ready');
   const plan = planner(time);
-  const core = createPetCore({ storage: storage ?? site.storage, progress: counts.progress, clock: time.port, random: random.port, scheduler: plan.port, log: log.port });
+  const core = createPetCore({ storage: storage ?? site.storage, progress: counts.progress, clock: time.port, random: random.port, scheduler: scheduler(plan), log: log.port });
   const seen = [];
   core.subscribe((update) => seen.push(update), { initial: false });
   const effects = (type) => seen.flatMap((update) => update.effects.filter((effect) => !type || effect.type === type));

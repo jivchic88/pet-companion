@@ -121,7 +121,8 @@ test('ошибки портов: scheduler, random, clock.nextDay бросают
   const scheduler = failing(() => ({ scheduler: { later: () => {
     throw new Error('планировщик упал');
   } } }));
-  assert.equal(scheduler.core.start().ok, true);
+  const placed = scheduler.core.start();
+  assert.deepEqual([placed.ok, placed.degraded, scheduler.core.getState().status, [...new Set(scheduler.warnings)]], [true, true, 'running', ['internal']], 'отказ планировщика — тоже честный degraded (подробно — core-scheduler.test.mjs)');
   assert.ok(scheduler.log.list.some((line) => line.includes('не запланирована: планировщик упал')), scheduler.log.list.join(' | '));
   const random = failing(() => ({ random: () => {
     throw new Error('random упал');
@@ -132,7 +133,8 @@ test('ошибки портов: scheduler, random, clock.nextDay бросают
   const nextDay = failing((time) => ({ clock: { ...time.port, nextDay: () => {
     throw new Error('nextDay упал');
   } } }));
-  assert.deepEqual([nextDay.core.start().ok, nextDay.log.list.some((line) => line.includes('nextDay упал'))], [true, true]);
+  const day = nextDay.core.start();
+  assert.deepEqual([day.ok, day.degraded, nextDay.warnings, nextDay.log.list.some((line) => line.includes('nextDay упал'))], [true, true, ['internal'], true]);
   // Повторный вход: порты вызывают команды ядра в фазе работы — reentrant, ничего не изменено, журнал не зацикливается.
   let core = null;
   const inside = [];

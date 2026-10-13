@@ -96,8 +96,20 @@ export function petMood(times, now) {
 
 // «Режиссёр»: одна реакция одновременно, одна отложенная (самая важная), без очереди. handled — обработанные события
 // (key), quiet — причины тишины, lastAt — последний запуск типа (паузы повторов): всё это — память экземпляра ядра.
+// background — фон (вкладка или приложение не видны, setBackground).
 export function createDirector() {
-  return { current: null, pending: null, quiet: new Set(), handled: new Set(), lastAt: {} };
+  return { current: null, pending: null, quiet: new Set(), handled: new Set(), lastAt: {}, background: false };
+}
+
+// Фон: идущая и отложенная реакции сняты; пока фон, ничего не начинается и не откладывается — запрос учитывает key и
+// пропадает, снятие тишины и конец реакции ничего не запускают, поэтому возврат ничего не доигрывает. Причины тишины,
+// учтённые события и паузы повторов остаются.
+export function setBackground(d, on) {
+  d.background = on;
+  if (on) {
+    d.current = null;
+    d.pending = null;
+  }
 }
 
 export const playing = (d, now) => Boolean(d.current && d.current.until > now);
@@ -129,6 +141,8 @@ export function request(d, type, { now, key = '', context = 'calm', extra = {}, 
     if (d.handled.has(key)) return { action: 'drop' };
     d.handled.add(key);
   }
+  // Фон: событие учтено (как в 0.1.4 — запросом), но не играет и не откладывается.
+  if (d.background) return { action: 'drop' };
   if (reaction.cooldown && now - (d.lastAt[type] ?? -Infinity) < reaction.cooldown) return { action: 'drop' };
   if (reaction.decorative) {
     if (d.quiet.size || playing(d, now) || (reaction.calmOnly && context !== 'calm')) return { action: 'drop' };
@@ -149,6 +163,7 @@ export function request(d, type, { now, key = '', context = 'calm', extra = {}, 
 export function finish(d, now) {
   const follow = d.current?.follow;
   d.current = null;
+  if (d.background) return { action: 'none' };
   const pending = d.pending && d.pending.expires > now ? d.pending : null;
   if (follow && REACTIONS[follow.type] && !d.quiet.size && !(pending && pending.priority < REACTIONS[follow.type].priority)) {
     return start(d, follow.type, now, follow.extra ?? {});
@@ -158,7 +173,7 @@ export function finish(d, now) {
 
 function takePending(d, now) {
   const next = d.pending;
-  if (!next || d.quiet.size || playing(d, now)) return { action: 'none' };
+  if (!next || d.background || d.quiet.size || playing(d, now)) return { action: 'none' };
   d.pending = null;
   if (next.expires <= now) return { action: 'none' };
   const { type, priority: _priority, expires: _expires, ...extra } = next;

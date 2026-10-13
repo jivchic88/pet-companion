@@ -3,7 +3,8 @@
 // и в меню сайта на телефоне): повтор события, причины тишины сайта и пауза повтора ожидания переживают скрытие —
 // регрессия падает на прежнем коде (новый режиссёр при «Скрыть»). Приветствие через 0,9 с; облако реплики и его срок;
 // тишина таймера и диктовки с отложенной реакцией; фон и возврат (реакция и облако сняты, дремота после долгого
-// отсутствия, без приветствия); пробуждение действием; системное «уменьшить движение» на ходу (выбор владельца не
+// отсутствия, без приветствия; таймер или диктовка сайта, кончившиеся в фоне, не запускают отложенную ни в фоне, ни при
+// возврате — регрессия падает на коде до доработки PL04.1); пробуждение действием; системное «уменьшить движение» на ходу (выбор владельца не
 // меняется); моргание по заданной случайности; местная полночь (карточка лакомства открытого уголка); готовое имя — named,
 // выбор собаки — meet; «Приходит по зову» — закрыт ничего не играет. Чужой ключ localStorage, внешние запросы, ошибки
 // страницы, горизонтальная прокрутка — на компьютере 1280×900 и телефоне 390×844. Запуск — в составе npm run test:browser.
@@ -18,6 +19,9 @@ function foreignKey() {
 const pose = (page, selector) => page.evaluate((s) => document.querySelector(s)?.dataset.pose ?? '', selector);
 const bubble = (page) => page.evaluate(() => ({ on: Boolean(document.querySelector('#cat-dock .cat-dock-say.is-saying')), text: document.querySelector('#cat-dock .cat-bubble')?.textContent ?? '' }));
 const stored = (page, ns, name) => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? 'null'), `${ns}:${name}:v1`);
+// Все рисунки питомца и облако на любом месте (боковая панель, док, плавающее).
+const arts = (page) => page.evaluate(() => ({ poses: [...document.querySelectorAll('.cat-art[data-cat-managed]')].map((el) => el.dataset.pose), saying: document.querySelectorAll('.is-saying').length > 0 }));
+const calmArts = (shot) => shot.poses.length > 0 && !shot.poses.includes('joy') && !shot.saying;
 const notify = (page, type, detail = null) => page.evaluate(([t, d]) => window.stand.pet.notify(t, d), [type, detail]);
 const DOCK = '#cat-dock .cat-art';
 
@@ -144,6 +148,23 @@ export async function lifeQa(browser, base, check, open, layout) {
     await page.locator('#site-main').click({ position: { x: 5, y: 5 } });
     check(`${label}: действие пользователя будит`, (await pose(page, DOCK)) === 'calm');
 
+    // Фон удерживает запрет (доработка по независимой проверке): радость ждёт таймера сайта, таймер кончился, пока вкладка
+    // в фоне, — ни реакции, ни облака в фоне, при возврате и через 60 с (прежде — радость); новое событие после — радость.
+    await page.evaluate(() => window.stand.pet.update({ timer: true }));
+    await notify(page, 'saved', { key: 'B1', counted: true });
+    const held = await arts(page);
+    await tab(page, true);
+    await page.evaluate(() => window.stand.pet.update({ timer: false }));
+    const away = await arts(page);
+    await tab(page, false);
+    const home = await arts(page);
+    await page.clock.runFor(61_000);
+    const late = await arts(page);
+    await notify(page, 'saved', { key: 'B2', counted: true });
+    const fresh = await pose(page, DOCK);
+    check(`${label}: фон — таймер сайта кончился в фоне: отложенная радость не играет ни в фоне, ни при возврате, ни через 60 с; новое событие — радость`, held.poses.every((p) => p === 'attentive') && [away, home, late].every(calmArts) && fresh === 'joy', JSON.stringify({ held, away, home, late, fresh }));
+    await page.clock.runFor(5000);
+
     // Системное «уменьшить движение» на ходу: режим ядра none, выбор владельца не меняется; снятие — моргание по заданной
     // случайности (Math.random = 0 → 12 с).
     // Событие change медиазапроса браузер шлёт на шаге отрисовки — ждём его итог (условие, а не пауза).
@@ -239,6 +260,19 @@ export async function lifeQa(browser, base, check, open, layout) {
     const played = await pose(m, '.cat-face .cat-art');
     check(`${phone}: Р1 — «Показать кота» из меню сайта: тот же P без реакции, диктовка действует, P2 — после неё`, joy === 'joy' && repeat === 'attentive' && held === 'attentive' && played === 'joy', JSON.stringify({ joy, repeat, held, played }));
     await m.clock.runFor(3000);
+    // Фон удерживает запрет: диктовка кончилась, пока вкладка в фоне, — отложенная радость не играет ни в фоне, ни при
+    // возврате, ни через 60 с (прежде — радость).
+    await m.evaluate(() => window.stand.pet.update({ dictation: true }));
+    await notify(m, 'saved', { key: 'PB', counted: true });
+    const waiting = await arts(m);
+    await tab(m, true);
+    await m.evaluate(() => window.stand.pet.update({ dictation: false }));
+    const inBackground = await arts(m);
+    await tab(m, false);
+    const onReturn = await arts(m);
+    await m.clock.runFor(61_000);
+    const minuteLater = await arts(m);
+    check(`${phone}: фон — диктовка кончилась в фоне: отложенная радость не играет ни в фоне, ни при возврате, ни через 60 с`, waiting.poses.every((p) => p === 'attentive') && [inBackground, onReturn, minuteLater].every(calmArts), JSON.stringify({ waiting, inBackground, onReturn, minuteLater }));
     // «Приходит по зову»: закрыт — событие без реакции, вызов — сразу «Поиграть», закрыли — ничего не доигрывает.
     await m.locator('.cat-face').tap();
     await m.locator('.cat-presence label:has(input[value="on-call"])').tap();
