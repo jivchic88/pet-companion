@@ -173,7 +173,7 @@ export function listen(core, list, name, record = (update) => `${update.reason}`
   return core.subscribe((update) => list.push(`deliver ${name} ${record(update)}`), { initial: false });
 }
 
-// Шпион координатора: журнал постановки, settle, поглощения; имена подключений — по порядку connect.
+// Шпион координатора: журнал сверки перед командой, постановки, settle, поглощения; имена подключений — по порядку connect.
 export function spy(storage, list, names = []) {
   let index = 0;
   return {
@@ -197,6 +197,10 @@ export function spy(storage, list, names = []) {
           });
           list.push(`${how} ${who}`);
           return how;
+        },
+        sync(keys) {
+          list.push(`sync ${who}`);
+          client.sync(keys);
         },
         watch: (absorb) =>
           client.watch((key, old, now) => {

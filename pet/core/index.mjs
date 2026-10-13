@@ -362,25 +362,32 @@ function core({ storage, progress, clock, log }) {
   // ---------- команды ----------
 
   // Порядок обработки (§ 5.5): отключён → destroyed; фаза работы другого вызова (порт, progress) → reentrant без изменений и
-  // без журнала; проверки и бизнес-правила — без изменений; затем применение одним присваиванием и операции записи.
-  // Внутренний сбой до применения — internal; после — ok с degraded и честным save.
+  // без журнала; сверка ключей среза своей фазой; проверки и бизнес-правила — без изменений; затем применение одним
+  // присваиванием и операции записи. Внутренний сбой до применения — internal; после — ok с degraded и честным save.
+  // Сверка (шаг 1а): решение — по подтверждённому, а не по кэшу. Изменение помимо координатора (другая вкладка, чьё
+  // событие storage ещё не пришло; восстановление на этой странице) поглощается до решения — всеми подключениями, как
+  // событие storage, и приходит своим обновлением 'storage', а не изменением команды; ok: false команды по-прежнему
+  // значит: сама она ничего не изменила и не поставила. Фазы — одного раунда: доставка после команды.
   function act(name, body) {
     if (status === 'destroyed') return fail('destroyed', 'Питомец отключён.');
     if (Round.working()) return fail('reentrant', 'Команда вызвана во время обработки другого вызова (из порта или progress()).');
-    return Round.run(order, () => {
-      const step = { applied: false, save: null };
-      mark(name);
-      try {
-        return body(step);
-      } catch (error) {
-        if (!step.applied) {
-          warnQuiet(`сбой команды ${name}`, error);
-          return fail('internal', `Внутренний сбой: ${describe(error)}`);
+    return Round.hold(() => {
+      client.sync(KEYS);
+      return Round.run(order, () => {
+        const step = { applied: false, save: null };
+        mark(name);
+        try {
+          return body(step);
+        } catch (error) {
+          if (!step.applied) {
+            warnQuiet(`сбой команды ${name}`, error);
+            return fail('internal', `Внутренний сбой: ${describe(error)}`);
+          }
+          effects.push({ type: 'warning', code: 'internal', message: `сбой после применения: ${describe(error)}` });
+          warnQuiet(`сбой команды ${name} после применения`, error);
+          return { ok: true, changed: true, save: step.save ?? report([]), degraded: true };
         }
-        effects.push({ type: 'warning', code: 'internal', message: `сбой после применения: ${describe(error)}` });
-        warnQuiet(`сбой команды ${name} после применения`, error);
-        return { ok: true, changed: true, save: step.save ?? report([]), degraded: true };
-      }
+      });
     });
   }
 
@@ -452,7 +459,8 @@ function core({ storage, progress, clock, log }) {
 
   // Подтверждённое занятие: счёт хоста уже включает знак. Спрятан, не на виду, до start или detail === null — только числа.
   // Иначе решение: радость или поддержка, праздник новой ступени (не в «Поиграть» и редакторе) с отметкой увиденной,
-  // продолжение с новой вещью, подсказка про миску. Реакцию, повтор key и сценку проигрывает веб (PL04).
+  // продолжение с новой вещью, подсказка про миску. Увиденная ступень — сверенная (act): уже увиденная или непонятная до
+  // команды — без праздника. Реакцию, повтор key и сценку проигрывает веб (PL04).
   const notify = (type, detail, sight) =>
     act('notify', (step) => {
       const where = sightOf(sight);
@@ -501,8 +509,9 @@ function core({ storage, progress, clock, log }) {
       return { ok: true, changed: !same(was, build()), save: step.save, reacted: true, celebrate, reaction, scene: { outcome, stage } };
     });
 
-  // Кормление: день заново; отметка дня в памяти и операция записи — до реакции (второго лакомства в экземпляре нет).
-  // Объявление — по известному итогу записи; асинхронно — без слов о сохранности, поздний отказ — отдельным объявлением.
+  // Кормление: день заново, отметка дня — сверенная (act): уже угостили до команды — treat-fed без записи и реакции. Отметка
+  // дня в памяти и операция записи — до реакции (второго лакомства в экземпляре нет). Объявление — по известному итогу
+  // записи; асинхронно — без слов о сохранности, поздний отказ — отдельным объявлением.
   const feed = (sight) =>
     act('feed', (step) => {
       const where = sightOf(sight);

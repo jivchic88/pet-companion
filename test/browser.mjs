@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
-import { coreQa } from './browser-core.mjs';
+import { coreQa, freshQa } from './browser-core.mjs';
 import { storageQa } from './browser-storage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1104,6 +1104,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await styles(browser, server.base, check);
     await storageQa(browser, server.base, check, open);
     await coreQa(browser, server.base, check, open);
+    await freshQa(browser, server.base, check, open);
   } finally {
     await server.close();
   }

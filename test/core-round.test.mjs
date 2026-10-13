@@ -1,13 +1,13 @@
 // Раунд доставки PL03 (docs/ARCHITECTURE.md § 5.4, § 8.7.1): ядра A (подключение a, слушатель la) и B (b, lb) на одном
 // координаторе; хост вызывает A.setName('Барсик'). Варианты: B пишет тот же ключ, другой ключ; слушатель отключает A или
 // B, B — себя после своей команды; исключение слушателя до и после команды; повтор того же значения завершает раунд.
-// Синхронно (веб) и асинхронно (ручное подтверждение): точный журнал постановки, чтения и записи, поглощения, settle,
-// доставок и возвратов. Веб не возвращает и не доставляет pending. Команда из порта или progress() в фазе работы —
+// Синхронно (веб) и асинхронно (ручное подтверждение): точный журнал сверки перед командой, постановки, чтения и записи,
+// поглощения, settle, доставок и возвратов. Веб не возвращает и не доставляет pending. Команда из порта или progress() в фазе работы —
 // reentrant без изменений и журнала; destroy из неё — в конце фазы работы; подписка из неё — начальный снимок в доставке.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPetCore } from '../pet/core/index.mjs';
-import { DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
+import { CORE_KEYS, DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
 
 const SEEN = { around: true };
 const MARS = { v: 1, name: 'Марс', seenStage: 0, greetDay: DAY };
@@ -24,7 +24,9 @@ function sync() {
   B.core.start(SEEN);
   list.length = 0;
   const key = site.keys.cat;
-  return { list, site, A: A.core, B: B.core, logB: B.log, get: `getItem ${key}`, set: `setItem ${key}` };
+  // Сверка перед командой (§ 5.5, шаг 1а): синхронный координатор перечитывает четыре ключа среза.
+  const fresh = (who) => [`sync ${who}`, ...CORE_KEYS.map((name) => `getItem ${site.keys[name]}`)];
+  return { list, site, A: A.core, B: B.core, logB: B.log, get: `getItem ${key}`, set: `setItem ${key}`, fresh };
 }
 
 async function later() {
@@ -37,11 +39,12 @@ async function later() {
   A.core.start(SEEN);
   B.core.start(SEEN);
   list.length = 0;
-  return { list, store, A: A.core, B: B.core };
+  // Асинхронный координатор синхронного чтения не имеет: сверка перед командой ничего не читает.
+  return { list, store, A: A.core, B: B.core, fresh: (who) => [`sync ${who}`] };
 }
 
 // Общее начало: фиксация A1 → закрытие (A, затем B) → доставка la, затем lb.
-const opening = (s) => ['write a cat', s.get, s.set, 'absorb b cat', 'settle a true', 'settled a', 'deliver la setName Барсик saved', 'deliver lb storage Барсик saved'];
+const opening = (s) => [...s.fresh('a'), 'write a cat', s.get, s.set, 'absorb b cat', 'settle a true', 'settled a', 'deliver la setName Барсик saved', 'deliver lb storage Барсик saved'];
 
 test('синхронно, вариант 1 — B пишет тот же ключ: фиксация A1, settle A1, затем B1; B.setName — окончательный итог; обновления B1 — в конец очереди', () => {
   const s = sync();
@@ -57,10 +60,10 @@ test('синхронно, вариант 1 — B пишет тот же ключ
   s.list.push(`return A ${result.save.status}`);
   assert.deepEqual(s.list, [
     ...opening(s),
-    'write b cat', s.get, s.set, 'absorb a cat', 'settle b true', 'settled b',
+    ...s.fresh('b'), 'write b cat', s.get, s.set, 'absorb a cat', 'settle b true', 'settled b',
     'return B saved',
     'deliver lb setName Пиксель saved',
-    'return B без изменений',
+    ...s.fresh('b'), 'return B без изменений',
     'deliver la storage Пиксель saved',
     'return A saved',
   ]);
@@ -82,10 +85,10 @@ test('синхронно, вариант 2 — B пишет другой клю�
   s.list.push(`return A ${result.save.status}`);
   const treat = s.site.keys.treat;
   assert.deepEqual(s.list, [
-    'write a cat', s.get, s.set, 'absorb b cat', 'settle a true', 'settled a',
+    ...s.fresh('a'), 'write a cat', s.get, s.set, 'absorb b cat', 'settle a true', 'settled a',
     'deliver la setName ready',
     'deliver lb storage ready 0',
-    'write b treat', `getItem ${treat}`, `setItem ${treat}`, 'absorb a treat', 'settle b true', 'settled b',
+    ...s.fresh('b'), 'write b treat', `getItem ${treat}`, `setItem ${treat}`, 'absorb a treat', 'settle b true', 'settled b',
     'return B saved',
     'deliver lb feed fed 1',
     'deliver la storage fed',
@@ -131,14 +134,15 @@ test('синхронно, вариант 3в — lb пишет, затем от�
   s.B.subscribe((update) => s.list.push(`deliver lb2 ${update.reason}`), { initial: false });
   const result = s.A.setName('Барсик');
   s.list.push(`return A ${result.save.status}`);
-  assert.deepEqual(s.list.slice(8), [
-    'write b cat', s.get, s.set, 'absorb a cat', 'settle b true', 'settled b',
+  const head = opening(s).length;
+  assert.deepEqual(s.list.slice(head), [
+    ...s.fresh('b'), 'write b cat', s.get, s.set, 'absorb a cat', 'settle b true', 'settled b',
     'deliver la storage Пиксель saved',
     'deliver lb destroyed',
     'deliver lb2 destroyed',
     'return A saved',
   ]);
-  assert.deepEqual(s.list.slice(0, 8), [...opening(s).slice(0, 7), 'deliver lb storage']);
+  assert.deepEqual(s.list.slice(0, head), [...opening(s).slice(0, head - 1), 'deliver lb storage']);
   assert.equal(s.site.json('cat').name, 'Пиксель', 'фиксация B1 прошла до отключения');
 });
 
@@ -193,7 +197,7 @@ test('асинхронно, тот же сценарий: A1 — queued и pendi
   }, { initial: false });
   const result = s.A.setName('Барсик');
   s.list.push(`return A ${result.save.status}`);
-  assert.deepEqual(s.list, ['write a cat', 'get cat', 'queued a', 'deliver la setName Барсик pending', 'return A pending']);
+  assert.deepEqual(s.list, [...s.fresh('a'), 'write a cat', 'get cat', 'queued a', 'deliver la setName Барсик pending', 'return A pending']);
   s.list.length = 0;
   await s.store.next('get', 'cat');
   await s.store.next('set', 'cat');
@@ -202,7 +206,7 @@ test('асинхронно, тот же сценарий: A1 — queued и pendi
     'absorb b cat', 'settle a true',
     'deliver la save Барсик saved',
     'deliver lb storage Барсик saved',
-    'write b cat', 'queued b', 'return B pending',
+    ...s.fresh('b'), 'write b cat', 'queued b', 'return B pending',
     'deliver lb setName Пиксель pending',
     'get cat',
   ]);
@@ -270,7 +274,9 @@ test('повторный вход в фазе работы: команда из 
   mode = 'subscribe';
   site.put('cat', { ...MARS, motion: 'calm' });
   core.refresh();
-  assert.deepEqual(list, ['изнутри initial'], 'начальный снимок подписки из порта — в доставке этого раунда');
+  // Запись без события storage (другая вкладка до события, восстановление на странице) найдена сверкой перед командой — своим
+  // обновлением storage; начальный снимок подписки из порта — в доставке этого же раунда, после него.
+  assert.deepEqual(list, ['снаружи storage', 'изнутри initial'], 'начальный снимок подписки из порта — в доставке этого раунда');
   const clockCore = createPetCore({ storage: site.storage, clock: { now: () => 0, day: () => (clockCore.setName('Часы').error.code === 'reentrant' ? DAY : 'нет'), nextDay: (at) => at + 1 } });
   assert.equal(clockCore.start(SEEN).ok, true);
   mode = 'destroy';

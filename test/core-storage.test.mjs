@@ -5,13 +5,13 @@
 // устаревшем кэше (§ 8.7.2), совпавший кэш, отказ после свежего чтения, отказ самого чтения; событие другой вкладки
 // (не newValue, key === null, запоздалое); барьер load; отключение автора до подтверждения (§ 8.7) с барьером и без;
 // пространства имён; закрытое подключение; самодостаточная правка после destroy; setAppearance — results, partial, failed,
-// pending, done; внутренний сбой постановки и после применения. Журнал — порядок постановки, чтения, записи, поглощения и
-// settle.
+// pending, done; внутренний сбой постановки и после применения. Журнал — порядок сверки перед командой, постановки, чтения,
+// записи, поглощения и settle.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPetCore } from '../pet/core/index.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
-import { DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
+import { CORE_KEYS, DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
 
 const SEEN = { around: true };
 const MARS = { v: 1, name: 'Марс', motion: 'normal', seenStage: 0, greetDay: DAY };
@@ -53,7 +53,8 @@ test('асинхронно, независимые поля (§ 8.7): правк
   await store.next('set', 'cat');
   assert.deepEqual(store.json('cat'), { ...MARS, name: 'Барсик', motion: 'none' });
   assert.deepEqual([await named.save.done, await moved.save.done], ['saved', 'saved']);
-  assert.deepEqual(list, ['write a cat', 'get cat', 'queued a', 'write b cat', 'queued b', 'set cat', 'absorb b cat', 'settle a true', 'get cat', 'set cat', 'absorb a cat', 'settle b true']);
+  // Сверка перед командой у асинхронного координатора ничего не читает (§ 5.5, шаг 1а).
+  assert.deepEqual(list, ['sync a', 'write a cat', 'get cat', 'queued a', 'sync b', 'write b cat', 'queued b', 'set cat', 'absorb b cat', 'settle a true', 'get cat', 'set cat', 'absorb a cat', 'settle b true']);
   for (const core of [A.core, B.core]) assert.deepEqual([core.getState().name.display, core.getState().prefs.motion, core.getState().save.cat.status], ['Барсик', 'none', 'saved']);
 });
 
@@ -62,7 +63,8 @@ test('синхронно, независимые поля: каждая прав
   A.core.setName('Барсик');
   B.core.setPreferences({ motion: 'none' });
   const key = site.keys.cat;
-  assert.deepEqual(list, ['write a cat', `getItem ${key}`, `setItem ${key}`, 'absorb b cat', 'settle a true', 'settled a', 'write b cat', `getItem ${key}`, `setItem ${key}`, 'absorb a cat', 'settle b true', 'settled b']);
+  const fresh = (who) => [`sync ${who}`, ...CORE_KEYS.map((name) => `getItem ${site.keys[name]}`)];
+  assert.deepEqual(list, [...fresh('a'), 'write a cat', `getItem ${key}`, `setItem ${key}`, 'absorb b cat', 'settle a true', 'settled a', ...fresh('b'), 'write b cat', `getItem ${key}`, `setItem ${key}`, 'absorb a cat', 'settle b true', 'settled b']);
   assert.deepEqual(site.json('cat'), { ...MARS, name: 'Барсик', motion: 'none' });
 });
 
@@ -159,52 +161,83 @@ test('синхронно: успех и отказ — окончательны�
   assert.deepEqual(seen, ['saved', 'failed']);
 });
 
-test('§ 8.7.2 на веб-координаторе: другая вкладка уже записала то же значение, события ещё нет — без записи, сверка поглощена всеми до settle', () => {
+test('§ 8.7.2 на веб-координаторе: другая вкладка уже записала то же значение, события ещё нет — команда без операции по сверке; запись по устаревшему кэшу — без setItem, сверка поглощена всеми до settle', () => {
   const { list, site, watched, A, B } = webPair({ cat: { v: 1, name: 'Марс' } });
   const got = { a: [], b: [] };
   A.core.subscribe((update) => got.a.push(`${update.reason} ${update.snapshot.name.display} ${update.snapshot.save.cat.status}`), { initial: false });
   B.core.subscribe((update) => got.b.push(`${update.reason} ${update.snapshot.name.display}`), { initial: false });
+  const key = site.keys.cat;
+  // Команда ядра: сверка до решения (§ 5.5, шаг 1а) находит «Барсик» — поглощают оба ядра, обновлением storage; имя уже то —
+  // операции нет, команда своего изменения не выдаёт.
   site.put('cat', { v: 1, name: 'Барсик' });
   const result = A.core.setName('Барсик');
-  const key = site.keys.cat;
-  assert.deepEqual(list, ['write a cat', `getItem ${key}`, 'absorb a cat', 'absorb b cat', 'settle a true', 'settled a'], 'next === current — setItem нет; автор поглощает сверку до своего settle');
-  assert.deepEqual([result.save.status, got.a, got.b], ['saved', ['setName Барсик saved'], ['storage Барсик']]);
-  assert.equal(site.store.writes.length, 0);
-  // Новое ядро после барьера видит Барсик; запоздалое событие storage — без второго обновления.
+  assert.deepEqual(list.slice(0, 4), ['sync a', `getItem ${key}`, 'absorb a cat', 'absorb b cat']);
+  assert.ok(!list.some((line) => line.startsWith('write')), 'операции нет');
+  assert.deepEqual([result.changed, result.save.status, got.a, got.b], [false, 'none', ['storage Барсик saved'], ['storage Барсик']]);
+  // Сверка внутри самой записи (§ 8.3, шаг 4а; на вебе её опережает сверка перед командой, у асинхронного координатора это
+  // единственная): подключение c пишет то же значение по устаревшему кэшу — setItem нет, сверку поглощают все открытые
+  // подключения, включая автора, до его settle.
+  const client = watched.connect();
+  client.watch(() => {});
+  site.put('cat', { v: 1, name: 'Пиксель' });
+  list.length = 0;
+  let settled = null;
+  assert.equal(client.write('cat', (current) => JSON.stringify({ ...JSON.parse(current), name: 'Пиксель' }), (ok) => (settled = ok)), 'settled');
+  assert.deepEqual(list, ['write c cat', `getItem ${key}`, 'absorb a cat', 'absorb b cat', 'absorb c cat', 'settle c true', 'settled c'], 'next === current — setItem нет; автор поглощает сверку до своего settle');
+  client.close();
+  assert.deepEqual([settled, got.a.at(-1), got.b.at(-1), site.store.writes.length], [true, 'storage Пиксель saved', 'storage Пиксель', 0]);
+  // Новое ядро после барьера видит Пиксель; запоздалые события storage — без второго обновления.
   site.storage.load();
-  assert.equal(make(watched).core.getState().name.display, 'Барсик');
+  assert.equal(make(watched).core.getState().name.display, 'Пиксель');
   site.events.fire(key);
-  assert.deepEqual([got.a.length, got.b.length], [1, 1]);
+  assert.deepEqual([got.a.length, got.b.length], [2, 2]);
 });
 
-test('§ 8.7.2: кэш уже совпадал — других ядер не уведомляют; чужое имя и своя правка движения — обе, одно обновление каждого ядра', () => {
+test('§ 8.7.2: кэш уже совпадал — других ядер не уведомляют; чужое имя и своя правка движения — обе: у команды сверка и запись своими обновлениями, в одной фиксации — одно обновление каждого ядра', () => {
   const { list, site, watched, A, B } = webPair({ cat: { v: 1, name: 'Марс' } });
   const got = { a: [], b: [] };
-  A.core.subscribe((update) => got.a.push(`${update.snapshot.name.display} ${update.snapshot.prefs.motion}`), { initial: false });
-  B.core.subscribe((update) => got.b.push(`${update.snapshot.name.display} ${update.snapshot.prefs.motion}`), { initial: false });
+  A.core.subscribe((update) => got.a.push(`${update.reason} ${update.snapshot.name.display} ${update.snapshot.prefs.motion}`), { initial: false });
+  B.core.subscribe((update) => got.b.push(`${update.reason} ${update.snapshot.name.display} ${update.snapshot.prefs.motion}`), { initial: false });
   // Операция без изменения при совпавшем кэше (подключение напрямую): ни поглощений, ни обновлений.
   const client = watched.connect();
   let settled = null;
   assert.equal(client.write('cat', (current) => current, (ok) => (settled = ok)), 'settled');
   assert.deepEqual([settled, got.a, got.b, list.includes('absorb a cat')], [true, [], [], false]);
   client.close();
+  // Команда: сверка перед решением поглощает чужое имя — обновление storage у обоих, затем своя запись движения.
   site.put('cat', { v: 1, name: 'Барсик' });
   A.core.setPreferences({ motion: 'none' });
   assert.deepEqual(site.json('cat'), { v: 1, name: 'Барсик', motion: 'none' });
-  assert.deepEqual([got.a, got.b], [['Барсик none'], ['Барсик none']], 'сверка и своя запись — одно обновление у каждого');
+  assert.deepEqual([got.a, got.b], [['storage Барсик normal', 'setPreferences Барсик none'], ['storage Барсик normal', 'storage Барсик none']], 'чужое изменение — не изменение команды');
+  // Одна фиксация со сверкой и своей записью (подключение напрямую по устаревшему кэшу): одно обновление у каждого ядра.
+  site.put('cat', { v: 1, name: 'Пиксель', motion: 'none' });
+  const direct = watched.connect();
+  direct.write('cat', (current) => JSON.stringify({ ...JSON.parse(current), motion: 'calm' }), () => {});
+  direct.close();
+  assert.deepEqual(site.json('cat'), { v: 1, name: 'Пиксель', motion: 'calm' });
+  assert.deepEqual([got.a.slice(2), got.b.slice(2)], [['storage Пиксель calm'], ['storage Пиксель calm']], 'сверка и своя запись — одно обновление у каждого');
 });
 
 test('отказ записи после свежего чтения — сверка всё равно; отказ самого чтения — не «ключа нет», кэш прежний', () => {
-  const { site, A, B } = webPair({ cat: { v: 1, name: 'Марс' } });
+  const { site, watched, A, B } = webPair({ cat: { v: 1, name: 'Марс' } });
   site.put('cat', { v: 1, name: 'Барсик' });
   site.store.denySet = new RegExp(site.keys.cat);
   const failed = A.core.setPreferences({ motion: 'none' });
   assert.deepEqual([failed.save.status, A.core.getState().name.display, B.core.getState().name.display, A.core.getState().save.cat.unsaved], ['failed', 'Барсик', 'Барсик', ['motion']]);
+  // То же внутри самой записи (шаг 4а — при любом исходе; подключение напрямую по устаревшему кэшу): setItem отказал, а
+  // прочитанное подтверждено и поглощено обоими ядрами; автор — settle(false), значение в хранилище прежнее.
+  site.put('cat', { v: 1, name: 'Пух' });
+  const direct = watched.connect();
+  let settled = null;
+  direct.write('cat', (current) => JSON.stringify({ ...JSON.parse(current), phrases: false }), (ok) => (settled = ok));
+  direct.close();
+  assert.deepEqual([settled, A.core.getState().name.display, B.core.getState().name.display, site.json('cat')], [false, 'Пух', 'Пух', { v: 1, name: 'Пух' }]);
+  // Отказ свежего чтения — и перед командой, и в записи: не «ключа нет», кэш прежний, поверх непрочитанного не пишет.
   site.store.denySet = null;
   site.store.denyGet = new RegExp(site.keys.cat);
   site.put('cat', { v: 1, name: 'Пиксель' });
   const unread = A.core.setName('Дымок');
-  assert.deepEqual([unread.save.status, B.core.getState().name.display, site.json('cat').name], ['failed', 'Барсик', 'Пиксель'], 'чтение не удалось — сверки нет, записи нет');
+  assert.deepEqual([unread.save.status, A.core.getState().name.display, B.core.getState().name.display, site.json('cat').name], ['failed', 'Дымок', 'Пух', 'Пиксель'], 'чтение не удалось — сверки нет, записи нет');
   assert.deepEqual(A.core.getState().save.cat.unsaved, ['motion', 'name']);
 });
 
@@ -338,7 +371,7 @@ test('внутренний сбой: исключение постановки �
     load: () => site.storage.load(),
     connect() {
       const client = site.storage.connect();
-      return { id: client.id, order: client.order, read: client.read, watch: client.watch, close: client.close, write: (key, build, settle) => (key === 'look' ? (() => { throw new Error('постановка look упала'); })() : client.write(key, build, settle)) };
+      return { id: client.id, order: client.order, read: client.read, sync: client.sync, watch: client.watch, close: client.close, write: (key, build, settle) => (key === 'look' ? (() => { throw new Error('постановка look упала'); })() : client.write(key, build, settle)) };
     },
   };
   const log = journal();
