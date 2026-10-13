@@ -82,18 +82,32 @@ export function parseRoom(text) {
   return room;
 }
 
-// Запись: свежее сохранённое как есть (другое животное, чужие поля, вещи не открытых ступеней) + точки предметов этого
-// животного в комнате; на исходном месте — без точки.
-export function roomRecord(text, kind, pos) {
+// Запись: свежее сохранённое как есть (другое животное, чужие поля, вещи не открытых ступеней, неизвестные предметы,
+// больший v) + новые места передвинутых предметов этого животного (moved — { id: [x, y] }). У точки меняются только x и y,
+// остальные её поля остаются; на исходном месте у точки нет координат (только прочие поля, а пустая — удаляется). Точка не
+// объект или kind не объект (непонятное значение) — передвинутый предмет заменяет его объектом.
+export function roomRecord(text, kind, moved) {
   const raw = readJson(text);
   const keep = isObj(raw) ? raw : {};
   const own = isObj(keep[kind]) ? { ...keep[kind] } : {};
-  for (const [id, p] of Object.entries(pos)) {
+  for (const [id, p] of Object.entries(moved)) {
     const [x, y] = grid(p);
-    if (same([x, y], HOME[id])) delete own[id];
-    else own[id] = { x, y };
+    const rest = isObj(own[id]) ? { ...own[id] } : {};
+    delete rest.x;
+    delete rest.y;
+    if (!same([x, y], HOME[id])) own[id] = { ...rest, x, y };
+    else if (Object.keys(rest).length) own[id] = rest;
+    else delete own[id];
   }
-  return { ...keep, v: ROOM_VERSION, [kind]: own };
+  const out = { v: ROOM_VERSION, ...keep, [kind]: own };
+  out.v = Number.isInteger(keep.v) && keep.v > ROOM_VERSION ? keep.v : ROOM_VERSION;
+  return out;
+}
+
+// Что писать при «Сохранить»: предметы, которые передвигали в редакторе (ids), если их место отличается от сохранённого
+// (saved — свежая расстановка). Остальные точки запись не трогает: место, показанное вместо непонятного значения, — не правка.
+export function movedItems(pos, saved, ids = Object.keys(pos)) {
+  return Object.fromEntries(ids.filter((id) => pos[id] && !(saved[id] && same(pos[id], saved[id]))).map((id) => [id, pos[id]]));
 }
 
 // ---------- геометрия ----------

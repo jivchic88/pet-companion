@@ -140,10 +140,13 @@ export function petLayout(record, env = {}) {
 // Изменение вида: «Свернуть» и «Показать целиком» не уводят питомца с места, где новый вид помещается. Место,
 // которое не выбирали, закрепляется только тогда, когда без этого питомец ушёл бы отсюда (например, свернули
 // целого внизу экрана на невысоком окне); «Автоматически» ничего не закрепляет — это прежнее поведение.
-export function viewPatch(record, env, view) {
+// stored — сохранённое как есть: место, непонятное этой версии (из более новой), выбор вида не заменяет.
+export function viewPatch(record, env, view, stored = record) {
   const device = env.phone ? 'phone' : 'desktop';
   const pref = normalizePlace(record)[device];
-  if (pref.place || view === 'auto') return { [device]: { view } };
+  const kept = isObject(stored) && isObject(stored[device]) ? stored[device].place : undefined;
+  const unknown = kept !== undefined && kept !== '' && !placeIds(device).includes(kept);
+  if (pref.place || view === 'auto' || unknown) return { [device]: { view } };
   const now = petLayout(record, env);
   const next = petLayout({ ...normalizePlace(record), [device]: { ...pref, view } }, env);
   const fits = placeAbility(device, env)[now.at]?.[view];

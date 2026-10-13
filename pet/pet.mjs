@@ -56,6 +56,8 @@ let T = TEXTS;
 const initial = () => ({
   mounted: false,
   abort: null, // снимает все слушатели при отключении
+  storage: 'ok', // 'failed' — при подключении хранилище не прочиталось: до отключения ничего не читается и не пишется
+  seen: {}, // последний прочитанный текст ключа (показ, если следующее чтение не удалось)
   kind: 'cat', // показанный напарник; выбор другой вкладки приходит событием storage
   look: R.defaultLook(), // облик кота и собаки (ключ look)
   lookUnsaved: {}, // облик, который не удалось записать (до перезагрузки страницы), — по животным
@@ -141,18 +143,72 @@ const esc = (text) =>
 // Слушатель, который снимет отключение (у старых MediaQueryList addEventListener нет — без слушателя, как раньше).
 const on = (target, type, fn, options = {}) => target?.addEventListener?.(type, fn, { ...options, signal: ui.abort.signal });
 
-// ---------- настройки ----------
-// Поля, которые не удалось записать (хранилище переполнено, запрещено или недоступно), живут в памяти страницы до
-// перезагрузки и читаются поверх сохранённого (у каждого ключа свои); остальные поля читаются свежими — их могла
-// поменять другая вкладка. Удачная запись ключа забирает поля из памяти.
+// ---------- хранение ----------
+// Показ — нормализованное сохранённое (непонятное — по умолчанию); запись — свежий исходный текст ключа + только
+// изменённые поля (функции записи pet-rules.mjs, pet-place.mjs, pet-room.mjs): неизвестные поля, значения и больший v
+// остаются. Поля, которые не удалось записать (хранилище переполнено, запрещено, недоступно или ключ не прочитался), живут
+// в памяти страницы до перезагрузки и читаются поверх сохранённого (у каждого ключа свои); остальные поля читаются
+// свежими — их могла поменять другая вкладка. Удачная запись ключа забирает поля из памяти. README, «Хранение».
 
-function readStored(key, parse) {
+const STORED = ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'];
+const rawOf = (text) => R.readRecord(text).raw ?? {};
+
+// Свежий текст ключа: { ok: true, text } (text — null, если ключа нет) или { ok: false } — отказ чтения.
+function readText(key) {
+  if (ui.storage === 'failed') return { ok: false };
   try {
-    return parse(localStorage.getItem(key));
+    const text = localStorage.getItem(key);
+    ui.seen[key] = text;
+    return { ok: true, text };
   } catch {
-    return parse(null);
+    return { ok: false };
   }
 }
+
+// Для показа: свежее сохранённое; не прочиталось — последнее прочитанное (после неудачной загрузки — умолчания).
+function readStored(key, parse) {
+  const read = readText(key);
+  return parse(read.ok ? read.text : (ui.seen[key] ?? null));
+}
+
+// Загрузка при подключении. Ключ не прочитался (исключение хранилища) — экземпляр работает в памяти: показывает умолчания,
+// ничего не пишет и больше не читает; новая попытка — следующее подключение. Повреждённое значение — предупреждение;
+// неявные записи его не трогают (writeKey).
+function loadStorage() {
+  for (const key of STORED.map((name) => K[name])) {
+    const read = readText(key);
+    if (!read.ok) {
+      ui.storage = 'failed';
+      ui.seen = {};
+      console.warn('Питомец: хранилище недоступно — настройки действуют до перезагрузки и не сохраняются.');
+      return;
+    }
+    if (R.readRecord(read.text).state === 'corrupt') console.warn(`Питомец: значение ${key} повреждено — показаны значения по умолчанию; оно не перезаписывается, пока эту настройку не изменят.`);
+  }
+}
+
+// Запись ключа: свежий текст → build(text) → setItem. Не пишет, если загрузка не удалась или ключ сейчас не прочитался
+// (отказ чтения — не «пусто»); неявная запись (implicit: приветствие дня, отметка ступени, копия дня сценки) не заменяет
+// повреждённое значение — его заменяет только явное действие. true — только после успешного setItem.
+function writeKey(key, build, implicit = false) {
+  const read = readText(key);
+  if (!read.ok || (implicit && R.readRecord(read.text).state === 'corrupt')) return false;
+  try {
+    const text = JSON.stringify(build(read.text));
+    localStorage.setItem(key, text);
+    ui.seen[key] = text;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const keyState = (key) => {
+  const read = readText(key);
+  return read.ok ? R.readRecord(read.text).state : 'failed';
+};
+
+// ---------- настройки ----------
 
 function readCat() {
   return R.normalizeSettings({ ...readStored(K.cat, R.parseSettings), ...ui.unsaved.cat });
@@ -164,18 +220,20 @@ function readCompanion() {
 
 const unsavedAny = () => Object.keys(ui.unsaved.cat).length > 0 || Object.keys(ui.unsaved.companion).length > 0;
 
-// Другая вкладка записала ключ: изменённые ею поля новее несохранённых здесь (последняя запись побеждает).
+// Другая вкладка записала ключ: изменённые ею поля (по сохранённым значениям как есть) новее несохранённых здесь —
+// последняя запись побеждает.
 function forgetOverwritten({ key, oldValue, newValue }) {
   const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
   const kept = (patch, was, now) => Object.fromEntries(Object.entries(patch).filter(([field]) => !changed(was[field], now[field])));
+  const was = rawOf(oldValue);
+  const now = rawOf(newValue);
   if (key === K.cat) {
-    ui.unsaved.cat = kept(ui.unsaved.cat, R.parseSettings(oldValue), R.parseSettings(newValue));
+    ui.unsaved.cat = kept(ui.unsaved.cat, was, now);
     return;
   }
-  const was = R.parseCompanion(oldValue);
-  const now = R.parseCompanion(newValue);
+  const dogOf = (raw) => (R.isRecord(raw.dog) ? raw.dog : {});
   const { dog = {}, ...rest } = ui.unsaved.companion;
-  const keepDog = kept(dog, was.dog, now.dog);
+  const keepDog = kept(dog, dogOf(was), dogOf(now));
   ui.unsaved.companion = { ...kept(rest, was, now), ...(Object.keys(keepDog).length ? { dog: keepDog } : {}) };
 }
 
@@ -185,77 +243,84 @@ function readSettings(kind = ui.kind) {
   return R.companionView(readCat(), readCompanion(), kind);
 }
 
-function store(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Изменённые поля — в память страницы, затем запись каждого ключа, где они есть, по свежим значениям.
-function updateSettings(fields) {
+// Изменённые поля — в память страницы, затем запись каждого ключа, где они есть: свежее сохранённое + эти поля (и прежние
+// несохранённые). implicit — запись без действия пользователя (приветствие дня, первое включение, отметка увиденной
+// ступени): повреждённый ключ она не заменяет — поля остаются в памяти.
+function updateSettings(fields, implicit = false) {
   const part = R.splitUpdate(ui.kind, fields);
   if (Object.keys(part.cat).length) {
     ui.unsaved.cat = { ...ui.unsaved.cat, ...part.cat };
-    if (store(K.cat, readCat())) ui.unsaved.cat = {};
+    if (writeKey(K.cat, (text) => R.catRecord(text, ui.unsaved.cat), implicit)) ui.unsaved.cat = {};
   }
   if (Object.keys(part.companion).length) {
     const was = ui.unsaved.companion;
     ui.unsaved.companion = { ...was, ...part.companion, dog: { ...was.dog, ...part.companion.dog } };
-    if (store(K.companion, readCompanion())) ui.unsaved.companion = {};
+    if (writeKey(K.companion, (text) => R.companionRecord(text, ui.unsaved.companion), implicit)) ui.unsaved.companion = {};
   }
   ui.settings = readSettings();
   syncStoreNote();
   return ui.settings;
 }
 
-// Подсказка в «Настройках»: сохранение обещается, только пока запись удаётся.
-const storeNote = () =>
-  `${unsavedAny() ? 'Сохранить настройки в этом браузере сейчас не получается: они действуют на этой странице до перезагрузки, другие вкладки их не видят.' : 'Настройки напарника, облик, имена и лакомство хранятся в этом браузере: на другом устройстве — свои.'} Имя, облик и аксессуар у кота и собаки свои, движение, реплики и «скрыть» — общие. ${T.origin}`;
+// Хранилище не прочиталось при подключении — изменения действуют только на этой странице (подсказки мест и облика).
+const offline = () => ui.storage === 'failed';
+const OFFLINE = 'Хранилище этого браузера недоступно: изменения действуют на этой странице до перезагрузки и не сохраняются.';
+
+// Подсказка в «Настройках»: сохранение обещается, только пока запись удаётся; повреждённые настройки — честно.
+function storeNote() {
+  const corrupt = keyState(K.cat) === 'corrupt' || keyState(K.companion) === 'corrupt';
+  const head = offline()
+    ? OFFLINE
+    : corrupt
+      ? 'Сохранённые настройки в этом браузере повреждены и не читаются: показаны обычные. Сами они не перезаписываются — изменение настройки здесь их заменит.'
+      : unsavedAny()
+        ? 'Сохранить настройки в этом браузере сейчас не получается: они действуют на этой странице до перезагрузки, другие вкладки их не видят.'
+        : 'Настройки напарника, облик, имена и лакомство хранятся в этом браузере: на другом устройстве — свои.';
+  return `${head} Имя, облик и аксессуар у кота и собаки свои, движение, реплики и «скрыть» — общие. ${T.origin}`;
+}
 
 // ---------- облик (ключ look) ----------
 // Не записался — в памяти страницы поверх сохранённого; сохранённый догнал память (другая вкладка записала тот же
 // облик) — память забывается, подсказка больше не говорит «не сохранился».
 
 function readLook() {
-  const stored = readStored(K.look, R.parseLook);
+  const stored = readStored(K.look, rawOf);
   for (const kind of R.KINDS) if (ui.lookUnsaved[kind] === stored[kind]) delete ui.lookUnsaved[kind];
   return R.normalizeLook({ ...stored, ...ui.lookUnsaved });
 }
 
-// Запись по свежему значению ключа: облик другого животного и чужие поля сохраняются.
+// Запись по свежему значению ключа: облик другого животного (и непонятный этой версии) и чужие поля сохраняются.
 function storeLook(patch) {
   ui.lookUnsaved = { ...ui.lookUnsaved, ...patch };
-  try {
-    localStorage.setItem(K.look, JSON.stringify(R.lookRecord(localStorage.getItem(K.look), ui.lookUnsaved)));
-    ui.lookUnsaved = {};
-    return true;
-  } catch {
-    return false;
-  }
+  if (!writeKey(K.look, (text) => R.lookRecord(text, ui.lookUnsaved))) return false;
+  ui.lookUnsaved = {};
+  return true;
 }
 
 // Другая вкладка записала облик: изменённый ею новее несохранённого здесь.
 function forgetLook({ oldValue, newValue }) {
-  const was = R.parseLook(oldValue);
-  const next = R.parseLook(newValue);
+  const was = rawOf(oldValue);
+  const next = rawOf(newValue);
   for (const kind of R.KINDS) if (was[kind] !== next[kind]) delete ui.lookUnsaved[kind];
 }
 
 const coatNote = () =>
   ui.lookUnsaved[ui.kind]
     ? 'Облик не сохранился в этом браузере: он действует на этой странице до перезагрузки.'
-    : 'Облик у кота и собаки свой и хранится в этом браузере. Знаков и вещей не меняет.';
+    : offline()
+      ? OFFLINE
+      : 'Облик у кота и собаки свой и хранится в этом браузере. Знаков и вещей не меняет.';
 
 // ---------- место и вид (ключ place) — как облик, по устройствам и полям ----------
 
+const deviceOf = (raw, device) => (R.isRecord(raw[device]) ? raw[device] : {});
+
 function readPlace() {
-  const stored = readStored(K.place, P.parsePlace);
+  const raw = readStored(K.place, rawOf);
+  const stored = P.normalizePlace(raw);
   for (const device of P.DEVICES) {
     const own = ui.placeUnsaved[device];
-    for (const field of Object.keys(own ?? {})) if (own[field] === stored[device][field]) delete own[field];
+    for (const field of Object.keys(own ?? {})) if (own[field] === deviceOf(raw, device)[field]) delete own[field];
     if (own && !Object.keys(own).length) delete ui.placeUnsaved[device];
   }
   return P.normalizePlace(Object.fromEntries(P.DEVICES.map((device) => [device, { ...stored[device], ...ui.placeUnsaved[device] }])));
@@ -263,19 +328,15 @@ function readPlace() {
 
 function storePlace(patch) {
   for (const [device, fields] of Object.entries(patch)) ui.placeUnsaved[device] = { ...ui.placeUnsaved[device], ...fields };
-  try {
-    localStorage.setItem(K.place, JSON.stringify(P.placeRecord(localStorage.getItem(K.place), ui.placeUnsaved)));
-    ui.placeUnsaved = {};
-    return true;
-  } catch {
-    return false;
-  }
+  if (!writeKey(K.place, (text) => P.placeRecord(text, ui.placeUnsaved))) return false;
+  ui.placeUnsaved = {};
+  return true;
 }
 
 function forgetPlace({ oldValue, newValue }) {
-  const was = P.parsePlace(oldValue);
-  const next = P.parsePlace(newValue);
-  for (const device of P.DEVICES) for (const field of ['place', 'view']) if (was[device][field] !== next[device][field]) delete ui.placeUnsaved[device]?.[field];
+  const was = rawOf(oldValue);
+  const next = rawOf(newValue);
+  for (const device of P.DEVICES) for (const field of ['place', 'view']) if (deviceOf(was, device)[field] !== deviceOf(next, device)[field]) delete ui.placeUnsaved[device]?.[field];
 }
 
 const placeUnsavedNow = () => Object.keys(ui.placeUnsaved[ui.layout?.device] ?? {}).length > 0;
@@ -283,20 +344,16 @@ const placeUnsavedNow = () => Object.keys(ui.placeUnsaved[ui.layout?.device] ?? 
 // ---------- присутствие (ключ presence; не записалось — в памяти, как место) ----------
 
 function readPresence() {
-  const stored = readStored(K.presence, P.parsePresence);
+  const stored = readStored(K.presence, rawOf).mode;
   if (ui.presenceUnsaved === stored) ui.presenceUnsaved = '';
-  return ui.presenceUnsaved || stored;
+  return ui.presenceUnsaved || P.presenceOf(stored);
 }
 
 function storePresence(mode) {
   ui.presenceUnsaved = mode;
-  try {
-    localStorage.setItem(K.presence, JSON.stringify(P.presenceRecord(localStorage.getItem(K.presence), mode)));
-    ui.presenceUnsaved = '';
-    return true;
-  } catch {
-    return false;
-  }
+  if (!writeKey(K.presence, (text) => P.presenceRecord(text, mode))) return false;
+  ui.presenceUnsaved = '';
+  return true;
 }
 
 // Рядом со страницей: питомец, кнопка или ничего; на виду — рядом или вызван.
@@ -314,14 +371,9 @@ function fedDay() {
 }
 
 function storeTreat(day) {
-  try {
-    localStorage.setItem(K.treat, JSON.stringify(R.treatRecord(localStorage.getItem(K.treat), day)));
-    ui.treatUnsaved = '';
-    return true;
-  } catch {
-    ui.treatUnsaved = day;
-    return false;
-  }
+  const saved = writeKey(K.treat, (text) => R.treatRecord(text, day));
+  ui.treatUnsaved = saved ? '' : day;
+  return saved;
 }
 
 function syncStoreNote() {
@@ -592,7 +644,8 @@ const sceneFull = () => Boolean(ui.sheet?.open) || ui.layout?.view === 'full';
 // тишины (play). Попытка — { type, key, day, at, until } до показа, отмены или срока.
 function sceneFor(key, outcome, celebrate, at) {
   const day = R.localDay();
-  const type = R.pickScene({ key, checked: ui.sceneChecked, outcome, celebrate, day, record: readStored(K.scene, R.parseScene), kind: ui.kind, available: R.sceneTypes(ui.kind, sceneFull()) });
+  // Хранилище не прочиталось при подключении — сценки нет (её день записывать нельзя).
+  const type = offline() ? '' : R.pickScene({ key, checked: ui.sceneChecked, outcome, celebrate, day, record: readStored(K.scene, R.parseScene), kind: ui.kind, available: R.sceneTypes(ui.kind, sceneFull()) });
   ui.sceneNext = type ? { type, key, day, at, until: at + R.SCENE_FRESH_MS } : null;
   return type;
 }
@@ -613,9 +666,10 @@ function sceneIdb() {
 
 // Реакция занятия доиграла: если сценка уместна — R.sceneTurn (решение, запись дня и начало показа одной транзакцией, по
 // очереди со всеми вкладками). Отменили, пока ждали очереди, или питомца отключили — ничего не пишется; показ начался —
-// день занят, даже если его прервут. Нет IndexedDB или localStorage — сценки нет. Копия дня — после записи и только
-// своим экземпляром и в своём пространстве (keys): отключили до конца транзакции — день остаётся в базе, копии и
-// остановки нет, новый экземпляр (с любым storage) не затрагивается.
+// день занят, даже если его прервут. Нет IndexedDB или localStorage — сценки нет; запись дня в базе повреждена — тоже
+// (R.sceneCommit). Копия дня — после записи и только своим экземпляром и в своём пространстве (keys): отключили до конца
+// транзакции — день остаётся в базе, копии и остановки нет, новый экземпляр (с любым storage) не затрагивается. Копия —
+// неявная запись: повреждённую или непрочитанную не заменяет; собака не меняет в ней прошлый вариант кота.
 function sceneSoon(key) {
   const next = ui.sceneNext;
   if (next?.key !== key || !sceneFits(next)) {
@@ -624,12 +678,13 @@ function sceneSoon(key) {
   }
   const owner = ui;
   const keys = K;
-  let record = null;
+  let copy = null; // правка копии дня: день, метка, у кота — вариант
   let shown = null;
   const decide = (stored) => {
     if (ui !== owner || !ui.mounted || ui.sceneNext !== next) return null;
     ui.sceneNext = null;
-    record = R.sceneCommit(stored, R.parseScene(localStorage.getItem(keys.scene)), { day: next.day, today: R.localDay(), by: sceneBy(), kind: ui.kind, type: next.type, fits: sceneFits(next) });
+    const record = R.sceneCommit(stored, R.parseScene(localStorage.getItem(keys.scene)), { day: next.day, today: R.localDay(), by: sceneBy(), kind: ui.kind, type: next.type, fits: sceneFits(next) });
+    if (record) copy = { day: record.day, by: record.by, ...(ui.kind === 'cat' ? { cat: record.cat } : {}) };
     return record;
   };
   const show = () => {
@@ -640,7 +695,7 @@ function sceneSoon(key) {
   void R.sceneTurn(sceneIdb(), keys.db, decide, show).then(
     safe((result) => {
       if (ui !== owner || !ui.mounted) return;
-      if (result === 'shown') store(keys.scene, R.sceneRecord(readStored(keys.scene, (text) => text), record));
+      if (result === 'shown') writeKey(keys.scene, (text) => R.sceneRecord(text, copy), true);
       else if (result === 'lost' && shown && ui.director.current === shown) stopScene();
     }),
   );
@@ -665,8 +720,8 @@ function refreshInfo() {
   ui.info = R.progressInfo(p.marks, ui.settings.seenStage);
   ui.treat = R.treatState(R.localDay(), fedDay(), p.today);
   if (ui.settings.seenStage < 0) {
-    // Первое включение: существующая практика учитывается молча — без исторических наград.
-    updateSettings({ seenStage: ui.info.stage });
+    // Первое включение: существующая практика учитывается молча — без исторических наград. Неявная запись.
+    updateSettings({ seenStage: ui.info.stage }, true);
   }
   const fresh = ui.info.stage > ui.settings.seenStage;
   for (const button of openers()) {
@@ -941,7 +996,7 @@ function choosePlace(id) {
 // (P.viewPatch).
 function chooseView(view) {
   if (!P.VIEWS.some((item) => item.id === view)) return;
-  const saved = storePlace(P.viewPatch(ui.place, env(), view));
+  const saved = storePlace(P.viewPatch(ui.place, env(), view, readStored(K.place, rawOf)));
   ui.place = readPlace();
   ui.lastActivity = now();
   applyLayout({ explicit: true });
@@ -1380,7 +1435,9 @@ function placeNoteText() {
         : 'Питомца можно перетащить мышью.';
   const keep = placeUnsavedNow()
     ? 'Не сохранилось в этом браузере: действует на этой странице до перезагрузки.'
-    : 'У телефона и компьютера место и вид свои; хранятся в этом браузере.';
+    : offline()
+      ? OFFLINE
+      : 'У телефона и компьютера место и вид свои; хранятся в этом браузере.';
   return [call ? '' : P.placeNote(L), how, keep].filter(Boolean).join(' ');
 }
 
@@ -1396,7 +1453,7 @@ function presenceHtml() {
 const presenceNote = () =>
   ui.presenceUnsaved
     ? 'Не сохранилось в этом браузере: действует на этой странице до перезагрузки.'
-    : `${ui.presence === 'on-call' ? `Лапка «${CALL}»${T.call}. ` : ''}Хранится в этом браузере; общее для кота и собаки.`;
+    : `${ui.presence === 'on-call' ? `Лапка «${CALL}»${T.call}. ` : ''}${offline() ? OFFLINE : 'Хранится в этом браузере; общее для кота и собаки.'}`;
 
 // Открытый уголок — на месте, без пересоздания.
 function syncPresenceBox() {
@@ -1537,7 +1594,7 @@ const unseenItems = () => (ui.info.stage > ui.settings.seenStage ? R.unlockedBet
 // Уголок открыт и всё видно — новая ступень увидена: точка на питомце гаснет, праздника нет.
 function markSeen() {
   if (ui.info.stage <= ui.settings.seenStage) return;
-  updateSettings({ seenStage: ui.info.stage });
+  updateSettings({ seenStage: ui.info.stage }, true);
   refreshInfo();
 }
 
@@ -2027,7 +2084,7 @@ function roomHtml() {
     <div class="cat-room-more">
       <p class="${C.muted} cat-note cat-room-keys">Стрелки клавиатуры двигают выбранный предмет, когда фокус на этих кнопках.</p>
       <button class="${C.link} cat-room-reset" type="button" data-room-reset>Вернуть обычную расстановку</button>
-      <p class="${C.muted} cat-note">Расстановка сохраняется в этом браузере.<span data-room-bowl> Миска появится в уголке после занятия — на этом месте.</span></p>
+      <p class="${C.muted} cat-note">${offline() ? OFFLINE : 'Расстановка сохраняется в этом браузере.'}<span data-room-bowl> Миска появится в уголке после занятия — на этом месте.</span></p>
     </div>
     <div class="cat-room-actions">
       <p class="cat-room-other" data-room-other hidden>${ROOM_OTHER}</p>
@@ -2074,7 +2131,8 @@ function enterRoom() {
   stopScene();
   ui.roomY = ui.sheet.querySelector('[data-cat-body]').scrollTop;
   const saved = roomSaved(ui.sheetStage).pos;
-  ui.room = { pos: { ...saved }, saved, pick: 'rest', live: null, other: false, failed: false };
+  // touched — предметы, которые здесь передвигали (перенос, кнопки, «Вернуть обычную»): только их пишет «Сохранить».
+  ui.room = { pos: { ...saved }, saved, touched: new Set(), pick: 'rest', live: null, other: false, failed: false };
   ui.sheet.dataset.view = 'room';
   renderRoom();
   ui.sheet.setAttribute('aria-labelledby', 'cat-room-title');
@@ -2110,20 +2168,21 @@ function roomDone(text) {
   announce(text);
 }
 
-// «Сохранить»: перенос отменён; без изменений — выход без записи; запись не удалась — редактор открыт, черновик цел.
+// «Сохранить»: перенос отменён; пишутся только передвинутые здесь предметы, чьё место отличается от свежего сохранённого
+// (остальные точки — как в хранилище: правки другой вкладки, поля и значения, которых эта версия не знает); без изменений —
+// выход без записи; запись не удалась — редактор открыт, черновик цел.
 function saveRoom() {
   if (!ui.room) return;
   Room.cancelArrange('save');
   const pos = Room.arrange(ui.kind, ui.sheetStage, ui.room.pos).pos;
   ui.room.pos = pos;
-  if (Room.samePlaces(pos, roomSaved(ui.sheetStage).pos)) {
+  const moved = Room.movedItems(pos, roomSaved(ui.sheetStage).pos, [...ui.room.touched]);
+  if (!Object.keys(moved).length) {
     leaveRoom();
     roomDone('Расстановка не изменилась.');
     return;
   }
-  try {
-    localStorage.setItem(K.room, JSON.stringify(Room.roomRecord(localStorage.getItem(K.room), ui.kind, pos)));
-  } catch {
+  if (!writeKey(K.room, (text) => Room.roomRecord(text, ui.kind, moved))) {
     ui.room.failed = true;
     paintDraft();
     announce(`${ROOM_FAILED}.`);
@@ -2145,6 +2204,7 @@ function resetRoom() {
   if (!ui.room) return;
   Room.cancelArrange('reset');
   ui.room.pos = Room.arrange(ui.kind, ui.sheetStage, {}).pos;
+  for (const id of Object.keys(ui.room.pos)) ui.room.touched.add(id);
   paintDraft();
   announce('Обычная расстановка. Сохрани, чтобы оставить её.');
 }
@@ -2165,6 +2225,7 @@ function moveRoom(dir) {
     return;
   }
   ui.room.pos = { ...ui.room.pos, [id]: p };
+  ui.room.touched.add(id);
   paintDraft();
   announce(`${roomTitle(id)} ${ROOM_DIRS[dir][2]}.`);
 }
@@ -2214,6 +2275,7 @@ const roomHooks = {
     ui.room.live = null;
     const moved = !Room.samePlaces({ [id]: live.p }, { [id]: ui.room.pos[id] });
     ui.room.pos = { ...ui.room.pos, [id]: live.p };
+    if (moved) ui.room.touched.add(id);
     paintDraft();
     if (moved) announce(`${roomTitle(id)} на новом месте.`);
   }),
@@ -2559,8 +2621,10 @@ function onVisibility() {
 }
 
 function onStorage(event) {
+  // Хранилище не прочиталось при подключении — экземпляр живёт в памяти, чужие записи не читает.
+  if (offline()) return;
   // Другая вкладка сохранила расстановку: комната — тихо, на месте; черновик не меняется — отметка, если сменилась
-  // расстановка этого питомца (своё «Сохранить» побеждает).
+  // расстановка этого питомца (своё «Сохранить» побеждает для предметов, передвинутых здесь).
   if (event.key === K.room || event.key === null) {
     if (ui.room) {
       const saved = roomSaved(ui.sheetStage).pos;
@@ -2575,7 +2639,7 @@ function onStorage(event) {
   }
   // Присутствие из другой вкладки: места — тихо, по свежему ключу; диалог и черновик не меняются.
   if (event.key === K.presence || event.key === null) {
-    if (event.key && P.parsePresence(event.oldValue) !== P.parsePresence(event.newValue)) ui.presenceUnsaved = '';
+    if (event.key && rawOf(event.oldValue).mode !== rawOf(event.newValue).mode) ui.presenceUnsaved = '';
     ui.presence = readPresence();
     if (ui.mounted && ui.presence !== ui.shownPresence) applyPresence();
     else syncPresenceBox();
@@ -2642,6 +2706,7 @@ function start(options) {
   K = R.storageKeys(options.storage);
   C = { ...CLASSES, ...options.classes };
   T = { ...TEXTS, ...options.texts };
+  loadStorage();
   ui.look = readLook();
   ui.kind = readCompanion().kind;
   ui.settings = readSettings();
@@ -2808,7 +2873,7 @@ function start(options) {
   const today = R.localDay();
   if (ui.settings.greetDay !== today && surface() === 'pet') {
     const away = R.daysBetween(ui.settings.greetDay, today);
-    updateSettings({ greetDay: today });
+    updateSettings({ greetDay: today }, true);
     later('greet', 900, () => play(R.request(ui.director, 'greet', { now: now(), key: `greet:${today}`, context: contextNow(), extra: away >= 2 ? { phrases: 'welcome' } : {} })));
   }
 }
@@ -2878,7 +2943,8 @@ function saved(detail) {
   let follow = null;
   if (celebrate !== null) {
     const { items, accessories } = R.unlockedBetween(Math.max(outcome.stageBefore, ui.settings.seenStage), celebrate, ui.kind);
-    updateSettings({ seenStage: celebrate });
+    // Неявная запись: подтверждённое занятие не поручение заменить повреждённые настройки.
+    updateSettings({ seenStage: celebrate }, true);
     refreshInfo();
     const opened = R.STAGES[celebrate];
     const tryOn = accessories.includes('plaid') && !items.length ? 'plaid' : '';

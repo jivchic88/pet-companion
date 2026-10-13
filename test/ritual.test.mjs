@@ -23,8 +23,9 @@ test('отметка лакомства: отдельный ключ, норма
   assert.deepEqual(R.parseTreat('{"v":7,"fedDay":"2026-10-08","extra":true}'), { v: 1, fedDay: '2026-10-08' });
   const once = JSON.stringify(R.parseTreat('{"fedDay":"2026-10-08"}'));
   assert.equal(JSON.stringify(R.parseTreat(once)), once, 'нормализация идемпотентна');
-  // Запись сохраняет чужие (будущие) поля и заменяет только день; повреждённое — с чистого листа.
-  assert.deepEqual(R.treatRecord('{"v":2,"fedDay":"2026-10-01","future":{"x":1}}', TODAY), { v: 1, fedDay: TODAY, future: { x: 1 } });
+  // Запись сохраняет чужие (будущие) поля и заменяет только день; повреждённое — с чистого листа. Больший номер схемы не
+  // уменьшается (до PL02 запись понижала v до 1).
+  assert.deepEqual(R.treatRecord('{"v":2,"fedDay":"2026-10-01","future":{"x":1}}', TODAY), { v: 2, fedDay: TODAY, future: { x: 1 } });
   assert.deepEqual(R.treatRecord('{oops', TODAY), { v: 1, fedDay: TODAY });
   assert.deepEqual(R.treatRecord(null, TODAY), { v: 1, fedDay: TODAY });
   assert.deepEqual(R.treatRecord('[1,2]', TODAY), { v: 1, fedDay: TODAY });

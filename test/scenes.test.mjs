@@ -273,8 +273,10 @@ test('хранение: повреждённое значение — по ум�
   for (const text of [null, '', '{', '[]', '"строка"', '42', 'null', '{"day":"10.10.2026"}', '{"day":20261010}']) assert.deepEqual(R.parseScene(text), empty, String(text));
   assert.deepEqual(R.parseScene('{"day":"2026-10-10","by":"tab","cat":"dance"}'), { v: 1, day: DAY, by: 'tab', cat: '' });
   assert.equal(R.parseScene(JSON.stringify({ by: 'x'.repeat(100) })).by.length, 32);
+  // Больший номер схемы не уменьшается (до PL02 запись понижала v до 1); вариант кота не меняли — он прежний.
   const record = R.sceneRecord('{"v":2,"future":{"a":1},"cat":"curl"}', { day: DAY, by: 'tab' });
-  assert.deepEqual(record, { v: 1, future: { a: 1 }, day: DAY, by: 'tab', cat: 'curl' });
+  assert.deepEqual(record, { v: 2, future: { a: 1 }, day: DAY, by: 'tab', cat: 'curl' });
+  assert.deepEqual(R.sceneRecord('{"v":1,"cat":"dance","x":[1]}', { day: DAY, by: 'tab' }), { v: 1, cat: 'dance', x: [1], day: DAY, by: 'tab' }, 'непонятный вариант кота без правки не стирается');
   assert.deepEqual(R.sceneRecord('испорчено', { day: DAY, by: 'tab', cat: 'stretch' }), { v: 1, day: DAY, by: 'tab', cat: 'stretch' });
   assert.deepEqual(Object.keys(R.sceneRecord(null, { day: DAY, by: 'tab', cat: 'curl', answer: 'текст ответа' })).sort(), ['by', 'cat', 'day', 'v'], 'лишнее (например, текст ответа) не пишется');
   // Прежние записи ключей не изменились (общий помощник keepRecord).
@@ -295,20 +297,25 @@ test('реакция сохранения ждала ввода, диктовк�
 });
 
 test('решение в транзакции: показ — только если уместно, день тот же и свободен (в базе и в копии для старых вкладок)', () => {
+  // Записи в базе нет — undefined (как get.result); null и другое не-объект — повреждённая запись (ниже).
   const base = { day: DAY, today: DAY, by: 'A', kind: 'cat', type: 'curl', fits: true };
-  assert.deepEqual(R.sceneCommit(null, null, base), { v: 1, day: DAY, by: 'A', cat: 'curl' });
+  assert.deepEqual(R.sceneCommit(undefined, null, base), { v: 1, day: DAY, by: 'A', cat: 'curl' });
   assert.deepEqual(R.sceneCommit({ day: '2026-10-09', by: 'B', cat: 'curl' }, R.parseScene('{не json'), { ...base, type: 'stretch' }), { v: 1, day: DAY, by: 'A', cat: 'stretch' }, 'вчерашний показ не мешает; повреждённая копия — как пустая');
-  assert.equal(R.sceneCommit(null, null, { ...base, fits: false }), null, 'условия помешали — ничего не пишется');
-  assert.equal(R.sceneCommit(null, null, { ...base, today: '2026-10-11' }), null, 'полночь между сохранением и показом');
+  assert.equal(R.sceneCommit(undefined, null, { ...base, fits: false }), null, 'условия помешали — ничего не пишется');
+  assert.equal(R.sceneCommit(undefined, null, { ...base, today: '2026-10-11' }), null, 'полночь между сохранением и показом');
   assert.equal(R.sceneCommit({ v: 1, day: DAY, by: 'B', cat: 'stretch' }, null, base), null, 'день занят другой вкладкой');
-  assert.equal(R.sceneCommit(null, { v: 1, day: DAY, by: 'old', cat: '' }, base), null, 'день занят старой версией в другой вкладке (копия SCENE_KEY)');
-  assert.equal(R.sceneCommit(null, null, { ...base, by: '' }), null);
-  assert.equal(R.sceneCommit(null, null, { ...base, day: 'вчера', today: 'вчера' }), null);
-  // Собака не меняет прошлый вариант кота (из базы, иначе — из копии); чужое значение варианта не пишется.
+  assert.equal(R.sceneCommit(undefined, { v: 1, day: DAY, by: 'old', cat: '' }, base), null, 'день занят старой версией в другой вкладке (копия SCENE_KEY)');
+  assert.equal(R.sceneCommit(undefined, null, { ...base, by: '' }), null);
+  assert.equal(R.sceneCommit(undefined, null, { ...base, day: 'вчера', today: 'вчера' }), null);
+  // Повреждённая запись дня — не свободный день: неявно её не заменяем, сценки нет (до PL02 — как пустая, и заменялась).
+  for (const bad of [null, [], 'день', 7, true]) assert.equal(R.sceneCommit(bad, null, base), null, JSON.stringify(bad));
+  // Неизвестные поля, вложенные данные и больший v записи базы остаются (до PL02 запись заменялась нормализованной).
+  assert.deepEqual(R.sceneCommit({ v: 4, day: '2026-10-09', by: 'B', cat: 'curl', future: { a: [1] } }, null, base), { v: 4, day: DAY, by: 'A', cat: 'curl', future: { a: [1] } });
+  // Собака не меняет прошлый вариант кота (из базы, иначе — из копии); непонятный этой версии — тоже (до PL02 — стирался).
   const dog = { ...base, kind: 'dog', type: 'fetch' };
   assert.deepEqual(R.sceneCommit({ day: '2026-10-09', cat: 'stretch' }, null, dog), { v: 1, day: DAY, by: 'A', cat: 'stretch' });
-  assert.equal(R.sceneCommit(null, { day: '2026-10-09', cat: 'curl' }, dog).cat, 'curl');
-  assert.equal(R.sceneCommit({ cat: 'dance' }, null, dog).cat, '');
+  assert.equal(R.sceneCommit(undefined, { day: '2026-10-09', cat: 'curl' }, dog).cat, 'curl');
+  assert.equal(R.sceneCommit({ cat: 'dance' }, null, dog).cat, 'dance');
 });
 
 test('IndexedDB: проверка, запись и начало показа — в одной транзакции; отмена до показа ничего не пишет', async () => {
@@ -386,8 +393,9 @@ test('хранение и координация недоступны — сце
   });
   assert.equal(result, 'lost');
   assert.equal(thrown.data.has('shown'), false);
-  // Копия для старых вкладок и выбора варианта: только день, метка и вариант; поля будущих версий сохраняются.
-  assert.deepEqual(R.sceneRecord('{"v":2,"future":1,"day":"2026-10-01"}', { v: 1, day: DAY, by: 'A', cat: 'curl' }), { v: 1, future: 1, day: DAY, by: 'A', cat: 'curl' });
+  // Копия для старых вкладок и выбора варианта: только день, метка и вариант; поля будущих версий и больший v сохраняются
+  // (v из правки не пишется; до PL02 номер понижался до 1).
+  assert.deepEqual(R.sceneRecord('{"v":2,"future":1,"day":"2026-10-01"}', { v: 1, day: DAY, by: 'A', cat: 'curl' }), { v: 2, future: 1, day: DAY, by: 'A', cat: 'curl' });
 });
 
 test('текст: имя без склонения, длинное имя целиком; реплик в банках нет — только одна фраза сценки', () => {

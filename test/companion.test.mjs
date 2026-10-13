@@ -14,13 +14,16 @@ const repo = (file) => path.join(here, '..', file);
 // Ключи в пространстве имён сайта (mountPet({ storage: 'site' })).
 const K = R.storageKeys('site');
 
-// Как пишет настройки вкладка, открытая до выбора собаки: только ключ cat, только его поля.
+// Модель вкладки, открытой до выбора собаки: только ключ cat, нормализованный до полей v1 (так писали версии до PL02).
+// Это модель для сценария двух ключей, а не доказательство совместимости с настоящей 0.1.4 — её запись проверяет
+// test/browser.mjs на неизменяемой фикстуре test/fixtures/pet-0.1.4/.
 const oldTabWrite = (stored, fields) => JSON.stringify(R.normalizeSettings({ ...R.parseSettings(stored), ...fields }));
-// Как пишет новая (pet/pet.mjs, updateSettings): каждый ключ — только если в нём есть изменённые поля.
+// Как пишет текущая (pet/pet.mjs, updateSettings): каждый ключ — только если в нём есть изменённые поля; запись — те же
+// функции R.catRecord и R.companionRecord по свежему значению ключа.
 function newTabWrite(storage, kind, fields) {
   const part = R.splitUpdate(kind, fields);
-  if (Object.keys(part.cat).length) storage[K.cat] = JSON.stringify(R.normalizeSettings({ ...R.parseSettings(storage[K.cat]), ...part.cat }));
-  if (Object.keys(part.companion).length) storage[K.companion] = JSON.stringify(R.mergeCompanion(R.parseCompanion(storage[K.companion]), part.companion));
+  if (Object.keys(part.cat).length) storage[K.cat] = JSON.stringify(R.catRecord(storage[K.cat] ?? null, part.cat));
+  if (Object.keys(part.companion).length) storage[K.companion] = JSON.stringify(R.companionRecord(storage[K.companion] ?? null, part.companion));
 }
 const view = (storage, kind) => {
   const companion = R.parseCompanion(storage[K.companion]);
@@ -66,11 +69,16 @@ test('повторное чтение и запись безопасны; изм
   const storage = {};
   newTabWrite(storage, 'cat', { kind: 'dog' });
   newTabWrite(storage, 'dog', { name: 'Рекс' });
-  const once = storage[K.companion];
+  // С PL02 запись — только изменённые поля (без умолчаний): нормализованный показ стабилен при повторном чтении, а повторная
+  // запись того же поля ключ не меняет.
+  const once = JSON.stringify(R.parseCompanion(storage[K.companion]));
   for (let i = 0; i < 3; i += 1) assert.equal(JSON.stringify(R.parseCompanion(once)), once, 'нормализация идемпотентна');
+  const written = storage[K.companion];
+  newTabWrite(storage, 'dog', { name: 'Рекс' });
+  assert.equal(storage[K.companion], written, 'повторная запись того же значения — тот же текст');
   // Вкладка 1 знает старое имя собаки; вкладка 2 поменяла его. Вкладка 1 меняет только выбор —
   // перед записью она читает свежие значения, имя не откатывается.
-  storage[K.companion] = JSON.stringify(R.mergeCompanion(R.parseCompanion(storage[K.companion]), { dog: { name: 'Тобиас' } }));
+  storage[K.companion] = JSON.stringify(R.companionRecord(storage[K.companion], { dog: { name: 'Тобиас' } }));
   newTabWrite(storage, 'dog', { kind: 'cat' });
   assert.deepEqual(R.parseCompanion(storage[K.companion]), { v: 1, kind: 'cat', dog: { name: 'Тобиас', accessory: 'scarf' } });
 });
@@ -86,8 +94,10 @@ test('вкладка, открытая до обновления, не стир�
   const shown = view(storage);
   assert.deepEqual([shown.kind, shown.name, shown.accessory, shown.motion], ['dog', 'Рекс', 'plaid', 'calm']);
   assert.equal(view(storage, 'cat').name, 'Мурзик');
-  // Новый код не кладёт в прежний ключ чужих полей — старая вкладка читает его как раньше.
-  assert.deepEqual(Object.keys(JSON.parse(storage[K.cat])).sort(), Object.keys(R.defaultSettings()).sort());
+  // Новый код не кладёт в прежний ключ чужих полей — старая вкладка читает его как раньше. С PL02 запись не дописывает
+  // умолчания (только изменённые поля поверх сохранённого): поля — подмножество формата v1.
+  const fields = Object.keys(R.defaultSettings());
+  assert.ok(Object.keys(JSON.parse(storage[K.cat])).every((key) => fields.includes(key)), storage[K.cat]);
 });
 
 test('повреждённые данные и неизвестный вид — кот по умолчанию; имена безопасны', () => {

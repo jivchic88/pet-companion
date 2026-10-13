@@ -133,7 +133,8 @@ export function normalizeSettings(raw) {
   };
 }
 
-// Сохранённый текст → нормализованное значение; повреждённый JSON — как пустое (значение по умолчанию).
+// Сохранённый текст → нормализованное значение для показа; повреждённый JSON — как пустое (значение по умолчанию).
+// Показ не меняет сохранённого: запись идёт от исходного объекта (keepRecord).
 function parser(normalize) {
   return (text) => {
     try {
@@ -145,6 +146,41 @@ function parser(normalize) {
 }
 
 export const parseSettings = parser(normalizeSettings);
+
+// ---------- хранение: исходная запись и правка ----------
+// Чтение различает: ключа нет (getItem вернул null) — умолчания, запись разрешена; повреждено (не JSON или не объект:
+// массив, строка, число, null) — умолчания, неявные записи ключ не трогают; объект — показываются понятые поля, а запись
+// сохраняет всё остальное. Отказ чтения (исключение хранилища) различает вызывающий: до текста дело не доходит.
+
+export const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+export function readRecord(text) {
+  if (text === null || text === undefined) return { state: 'missing', raw: null };
+  try {
+    const raw = JSON.parse(text);
+    return isRecord(raw) ? { state: 'ok', raw } : { state: 'corrupt', raw: null };
+  } catch {
+    return { state: 'corrupt', raw: null };
+  }
+}
+
+// Номер схемы при записи: больший корректный сохранённый (совместимая более новая версия) не уменьшается.
+export const keepVersion = (v, known) => (Number.isInteger(v) && v > known ? v : known);
+
+// Запись ключа: свежее сохранённое как есть (неизвестные поля и непонятные значения известных — на своих местах) + только
+// изменённые известные поля (patch), каждое — по правилам проверки normalize; поля, которых формат не знает, из patch не
+// пишутся. Ключа нет или повреждён — запись только из изменённых полей.
+function keepRecord(text, version, normalize, patch) {
+  const raw = readRecord(text).raw ?? {};
+  const clean = normalize({ ...raw, ...patch });
+  const out = { v: version, ...raw };
+  for (const key of Object.keys(patch)) if (key !== 'v' && key in clean) out[key] = clean[key];
+  out.v = keepVersion(raw.v, version);
+  return out;
+}
+
+// Запись общих настроек и кота: изменённые поля ({ name?, accessory?, motion?, … }).
+export const catRecord = (text, patch = {}) => keepRecord(text, CAT_VERSION, normalizeSettings, patch);
 
 // ---------- выбор напарника ----------
 // Ключ cat — общие настройки (движение, реплики, скрыт, увиденная ступень, день приветствия), имя и аксессуар кота; выбор
@@ -204,10 +240,28 @@ export function splitUpdate(kind, fields = {}) {
   return { cat, companion };
 }
 
-// Свежие сохранённые значения + изменённые поля (остальные поля не откатываются к устаревшим).
+// Показ: свежие сохранённые значения + изменённые поля (остальные поля не откатываются к устаревшим).
 export function mergeCompanion(current, patch = {}) {
   const now = normalizeCompanion(current);
   return normalizeCompanion({ ...now, ...patch, dog: { ...now.dog, ...patch.dog } });
+}
+
+// Запись: свежее сохранённое как есть + изменённые поля ({ kind?, dog?: { name?, accessory? } }). Неизвестный вид в kind
+// (показывается котом) остаётся, пока не выберут известного; поля других животных и неизвестные поля dog — тоже. dog не
+// объект (непонятное значение) — правка имени или аксессуара собаки заменяет его объектом с изменёнными полями.
+export function companionRecord(text, patch = {}) {
+  const raw = readRecord(text).raw ?? {};
+  const out = { v: COMPANION_VERSION, ...raw };
+  if ('kind' in patch) out.kind = kindOf(patch.kind);
+  const dog = isRecord(patch.dog) ? patch.dog : {};
+  const fields = ['name', 'accessory'].filter((key) => key in dog);
+  if (fields.length) {
+    const was = isRecord(raw.dog) ? raw.dog : {};
+    const clean = normalizeCompanion({ dog: { ...was, ...dog } }).dog;
+    out.dog = { ...was, ...Object.fromEntries(fields.map((key) => [key, clean[key]])) };
+  }
+  out.v = keepVersion(raw.v, COMPANION_VERSION);
+  return out;
 }
 
 export const companionName = (view) => view?.name || profileOf(view?.kind).defaultName;
@@ -260,20 +314,8 @@ export function normalizeTreat(raw) {
 
 export const parseTreat = parser(normalizeTreat);
 
-// Запись ключа: свежее сохранённое (с полями будущих версий) + изменённые поля, нормализованные.
-function keepRecord(text, normalize, patch) {
-  let raw = null;
-  try {
-    raw = JSON.parse(text ?? 'null');
-  } catch {
-    raw = null;
-  }
-  const keep = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  return { ...keep, ...normalize({ ...keep, ...patch }) };
-}
-
 // Запись отметки: свежее сохранённое + день кормления.
-export const treatRecord = (text, fedDay) => keepRecord(text, normalizeTreat, { fedDay });
+export const treatRecord = (text, fedDay) => keepRecord(text, TREAT_VERSION, normalizeTreat, { fedDay });
 
 // Состояние ритуала на день today: 'fed' — сегодня уже угостили; 'ready' — сегодня есть занятие (count — знаков за
 // сегодня от сайта), можно угостить; 'waiting' — занятия сегодня ещё не было.
@@ -330,8 +372,9 @@ export function normalizeLook(raw) {
 
 export const parseLook = parser(normalizeLook);
 
-// Запись: свежее сохранённое + изменённые облики ({ cat?, dog? }).
-export const lookRecord = (text, patch = {}) => keepRecord(text, normalizeLook, patch);
+// Запись: свежее сохранённое + изменённые облики ({ cat?, dog? }); облик другого животного, в том числе непонятный этой
+// версии, и облики неизвестных животных остаются как были.
+export const lookRecord = (text, patch = {}) => keepRecord(text, LOOK_VERSION, normalizeLook, patch);
 
 // Движение: системное «уменьшить движение» и выбор «Без анимации» важнее всего.
 export function effectiveMotion(settings, reducedMotion) {
@@ -545,8 +588,9 @@ export function normalizeScene(raw) {
   };
 }
 
-export const parseScene = (text) => normalizeScene(keepRecord(text, (raw) => raw, {}));
-export const sceneRecord = (text, patch = {}) => keepRecord(text, normalizeScene, patch);
+export const parseScene = (text) => normalizeScene(readRecord(text).raw);
+// Копия дня: свежее сохранённое как есть + изменённые поля ({ day?, by?, cat? }).
+export const sceneRecord = (text, patch = {}) => keepRecord(text, SCENE_VERSION, normalizeScene, patch);
 
 // Сценка этого занятия или ''. key — id события (checked — проверенные: одна попытка), outcome — doneOutcome,
 // celebrate — stageToCelebrate, record — копия scene, available — sceneTypes. У кота — не прошлый вариант, если доступны оба.
@@ -572,19 +616,26 @@ export function sceneFits(next, { now = Date.now(), shown = true, quiet = false,
 // Реакция сохранения (next — попытка: { at — время сохранения }) началась в started позже перехода: сценка отменяется.
 export const sceneWaited = (next, started) => !next || started > next.at + SCENE_GRACE_MS;
 
-// Решение в транзакции: запись дня (показать) или null. stored — день в базе, mirror — копия scene (её мог занять прежний
-// код другой вкладки), day — день занятия, today — день сейчас (полночь между ними — без сценки).
+// Решение в транзакции: запись дня (показать) или null. stored — запись в базе как есть (undefined — записи нет; не
+// объект — повреждена: это не свободный день, неявно её не заменяем — сценки нет), mirror — копия scene (её мог занять
+// прежний код другой вкладки), day — день занятия, today — день сейчас (полночь между ними — без сценки). Запись — та же
+// запись базы с днём и меткой (и вариантом у кота): неизвестные поля и больший v остаются; собака прошлый вариант кота не
+// меняет (непонятный этой версии — тоже), пустой — берёт из копии.
 export function sceneCommit(stored, mirror, { day = '', today = '', by = '', kind = 'cat', type = '', fits = false } = {}) {
-  const last = normalizeScene(stored);
+  if (stored !== undefined && !isRecord(stored)) return null;
+  const raw = stored ?? {};
+  const last = normalizeScene(raw);
   const copy = normalizeScene(mirror);
   if (!fits || !by || !DAY_ONLY.test(day) || day !== today || last.day === day || copy.day === day) return null;
-  return normalizeScene({ day, by, cat: kindOf(kind) === 'cat' ? type : last.cat || copy.cat });
+  const cat = kindOf(kind) === 'cat' ? type : raw.cat === undefined || raw.cat === '' ? copy.cat : raw.cat;
+  return { ...raw, v: keepVersion(raw.v, SCENE_VERSION), day, by, cat };
 }
 
-// Попытка показа — одна транзакция readwrite IndexedDB (idb — indexedDB, name — база): прочитать день, decide → запись
-// или null, с записью — show() (начало показа). Такие транзакции браузер выполняет по очереди для всех вкладок, и
-// следующая видит запись предыдущей: проверка и фиксация исключительны. Итог: 'shown' — записано; 'skip' — не
-// показывали, ничего не записано; 'fail' — базы нет или сбой до показа; 'lost' — показ начался, запись откатилась.
+// Попытка показа — одна транзакция readwrite IndexedDB (idb — indexedDB, name — база): прочитать запись, decide → запись
+// или null, с записью — show() (начало показа). decide получает запись как есть: undefined — записи нет. Такие транзакции
+// браузер выполняет по очереди для всех вкладок, и следующая видит запись предыдущей: проверка и фиксация исключительны.
+// Итог: 'shown' — записано; 'skip' — не показывали, ничего не записано; 'fail' — базы нет или сбой до показа; 'lost' —
+// показ начался, запись откатилась.
 export function sceneTurn(idb, name, decide, show) {
   return new Promise((resolve) => {
     let shown = false;
@@ -604,7 +655,7 @@ export function sceneTurn(idb, name, decide, show) {
           const get = store.get('shown');
           get.onsuccess = () => {
             try {
-              const record = decide(get.result ?? null);
+              const record = decide(get.result);
               if (!record) return;
               store.put(record, 'shown');
               shown = true;

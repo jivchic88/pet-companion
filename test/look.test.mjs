@@ -32,12 +32,20 @@ test('облик: повреждённое и чужое значение — б
     assert.deepEqual(R.parseLook(bad), R.defaultLook(), String(bad));
   }
   assert.deepEqual(R.parseLook('{"v":9,"cat":"tuxedo","dog":"spotted","hat":"cap"}'), { v: 1, cat: 'tuxedo', dog: 'spotted' });
-  // Запись облика кота не трогает облик собаки и поля будущих версий.
+  // Запись облика кота не трогает облик собаки и поля будущих версий; больший номер схемы не уменьшается (до PL02 запись
+  // понижала v до 1).
   const stored = JSON.stringify({ v: 2, cat: 'smoke', dog: 'blacktan', hat: 'cap', extra: { a: 1 } });
   const written = R.lookRecord(stored, { cat: 'ginger' });
-  assert.deepEqual(written, { v: 1, cat: 'ginger', dog: 'blacktan', hat: 'cap', extra: { a: 1 } });
-  assert.deepEqual(R.lookRecord('{oops', { dog: 'spotted' }), { v: 1, cat: 'smoke', dog: 'spotted' });
-  assert.deepEqual(R.lookRecord(null, { dog: 'nope' }), R.defaultLook(), 'неизвестный облик не записывается');
+  assert.deepEqual(written, { v: 2, cat: 'ginger', dog: 'blacktan', hat: 'cap', extra: { a: 1 } });
+  // Повреждённое значение понятых данных не содержит: запись — только изменённый облик (показ — по умолчанию).
+  assert.deepEqual(R.lookRecord('{oops', { dog: 'spotted' }), { v: 1, dog: 'spotted' });
+  assert.deepEqual(R.parseLook(JSON.stringify(R.lookRecord('{oops', { dog: 'spotted' }))), { v: 1, cat: 'smoke', dog: 'spotted' });
+  assert.deepEqual(R.lookRecord(null, { dog: 'nope' }), { v: 1, dog: 'caramel' }, 'неизвестный облик не записывается: изменённое поле — по правилам проверки');
+  // Непонятный этой версии облик другого животного, облики неизвестных животных — как были (до PL02 — облик по умолчанию).
+  const future = JSON.stringify({ v: 3, cat: 'calico', dog: 'blacktan', bunny: 'snow', pets: { 'example.bunny': { coat: 'snow' } } });
+  assert.deepEqual(R.lookRecord(future, { dog: 'spotted' }), { v: 3, cat: 'calico', dog: 'spotted', bunny: 'snow', pets: { 'example.bunny': { coat: 'snow' } } });
+  assert.deepEqual(R.parseLook(future), { v: 1, cat: 'smoke', dog: 'blacktan' }, 'показ — безопасный облик, сохранённый не меняется');
+  assert.deepEqual(R.lookRecord(future, { cat: 'tuxedo' }).cat, 'tuxedo', 'явный выбор известного облика заменяет только своё поле');
   // Две вкладки: одна меняет кота, другая (по свежему значению) — собаку; ничего не теряется.
   let key = null;
   key = JSON.stringify(R.lookRecord(key, { cat: 'tuxedo' }));

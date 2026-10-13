@@ -123,8 +123,10 @@ test('кнопка вызова: лапка без мордашки, точек 
   assert.match(ui, /if \(!relatedTarget && openers\(\)\.includes\(target\) && !shown\(target\)\) ui\.lostEntry = true;/);
   const layout = ui.slice(ui.indexOf('function applyLayout('), ui.indexOf('const hostBox'));
   assert.match(layout, /if \(lost\) fallbackFocus\(\)\?\.focus\(\{ preventScroll: true \}\);\s*else keepFocus\(focused\);/, 'и для лапки, а не только при смене места питомца');
-  // Запись присутствия — только из выбора (storePresence), не из чтения.
-  assert.equal([...ui.matchAll(/setItem\(K\.presence/g)].length, 1);
+  // Запись присутствия — только из выбора (storePresence), не из чтения. С PL02 все записи идут через writeKey (свежее
+  // чтение, отказ, повреждённое): setItem — только в нём.
+  assert.equal([...ui.matchAll(/writeKey\(K\.presence/g)].length, 1);
+  assert.equal([...ui.matchAll(/setItem\(/g)].length, 1);
 });
 
 test('кнопка вызова в стилях: не меньше 44×44, без анимации, при печати нет; видна одна по компоновке', async () => {

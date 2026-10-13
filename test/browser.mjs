@@ -1,6 +1,6 @@
 // Модуль питомца в браузере без сайта-источника: стенд test/stand.html — условный сайт со своей разметкой и своими
 // классами .btn, .muted, .visually-hidden, h2; свой мини-сервер отдаёт только стенд, файлы модуля (pet/) и фикстуру
-// версии 0.1.1 (test/fixtures/pet-0.1.1/). Проверки: подключение кота и собаки, уголок и «Поиграть», поглаживание,
+// версий 0.1.1 и 0.1.4 (test/fixtures/). Проверки: подключение кота и собаки, уголок и «Поиграть», поглаживание,
 // лапа, миска и мячик, клавиатура и Esc, следующий шаг сайта, сохранение настроек после перезагрузки, состояние и события
 // сайта (знаки, ступень, лакомство, тишина таймера), своё пространство имён хранения (localStorage и IndexedDB),
 // отключение (элементы, отметки html, слушатели document, window и медиазапросов, отложенные вызовы, события storage,
@@ -13,8 +13,9 @@
 // элементов, ни отметок, ни слушателей, сайт не тронут, методы неудачного экземпляра пустые, затем обычное подключение
 // без дублей; две копии модуля по разным адресам (/pet/ и /pet2/) — один питомец, отключение прежнего не задевает нового,
 // отложенное прежней копии молчит; версия 0.1.1 (/old/) — новая копия отказывает; стили сайта до и после CSS модуля и
-// подключения — минимальный сайт и сайт с общими правилами button, input, h2, dialog. Часы — page.clock (таймеры модуля —
-// по runFor). Запуск: npm run test:browser (нужен установленный Google Chrome).
+// подключения — минимальный сайт и сайт с общими правилами button, input, h2, dialog; сохранность данных (PL02) —
+// test/browser-storage.mjs. Часы — page.clock (таймеры модуля — по runFor). Запуск: npm run test:browser (нужен
+// установленный Google Chrome).
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
@@ -22,11 +23,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
+import { storageQa } from './browser-storage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 // Версия 0.1.1 (до реестра страницы) — фикстура: те же файлы, что выпуск 0.1.1 (test/fixtures/pet-0.1.1/README.md).
 const OLD = path.join(root, 'test', 'fixtures', 'pet-0.1.1');
+// Версия 0.1.4 (до PL02) — фикстура для смешанных версий хранения (test/fixtures/pet-0.1.4/README.md).
+const OLD14 = path.join(root, 'test', 'fixtures', 'pet-0.1.4');
 const K = storageKeys('stand');
 const START = new Date('2026-10-11T10:00:00');
 const DAY = '2026-10-11';
@@ -57,15 +61,16 @@ window.qaReady = true;
 </script></body></html>`;
 
 // Мини-сервер стенда: / — стенд, /readme — пример из README, /pet/<файл>.mjs|css — модуль, /pet2/… — те же файлы по
-// другому адресу (вторая копия модуля), /old/… — версия 0.1.1 (фикстура), /site/plain и /site/rules — страницы стилей;
-// остальное — 404.
+// другому адресу (вторая копия модуля), /old/… — версия 0.1.1, /old14/… — версия 0.1.4 (фикстуры), /site/plain и
+// /site/rules — страницы стилей; остальное — 404.
 function serve() {
   const server = createServer(async (req, res) => {
     const { pathname } = new URL(req.url, 'http://stand');
     // Пример из README без значка: запрос браузера не считается ошибкой страницы.
     if (pathname === '/favicon.ico') return res.writeHead(204).end();
-    const name = /^\/(pet|pet2|old)\/([\w-]+\.(mjs|css))$/.exec(pathname);
-    const file = pathname === '/' ? path.join(root, 'test', 'stand.html') : pathname === '/readme' ? 'readme.html' : pathname.startsWith('/site/') ? 'site.html' : name ? path.join(name[1] === 'old' ? OLD : path.join(root, 'pet'), name[2]) : '';
+    const name = /^\/(pet|pet2|old|old14)\/([\w-]+\.(mjs|css))$/.exec(pathname);
+    const dir = { old: OLD, old14: OLD14 }[name?.[1]] ?? path.join(root, 'pet');
+    const file = pathname === '/' ? path.join(root, 'test', 'stand.html') : pathname === '/readme' ? 'readme.html' : pathname.startsWith('/site/') ? 'site.html' : name ? path.join(dir, name[2]) : '';
     try {
       const body = file === 'readme.html' ? await readmeExample() : file === 'site.html' ? (['/site/plain', '/site/rules'].includes(pathname) ? sitePage(pathname === '/site/rules') : null) : await readFile(file);
       if (body === null) throw new Error('нет');
@@ -1089,6 +1094,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await failures(browser, server.base, check);
     await copies(browser, server.base, check);
     await styles(browser, server.base, check);
+    await storageQa(browser, server.base, check, open);
   } finally {
     await server.close();
   }
