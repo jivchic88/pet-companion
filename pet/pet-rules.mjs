@@ -116,6 +116,19 @@ export function cleanName(value) {
 
 export const catName = (settings) => settings?.name || DEFAULT_NAME;
 
+// Увиденная ступень, понятная этой версии: -1 (ещё не отмечали) или ступень из STAGES.
+export const knownStage = (value) => Number.isInteger(value) && value >= -1 && value < STAGES.length;
+
+// В сохранённом объекте есть увиденная ступень, непонятная этой версии (больше известных — из более новой версии, не целое
+// число, другой тип). Показ — -1 (вещи по знакам), но это не «ещё не отмечали»: отметка, праздник и первое включение её не
+// трогают (pet.mjs, seenStage), запись её не заменяет (catRecord). Поля нет или -1 — обычное первое включение.
+export const unknownStage = (raw) => isRecord(raw) && 'seenStage' in raw && !knownStage(raw.seenStage);
+
+// Сохранённая увиденная ступень остаётся при правке patch: она непонятна этой версии или не меньше правки (ступень только
+// растёт — «открытые вещи не пропадают»). Сохранённой нет или она -1 и меньше — правка пишется.
+export const stageKept = (raw, patch) =>
+  'seenStage' in patch && (unknownStage(raw) || (knownStage(raw?.seenStage) && raw.seenStage >= (knownStage(patch.seenStage) ? patch.seenStage : -1)));
+
 // Любое сохранённое значение → корректные настройки. Повреждённое — по умолчанию; старая версия
 // и версия из более новой вкладки — понятные поля сохраняются, остальное по умолчанию.
 export function normalizeSettings(raw) {
@@ -128,7 +141,7 @@ export function normalizeSettings(raw) {
     motion: MOTIONS.some(([id]) => id === raw.motion) ? raw.motion : base.motion,
     phrases: typeof raw.phrases === 'boolean' ? raw.phrases : base.phrases,
     hidden: raw.hidden === true,
-    seenStage: Number.isInteger(raw.seenStage) && raw.seenStage >= -1 && raw.seenStage < STAGES.length ? raw.seenStage : base.seenStage,
+    seenStage: knownStage(raw.seenStage) ? raw.seenStage : base.seenStage,
     greetDay: typeof raw.greetDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.greetDay) ? raw.greetDay : '',
   };
 }
@@ -179,8 +192,13 @@ function keepRecord(text, version, normalize, patch) {
   return out;
 }
 
-// Запись общих настроек и кота: изменённые поля ({ name?, accessory?, motion?, … }).
-export const catRecord = (text, patch = {}) => keepRecord(text, CAT_VERSION, normalizeSettings, patch);
+// Запись общих настроек и кота: изменённые поля ({ name?, accessory?, motion?, … }). Увиденная ступень правки — по свежему
+// сохранённому (stageKept): непонятную этой версии и не меньшую она не заменяет — ни первым включением, ни отметкой, ни
+// праздником, ни вместе с явной правкой из памяти страницы после отказа записи или повреждения.
+export function catRecord(text, patch = {}) {
+  const own = stageKept(readRecord(text).raw, patch) ? Object.fromEntries(Object.entries(patch).filter(([key]) => key !== 'seenStage')) : patch;
+  return keepRecord(text, CAT_VERSION, normalizeSettings, own);
+}
 
 // ---------- выбор напарника ----------
 // Ключ cat — общие настройки (движение, реплики, скрыт, увиденная ступень, день приветствия), имя и аксессуар кота; выбор

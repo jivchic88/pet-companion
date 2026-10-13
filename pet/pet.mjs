@@ -64,6 +64,7 @@ const initial = () => ({
   shownHidden: false, // показано ли место «спрятан» (renderAll); сравнивается со свежим «скрыт»
   settings: R.companionView(R.defaultSettings(), R.defaultCompanion()),
   unsaved: { cat: {}, companion: {} }, // поля, которые не удалось записать (до перезагрузки страницы)
+  stageUnknown: false, // сохранённая увиденная ступень непонятна этой версии (R.unknownStage; readCat, seenStage)
   director: R.createDirector(),
   reduced: null,
   dock: null,
@@ -210,8 +211,13 @@ const keyState = (key) => {
 
 // ---------- настройки ----------
 
+// Увиденная ступень из памяти уступает свежей сохранённой, которую запись всё равно не заменит (R.stageKept): непонятной
+// этой версии (её восстановила другая вкладка или сайт) или не меньшей. Непонятная сохранённая — ui.stageUnknown.
 function readCat() {
-  return R.normalizeSettings({ ...readStored(K.cat, R.parseSettings), ...ui.unsaved.cat });
+  const raw = readStored(K.cat, rawOf);
+  if (R.stageKept(raw, ui.unsaved.cat)) delete ui.unsaved.cat.seenStage;
+  ui.stageUnknown = R.unknownStage(raw);
+  return R.normalizeSettings({ ...raw, ...ui.unsaved.cat });
 }
 
 function readCompanion() {
@@ -715,15 +721,20 @@ function stopScene() {
 // Всего (marks), за сегодня (today), предел дня (limit — только для подписи).
 const progress = () => ({ marks: 0, today: 0, ...O.progress?.() });
 
+// Увиденная ступень для первого включения, отметки, точки «новое» и праздника. Сохранённая непонятна этой версии — как
+// увиденная выше всех известных: ничего не отмечается и не празднуется, сохранённое не переписывается; вещи — по знакам
+// (progressInfo получает показ — -1).
+const seenStage = () => (ui.stageUnknown ? R.STAGES.length : ui.settings.seenStage);
+
 function refreshInfo() {
   const p = progress();
   ui.info = R.progressInfo(p.marks, ui.settings.seenStage);
   ui.treat = R.treatState(R.localDay(), fedDay(), p.today);
-  if (ui.settings.seenStage < 0) {
+  if (seenStage() < 0) {
     // Первое включение: существующая практика учитывается молча — без исторических наград. Неявная запись.
     updateSettings({ seenStage: ui.info.stage }, true);
   }
-  const fresh = ui.info.stage > ui.settings.seenStage;
+  const fresh = ui.info.stage > seenStage();
   for (const button of openers()) {
     // У кнопки вызова точки нет.
     const call = button.hasAttribute('data-cat-call');
@@ -1357,7 +1368,7 @@ function nameHtml() {
 
 // «Новое в уголке»: вещи и аксессуары, открытые после увиденной ступени.
 function freshText(fresh) {
-  const accessories = R.unlockedBetween(ui.settings.seenStage, ui.info.stage, ui.kind).accessories;
+  const accessories = R.unlockedBetween(seenStage(), ui.info.stage, ui.kind).accessories;
   const names = [...fresh, ...accessories].map((item) => ITEM_NAMES[item] ?? item);
   return names.length ? `Новое в уголке: ${names.join(', ')}.` : '';
 }
@@ -1589,11 +1600,11 @@ function renderSheet(fresh = []) {
 }
 
 // Вещи, которых ещё не видели (подсветка в сцене), — от увиденной ступени до текущей.
-const unseenItems = () => (ui.info.stage > ui.settings.seenStage ? R.unlockedBetween(ui.settings.seenStage, ui.info.stage, ui.kind).items : []);
+const unseenItems = () => (ui.info.stage > seenStage() ? R.unlockedBetween(seenStage(), ui.info.stage, ui.kind).items : []);
 
 // Уголок открыт и всё видно — новая ступень увидена: точка на питомце гаснет, праздника нет.
 function markSeen() {
-  if (ui.info.stage <= ui.settings.seenStage) return;
+  if (ui.info.stage <= seenStage()) return;
   updateSettings({ seenStage: ui.info.stage }, true);
   refreshInfo();
 }
@@ -2938,11 +2949,11 @@ function saved(detail) {
   // Новая ступень — один раз на всех вкладках этого браузера: seenStage записывается сразу. Радость и новая вещь — одно
   // событие: вещь показывается продолжением радости. В «Поиграть» и редакторе уголок скрыт: без праздника и отметки —
   // «Новое в уголке» при возврате (syncSheet, markSeen).
-  const stage = R.stageToCelebrate(outcome, ui.settings.seenStage);
+  const stage = R.stageToCelebrate(outcome, seenStage());
   const celebrate = ui.play || ui.room ? null : stage;
   let follow = null;
   if (celebrate !== null) {
-    const { items, accessories } = R.unlockedBetween(Math.max(outcome.stageBefore, ui.settings.seenStage), celebrate, ui.kind);
+    const { items, accessories } = R.unlockedBetween(Math.max(outcome.stageBefore, seenStage()), celebrate, ui.kind);
     // Неявная запись: подтверждённое занятие не поручение заменить повреждённые настройки.
     updateSettings({ seenStage: celebrate }, true);
     refreshInfo();

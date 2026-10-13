@@ -4,7 +4,8 @@
 // повреждено, отказ чтения, более новая схема) — неявные записи повреждённого не трогают, после отказа загрузки экземпляр
 // ничего не пишет (счётчик setItem), отказ записи и переполнение — честно и без потери прочитанного; день сценки в
 // IndexedDB и её копия; две вкладки, пространства имён и смешанные версии — настоящая 0.1.4 из неизменяемой фикстуры
-// (/old14/, test/fixtures/pet-0.1.4/) фиксирует предел, а не маскирует его. Отказы — управляемые обёртки Storage, без пауз.
+// (/old14/, test/fixtures/pet-0.1.4/) фиксирует предел, а не маскирует его; увиденная ступень, непонятная этой версии, —
+// во всех неявных путях и в памяти правок (stages). Отказы — управляемые обёртки Storage, без пауз.
 // Запуск — в составе npm run test:browser (test/browser.mjs).
 import { isDeepStrictEqual } from 'node:util';
 import { storageKeys } from '../pet/pet-rules.mjs';
@@ -612,10 +613,195 @@ async function tabs(browser, base, check, open) {
   }
 }
 
+// Подключить, когда у сайта уже есть знаки (первое включение решается при подключении, а stand.set требует подключённого
+// питомца): прогресс сайта — window.qaProgress. progressTo — новые знаки и update(); practiced — занятие, давшее знак
+// (marks уже с ним), без сценки (Math.random — мимо шанса).
+const mountWith = (page, ns, marks, today = 0) =>
+  page.evaluate(
+    ([storage, m, t]) => {
+      window.qaProgress = { marks: m, today: t, limit: 3 };
+      window.stand.mount({ storage, progress: () => window.qaProgress });
+    },
+    [ns, marks, today],
+  );
+const progressTo = (page, marks, today) =>
+  page.evaluate(
+    ([m, t]) => {
+      Object.assign(window.qaProgress, { marks: m, today: t });
+      window.stand.pet.update();
+    },
+    [marks, today],
+  );
+const practiced = (page, marks, today, key) =>
+  page.evaluate(
+    ([m, t, entry]) => {
+      Math.random = () => 0.99;
+      Object.assign(window.qaProgress, { marks: m, today: t });
+      window.stand.pet.notify('saved', { key: entry, counted: true });
+    },
+    [marks, today, key],
+  );
+// Ступень по знакам, точка «новое» на питомце, «Новое в уголке» (открытый уголок) и объявление праздника.
+const stageView = (page) =>
+  page.evaluate(() => ({
+    stage: document.querySelector('#cat-dock [data-cat-stage]')?.textContent ?? '',
+    fresh: (document.querySelector('#cat-dock .cat-dock-btn')?.getAttribute('aria-label') ?? '').includes('есть новая вещь'),
+    note: document.getElementById('cat-sheet')?.open ? (document.querySelector('[data-cat-fresh]:not([hidden])')?.textContent ?? '') : '',
+    told: document.getElementById('cat-live')?.textContent ?? '',
+  }));
+
+// I: увиденная ступень, непонятная этой версии (из более новой версии, не число), в валидном объекте (проверка Codex PL02):
+// показ безопасный, неявные пути (подключение, приветствие, update, занятие с новой ступенью, уголок, повторное
+// подключение, событие другой вкладки) её не пишут; явные правки меняют свои поля; память правок после повреждения, отказа
+// чтения и переполнения не переносит потерю на следующую запись. Контроль: нет ключа, нет поля, -1 — первое включение молча.
+async function stages(browser, base, check, open) {
+  const label = 'хранение: непонятная ступень';
+  const { context, page } = await open(browser, { viewport: { width: 1280, height: 900 } }, storageHooks);
+  const expected = [];
+  const closeCorner = async (target = page) => {
+    await target.keyboard.press('Escape');
+    await target.clock.runFor(3000);
+  };
+  try {
+    // Подключение, приветствие, занятие с новой ступенью, уголок и update, явные правки, повторное подключение.
+    for (const [i, { odd, greet }] of [{ odd: 8, greet: DAY }, { odd: 'future-stage', greet: '2026-10-01' }].entries()) {
+      const ns = `us${i}`;
+      const k = storageKeys(ns);
+      const what = `seenStage ${JSON.stringify(odd)}`;
+      const stored = { v: 3, name: 'Марс', accessory: 'crown', seenStage: odd, greetDay: greet, future: { a: 1 } };
+      await fresh(page, base);
+      await seed(page, { [k.cat]: stored });
+      await mountWith(page, ns, 2);
+      await page.clock.runFor(3000);
+      const greeted = greet === DAY ? stored : { ...stored, greetDay: DAY };
+      check(`${label}: ${what} — подключение ${greet === DAY ? 'ничего не пишет' : 'пишет только день приветствия'}; ступень, v 3, crown и future на месте`, same(await json(page, k.cat), greeted) && (await writes(page, `^${k.cat}$`)) === (greet === DAY ? 0 : 1), await raw(page, k.cat));
+      await practiced(page, 3, 1, `${ns}-1`);
+      await page.clock.runFor(200);
+      const after = await stageView(page);
+      await page.clock.runFor(3000);
+      check(`${label}: ${what} — занятие открыло «Освоился»: вещи по знакам, без праздника и точки «новое», ступень не понижена`, same(await json(page, k.cat), greeted) && after.stage === 'Освоился' && !after.fresh && !after.told.includes('открыта ступень'), JSON.stringify({ after, cat: await raw(page, k.cat) }));
+      await openCorner(page);
+      await progressTo(page, 9, 2);
+      const corner = await stageView(page);
+      check(`${label}: ${what} — уголок и update до «Нашего ритуала»: «Новое в уголке» нет, отметки нет`, same(await json(page, k.cat), greeted) && corner.note === '' && corner.stage === 'Наш ритуал', JSON.stringify({ corner, cat: await raw(page, k.cat) }));
+      await page.locator('input[name="cat-name"]').fill('Дымок');
+      await openSettings(page);
+      await page.locator('label:has(> input[name="cat-motion"][value="calm"])').click();
+      const named = { ...greeted, name: 'Дымок', motion: 'calm' };
+      check(`${label}: ${what} — явные имя и движение пишут свои поля, ступень на месте`, same(await json(page, k.cat), named), await raw(page, k.cat));
+      await closeCorner(page);
+      const written = await writes(page, `^${k.cat}$`);
+      await page.evaluate(() => window.stand.pet.destroy());
+      await mountWith(page, ns, 9, 2);
+      await page.clock.runFor(3000);
+      await openCorner(page);
+      await closeCorner(page);
+      check(`${label}: ${what} — после destroy новое подключение и уголок ничего не пишут`, same(await json(page, k.cat), named) && (await writes(page, `^${k.cat}$`)) === written, await raw(page, k.cat));
+    }
+
+    // Другая вкладка записала непонятную ступень: событие storage, затем неявные пути и независимая правка этой вкладки.
+    for (const [i, { start, brought }] of [
+      { start: { v: 1, name: 'Барсик', seenStage: 0, greetDay: DAY }, brought: { v: 3, name: 'Барсик', seenStage: 8, greetDay: DAY, future: 1 } },
+      // Ключ был повреждён: первое включение и приветствие — в памяти страницы; другая вкладка восстановила объект.
+      { start: '{', brought: { v: 3, name: 'Барсик', seenStage: 'future-stage', greetDay: '2026-10-01', future: 1 } },
+    ].entries()) {
+      const ns = `ut${i}`;
+      const k = storageKeys(ns);
+      const what = `другая вкладка, ${start === '{' ? 'после повреждения' : 'было 0'} → seenStage ${JSON.stringify(brought.seenStage)}`;
+      await fresh(page, base);
+      await seed(page, { [k.cat]: start });
+      await mountWith(page, ns, 2);
+      await page.clock.runFor(3000);
+      if (start === '{') expected.push(corrupt(k.cat));
+      const other = await tab(context, base);
+      await seed(other, { [k.cat]: brought });
+      await other.close();
+      await page.clock.runFor(100);
+      const before = await writes(page, `^${k.cat}$`);
+      await progressTo(page, 2, 0);
+      await practiced(page, 3, 1, `${ns}-1`);
+      await page.clock.runFor(3000);
+      await openCorner(page);
+      await progressTo(page, 9, 2);
+      check(`${label}: ${what} — update, занятие с новой ступенью и уголок не пишут`, (await writes(page, `^${k.cat}$`)) === before && same(await json(page, k.cat), brought), await raw(page, k.cat));
+      await page.locator('input[name="cat-name"]').fill('Дымок');
+      check(`${label}: ${what} — явное имя пишет только имя; ступень, v 3 и future на месте`, same(await json(page, k.cat), { ...brought, name: 'Дымок' }), await raw(page, k.cat));
+      await closeCorner(page);
+    }
+
+    // Память правок: неявная ступень не записалась (повреждение, отказ чтения, переполнение); сайт восстановил объект с
+    // непонятной ступенью на этой же странице (события storage нет); следующая явная запись уносит свои поля, не ступень.
+    const restored = (seenStage) => ({ v: 3, name: 'Марс', seenStage, greetDay: DAY, future: { a: 1 } });
+    // deny: 'set' — setItem cat бросает с подключения (первое включение и приветствие — в памяти); 'get' — getItem cat бросает
+    // после подключения (отметка ступени при открытии уголка — в памяти).
+    const memory = [
+      { what: 'повреждение', start: '{', deny: '', odd: 8 },
+      { what: 'отказ чтения при отметке', start: { v: 1, seenStage: 0, greetDay: DAY }, deny: 'get', odd: 'future-stage' },
+      { what: 'переполнение', start: null, deny: 'set', odd: 8 },
+    ];
+    for (const [i, { what, start, deny, odd }] of memory.entries()) {
+      const ns = `uq${i}`;
+      const k = storageKeys(ns);
+      const pattern = `^${k.cat}$`;
+      await fresh(page, base);
+      if (start) await seed(page, { [k.cat]: start });
+      if (deny === 'set') await setQa(page, { denySet: pattern });
+      await mountWith(page, ns, 3, 1);
+      await page.clock.runFor(3000);
+      if (start === '{') expected.push(corrupt(k.cat));
+      if (deny === 'get') await setQa(page, { denyGet: pattern });
+      // Уголок: отметка «Освоился» (неявная) — в памяти, пока запись невозможна.
+      await openCorner(page);
+      const pending = await note(page, '[data-cat-store]');
+      await seed(page, { [k.cat]: restored(odd) });
+      await setQa(page, { denyGet: '', denySet: '' });
+      await page.locator('input[name="cat-name"]').fill('Дымок');
+      check(`${label}: ${what}, затем объект с seenStage ${JSON.stringify(odd)} — явное имя не уносит ступень из памяти`, same(await json(page, k.cat), { ...restored(odd), name: 'Дымок' }) && /повреждены|не получается/.test(pending), JSON.stringify({ pending, cat: await raw(page, k.cat) }));
+      await openSettings(page);
+      await page.locator('label:has(> input[name="cat-motion"][value="calm"])').click();
+      await closeCorner(page);
+      await page.evaluate(() => window.stand.pet.destroy());
+      await mountWith(page, ns, 9, 2);
+      await page.clock.runFor(3000);
+      await openCorner(page);
+      await closeCorner(page);
+      check(`${label}: ${what} — движение, затем новое подключение и уголок: ступень ${JSON.stringify(odd)} на месте`, same(await json(page, k.cat), { ...restored(odd), name: 'Дымок', motion: 'calm' }), await raw(page, k.cat));
+    }
+
+    // Контроль: нет ключа, нет поля, известный -1 — первое включение молча отмечает текущую ступень (знаки 9 — «Наш ритуал»)
+    // без исторического праздника; следующая новая ступень празднуется и отмечается.
+    for (const [i, { what, start }] of [
+      { what: 'ключа нет', start: null },
+      { what: 'поля seenStage нет', start: { v: 2, name: 'Барсик', greetDay: DAY, future: 1 } },
+      { what: 'seenStage -1', start: { v: 1, seenStage: -1, greetDay: DAY } },
+    ].entries()) {
+      const ns = `uc${i}`;
+      const k = storageKeys(ns);
+      await fresh(page, base);
+      if (start) await seed(page, { [k.cat]: start });
+      await mountWith(page, ns, 9, 0);
+      await page.clock.runFor(3000);
+      const first = await stageView(page);
+      check(`${label}: контроль, ${what} — первое включение отметило «Наш ритуал» молча (без праздника и точки «новое»)`, same(await json(page, k.cat), { ...(start ?? { v: 1 }), seenStage: 2, greetDay: DAY }) && first.stage === 'Наш ритуал' && !first.fresh && first.told === '', JSON.stringify({ first, cat: await raw(page, k.cat) }));
+      await practiced(page, 18, 1, `${ns}-1`);
+      await page.clock.runFor(200);
+      const next = await stageView(page);
+      await page.clock.runFor(3000);
+      check(`${label}: контроль, ${what} — новая ступень «Уютный штаб» празднуется и отмечается`, (await json(page, k.cat)).seenStage === 3 && next.told.includes('открыта ступень «Уютный штаб»'), JSON.stringify({ next, cat: await raw(page, k.cat) }));
+    }
+    errorsOk(check, label, [page], expected);
+  } catch (error) {
+    check(`${label}: сценарий выполнен`, false, error.stack);
+  } finally {
+    await context.close();
+  }
+}
+
 export async function storageQa(browser, base, check, open) {
   await keep(browser, base, check, open);
   await room(browser, base, check, open);
   await scenes(browser, base, check, open);
   await cases(browser, base, check, open);
   await tabs(browser, base, check, open);
+  await stages(browser, base, check, open);
 }

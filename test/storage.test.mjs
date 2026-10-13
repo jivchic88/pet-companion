@@ -1,8 +1,8 @@
 // Сохранность данных (PL02): функции записи каждого ключа — свежее сохранённое как есть + только изменённые известные
 // поля; неизвестные поля, вложенные данные, неизвестные ID и непонятные значения известных полей, данные другого
-// животного и больший номер схемы не теряются. Чтение различает «ключа нет» и «повреждено»; повреждённая запись дня
-// сценки — не свободный день. Путь записи настоящего экземпляра (mountPet, неявные записи, отказы, смешанные версии) —
-// test/browser.mjs, группа «хранение».
+// животного и больший номер схемы не теряются; непонятная увиденная ступень не заменяется, понятная не понижается.
+// Чтение различает «ключа нет» и «повреждено»; повреждённая запись дня сценки — не свободный день. Путь записи настоящего
+// экземпляра (mountPet, неявные записи, отказы, смешанные версии) — test/browser.mjs, группа «хранение».
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as P from '../pet/pet-place.mjs';
@@ -35,6 +35,25 @@ test('cat: правка меняет только своё поле; неизв�
   assert.deepEqual(R.catRecord(null, { name: '<b>Кот</b>', answer: 'текст ответа', v: 7 }), { v: 1, name: 'bКот/b' });
   // Ключа нет или повреждён — запись только из изменённых полей; показ остальных — по умолчанию.
   for (const text of [null, '{', '[1]', 'null']) assert.deepEqual(R.catRecord(text, { greetDay: DAY }), { v: 1, greetDay: DAY }, String(text));
+});
+
+// Проверка Codex PL02 (2026-10-13): показ непонятной ступени — -1, и первое включение записывало её поверх оригинала.
+test('cat: увиденную ступень, непонятную этой версии, правка не заменяет; понятная только растёт', () => {
+  for (const odd of [8, R.STAGES.length, 'future-stage', 1.5, -2, null, { at: 3 }]) {
+    const stored = JSON.stringify({ v: 3, name: 'Марс', accessory: 'crown', seenStage: odd, greetDay: DAY, future: { a: 1 } });
+    const raw = JSON.parse(stored);
+    assert.equal(R.parseSettings(stored).seenStage, -1, `показ безопасный: ${JSON.stringify(odd)}`);
+    // Первое включение, отметка при открытии и праздник — неявные правки ступени — ничего не меняют.
+    for (const stage of [-1, 0, 1, R.STAGES.length - 1]) assert.deepEqual(R.catRecord(stored, { seenStage: stage }), raw, `${JSON.stringify(odd)} ← ${stage}`);
+    // Явная правка вместе с памятью страницы (ступень и приветствие после отказа записи): свои поля — новые, ступень прежняя.
+    assert.deepEqual(R.catRecord(stored, { seenStage: 0, greetDay: '2026-10-12', name: 'Дымок', motion: 'calm' }), { ...raw, greetDay: '2026-10-12', name: 'Дымок', motion: 'calm' }, JSON.stringify(odd));
+  }
+  // Понятная ступень не понижается правкой из памяти; большая пишется.
+  const known = JSON.stringify({ v: 1, seenStage: 2, future: 1 });
+  assert.deepEqual(R.catRecord(known, { seenStage: 1, name: 'Дымок' }), { v: 1, seenStage: 2, future: 1, name: 'Дымок' });
+  assert.deepEqual(R.catRecord(known, { seenStage: 3 }), { v: 1, seenStage: 3, future: 1 });
+  // Ключа нет, повреждён, поля нет, известный -1 — обычное первое включение: ступень пишется.
+  for (const text of [null, '{', 'null', JSON.stringify({ v: 1, name: 'Барсик' }), JSON.stringify({ v: 1, seenStage: -1 })]) assert.equal(R.catRecord(text, { seenStage: 2 }).seenStage, 2, String(text));
 });
 
 test('companion: неизвестный вид остаётся до явного выбора; имя собаки не трогает её аксессуар, вложенное и других животных', () => {
