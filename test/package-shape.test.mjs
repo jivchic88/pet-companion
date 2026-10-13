@@ -76,8 +76,14 @@ test('граф ядра: pet/core/** импортирует только pet/cor
   await walk('core/index.mjs');
   await walk('core/storage.mjs');
   assert.deepEqual([...seen].sort(), files);
-  // Ядро без обращений к браузеру (исполнение проверяет test/core.test.mjs с глобалами-ловушками).
-  for (const file of files) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto)\b|\bfetch\b/, file);
+  // Ядро без обращений к браузеру (исполнение проверяет test/core-globals.test.mjs с глобалами-ловушками). Сеть — вызов
+  // fetch(…) или обращение .fetch / ["fetch"]; само слово fetch — имя сценки собаки «приносит мячик» (данные 0.1.4).
+  for (const file of files) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto)\b|\bfetch\s*\(|\.fetch\b|\[\s*['"]fetch['"]\s*\]/, file);
+  // PL04.1: время, случайность и задачи — только порты экземпляра; системные Date, Math.random и таймеры — в реализациях
+  // портов по умолчанию (core/ports.mjs и местный день core/day.mjs), не в правилах и сессии.
+  for (const file of files.filter((name) => !['core/ports.mjs', 'core/day.mjs'].includes(name))) {
+    assert.doesNotMatch(strip(await read(`pet/${file}`)), /\bDate\.now\b|\bnew Date\b|\bMath\.random\b|\b(setTimeout|setInterval|clearTimeout|requestAnimationFrame|queueMicrotask)\b/, file);
+  }
 });
 
 test('CSS: без внешних файлов; переменные темы --pet-* с рабочими значениями на :root', async () => {

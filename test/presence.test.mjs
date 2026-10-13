@@ -116,12 +116,14 @@ test('кнопка вызова: лапка без мордашки, точек 
   // на виду ли питомец и какой вид открыт (sight), и своего правила праздника не держит; поведение — test/core.test.mjs.
   const saved = ui.slice(ui.indexOf('function saved('), ui.indexOf('function failed('));
   assert.match(saved, /ui\.core\.notify\('saved', event, sight\(\)\)/);
-  assert.match(ui, /const sight = \(\) => \(\{ around: around\(\), view: ui\.room \? 'room' : ui\.play \? 'play' : ui\.sheet\?\.open \? 'corner' : null \}\);/);
+  // С PL04.1 открытый диалог — ui.sheetOpen (ставится до showModal); то же ядру при каждой смене (syncSight).
+  assert.match(ui, /const sight = \(\) => \(\{ around: around\(\), view: ui\.room \? 'room' : ui\.play \? 'play' : ui\.sheetOpen \? 'corner' : null \}\);/);
   assert.doesNotMatch(ui, /stageToCelebrate|doneOutcome|unlockedBetween|seenStage: /, 'праздник, ступень и её отметка — только в ядре');
   // Доработка 2026-10-11: закрытый по зову диалог очищается и при смене режима; фокус спрятанного медиазапросом входа
   // возвращается.
   const presence = ui.slice(ui.indexOf('function applyPresence('), ui.indexOf('function choosePresence('));
-  assert.match(presence, /else \{\s*calmDown\(\);\s*clearSheet\(\);\s*\}/);
+  // С PL04.1 «ничего не доигрывает» — ядро (syncSight: питомец ушёл); здесь — таймеры показа и очистка закрытого диалога.
+  assert.match(presence, /syncSight\(\);\s*if \(!around\(\)\) \{\s*dropShown\(\);\s*clearSheet\(\);\s*\}/);
   assert.match(ui, /if \(!relatedTarget && openers\(\)\.includes\(target\) && !shown\(target\)\) ui\.lostEntry = true;/);
   const layout = ui.slice(ui.indexOf('function applyLayout('), ui.indexOf('const hostBox'));
   assert.match(layout, /if \(lost\) fallbackFocus\(\)\?\.focus\(\{ preventScroll: true \}\);\s*else keepFocus\(focused\);/, 'и для лапки, а не только при смене места питомца');

@@ -27,7 +27,7 @@ const VERSION = pkg.version;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.json': 'application/json' };
 const START = new Date('2026-10-12T10:00:00');
 // Файлы pet/ — явный список, с внутренними папками ядра и веб-адаптера (входом пакета они не открыты).
-const CORE = ['core/day.mjs', 'core/errors.mjs', 'core/formats/legacy.mjs', 'core/index.mjs', 'core/pets.mjs', 'core/ports.mjs', 'core/round.mjs', 'core/stages.mjs', 'core/storage.mjs'];
+const CORE = ['core/day.mjs', 'core/director.mjs', 'core/errors.mjs', 'core/formats/legacy.mjs', 'core/index.mjs', 'core/pets.mjs', 'core/phrases.mjs', 'core/ports.mjs', 'core/round.mjs', 'core/session.mjs', 'core/stages.mjs', 'core/storage.mjs'];
 const RUNTIME = ['cat-art.mjs', ...CORE, 'css.d.mts', 'dog-art.mjs', 'dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'web/storage.mjs'];
 const EXPECTED = ['CHANGELOG.md', 'LICENSE', 'README.md', 'example.html', 'package.json', ...RUNTIME.map((file) => `pet/${file}`)].sort();
 // Ничего из этого не должно попасть в архив.
@@ -301,13 +301,13 @@ try {
     const pet = await import('${NAME}');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'core', 'pet/core/index.mjs', 'pet/core/storage.mjs', 'pet/web/storage.mjs'].map((name) => resolve('${NAME}/' + name));
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'core', 'pet/core/index.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/web/storage.mjs'].map((name) => resolve('${NAME}/' + name));
     console.log(JSON.stringify({ keys: Object.keys(pet).sort(), version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: project });
   const node = JSON.parse(stdout);
   check('Node: вход — mountPet, localDay, VERSION; версия пакета', JSON.stringify(node.keys) === '["VERSION","localDay","mountPet"]' && node.version === VERSION && node.day === '2026-10-12', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
-  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, ядро (pet-companion/core до PL05) и его файлы — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 7 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, ядро (pet-companion/core до PL05) и его файлы (в том числе сессия PL04.1) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 8 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
 
   // TypeScript: полное подключение, как в README, — вход и три стиля. У проекта нет общих деклараций CSS (declare module
   // '*.css', vite/client): стили находит сам пакет, иначе noUncheckedSideEffectImports даёт TS2307.

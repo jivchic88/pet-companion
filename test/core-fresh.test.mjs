@@ -24,7 +24,8 @@ function pair(initial, counts) {
   assert.equal(B.start(SEEN).ok, true);
   const got = { a: [], b: [] };
   const line = (update) => {
-    const effects = update.effects.filter((effect) => effect.type !== 'save').map((effect) => (effect.type === 'announce' ? `announce ${effect.text}` : effect.type));
+    // Сигналы конвейеру сценки (PL04.1, { type: 'scene' }) к решению по подтверждённому не относятся.
+    const effects = update.effects.filter((effect) => effect.type !== 'save' && effect.type !== 'scene').map((effect) => (effect.type === 'announce' ? `announce ${effect.text}` : effect.type));
     return [update.reason, update.snapshot.treat, update.snapshot.progress?.seenStage, update.snapshot.save.cat.status, update.snapshot.save.treat.status, ...effects].join(' ');
   };
   A.subscribe((update) => got.a.push(line(update)), { initial: false });

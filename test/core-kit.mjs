@@ -147,18 +147,110 @@ export function journal() {
   return { list, port: { warn: (message, error) => list.push(error === undefined ? message : `${message}: ${error?.message ?? error}`) } };
 }
 
-// Порты, которые срез PL03 вызывать не должен (реакций, покоя и полуночи в ядре ещё нет).
+// Порты random и scheduler без хода времени: random — 0.5; планирование записывается (tasks — ещё не отменённые задачи,
+// проверка может вызвать их сама). Проверки срезов PL03 и хранения: задачи PL04.1 там не срабатывают.
 export function idle() {
   const calls = { random: 0, scheduler: 0 };
+  const tasks = [];
   return {
     calls,
+    tasks,
     random: () => (calls.random++, 0.5),
     scheduler: {
-      later: () => {
+      later: (ms, task) => {
         calls.scheduler += 1;
-        return () => {};
+        const run = () => task();
+        tasks.push(run);
+        return () => {
+          const index = tasks.indexOf(run);
+          if (index >= 0) tasks.splice(index, 1);
+        };
       },
     },
+  };
+}
+
+// Часы с местным днём (PL04.1): state.now — мс эпохи, state.offset — смещение местного времени от UTC в минутах (смена
+// пояса или перевод часов — его изменение). day — местная дата момента, nextDay — начало следующего местного дня по
+// текущему смещению (длина дня не предполагается: смещение могло смениться). calls — обращения к порту.
+export function calendar(start = `${DAY}T10:00:00Z`, offset = 0) {
+  const state = { now: Date.parse(start), offset, calls: 0 };
+  const local = (at) => new Date(at + state.offset * 60_000);
+  const day = (at) => local(at).toISOString().slice(0, 10);
+  return {
+    state,
+    day,
+    port: {
+      now: () => (state.calls++, state.now),
+      day: (at) => (state.calls++, day(at)),
+      nextDay: (at) => {
+        state.calls++;
+        const next = Date.parse(`${day(at)}T00:00:00Z`) + 86_400_000 - state.offset * 60_000;
+        return Math.max(next, at + 1000);
+      },
+    },
+  };
+}
+
+// Ручной планировщик (PL04.1): задачи по моменту на часах time; advance(ms) — продвинуть время, срабатывают задачи до
+// цели по порядку (момент, порядок постановки), каждая — в свой момент; jump(ms) — скачок часов без срабатываний (сон
+// устройства, перевод часов). log — журнал «plan|cancel|run имя ms» при подписи задач (name — последняя метка, см.
+// label), live() — запланированные и не отменённые.
+export function planner(time) {
+  const items = [];
+  let order = 0;
+  const self = {
+    calls: 0,
+    runs: 0,
+    later(ms, task) {
+      self.calls += 1;
+      const item = { at: time.state.now + ms, ms, order: ++order, task, live: true };
+      items.push(item);
+      return () => {
+        item.live = false;
+      };
+    },
+    live: () => items.filter((item) => item.live).sort((a, b) => a.at - b.at || a.order - b.order),
+    // Ближайшая задача: через сколько мс.
+    nextIn: () => {
+      const [next] = self.live();
+      return next ? next.at - time.state.now : null;
+    },
+    advance(ms) {
+      const target = time.state.now + ms;
+      for (;;) {
+        const [next] = self.live();
+        if (!next || next.at > target) break;
+        next.live = false;
+        time.state.now = Math.max(time.state.now, next.at);
+        self.runs += 1;
+        next.task();
+      }
+      time.state.now = target;
+    },
+    jump(ms) {
+      time.state.now += ms;
+    },
+    // Все задачи с отменёнными (all) — проверка может вызвать отменённую или устаревшую задачу сама.
+    all: items,
+    port: null,
+  };
+  self.port = { later: (ms, task) => self.later(ms, task) };
+  return self;
+}
+
+// Заданная последовательность random — очередь: значения по порядку, затем fallback; push — следующие значения (после уже
+// взятых); taken — сколько взято всего.
+export function series(values = [], fallback = 0.5) {
+  const queue = [...values];
+  const state = { taken: 0 };
+  return {
+    state,
+    port: () => {
+      state.taken += 1;
+      return queue.length ? queue.shift() : fallback;
+    },
+    push: (...more) => queue.push(...more),
   };
 }
 
@@ -166,6 +258,19 @@ export function idle() {
 export function make(storage, { counts = host(), time = clock(), log = journal(), quiet = idle() } = {}) {
   const core = createPetCore({ storage, progress: counts.progress, clock: time.port, log: log.port, random: quiet.random, scheduler: quiet.scheduler });
   return { core, counts, time, log, quiet };
+}
+
+// Ядро PL04.1 с ручным временем: часы calendar, ручной планировщик, заданный random; журнал обновлений (seen) и эффектов.
+// storage — уже загруженный координатор (по умолчанию — свой веб в отдельном пространстве с initial).
+export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal() } = {}) {
+  const site = storage ? null : web(initial);
+  if (site) assert.equal(site.storage.load(), 'ready');
+  const plan = planner(time);
+  const core = createPetCore({ storage: storage ?? site.storage, progress: counts.progress, clock: time.port, random: random.port, scheduler: plan.port, log: log.port });
+  const seen = [];
+  core.subscribe((update) => seen.push(update), { initial: false });
+  const effects = (type) => seen.flatMap((update) => update.effects.filter((effect) => !type || effect.type === type));
+  return { ...(site ?? {}), core, counts, time, plan, random, log, seen, effects, state: () => core.getState() };
 }
 
 // Слушатель с журналом: name — подпись; record(update) → строка журнала.

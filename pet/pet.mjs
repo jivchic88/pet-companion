@@ -1,10 +1,12 @@
 // Питомец (кот или собака) — самостоятельный модуль: места рядом со страницей или лапка вызова, один диалог в трёх видах
 // (уголок, «Поиграть», «Обустроить уголок»), реакции и настройки. Подключение, интерфейс, хранение и ограничения — README
 // модуля. Ядро без DOM (core/index.mjs) — настройки и ключи cat, companion, look, treat, счёт и ступени, решения
-// подтверждённого занятия, кормления и приветствия; хранение — общий координатор (web/storage.mjs). Оболочка показывает
-// снимок ядра и проигрывает его решения. Рисунки — cat-art.mjs, dog-art.mjs; правила оболочки — pet-rules.mjs; место и
-// присутствие — pet-place.mjs; перенос — pet-move.mjs; жест сцены — pet-play.mjs; миска и мячик — pet-toys.mjs; комната —
-// pet-room.mjs. Хранит только предпочтения в браузере; данных сайта не меняет; ошибки здесь сайту не мешают.
+// подтверждённого занятия, кормления и приветствия, а с PL04.1 — реакции и время: режиссёр, память событий, тишина, покой,
+// полночь, видимость, реплики, проигрывание приветствия; хранение — общий координатор (web/storage.mjs). Оболочка
+// распознаёт события страницы, передаёт ядру смысловые входы и показывает его снимок и эффекты. Рисунки — cat-art.mjs,
+// dog-art.mjs; правила оболочки (редкие сценки до PL04.2) — pet-rules.mjs; место и присутствие — pet-place.mjs; перенос —
+// pet-move.mjs; жест сцены — pet-play.mjs; миска и мячик — pet-toys.mjs; комната — pet-room.mjs. Хранит только
+// предпочтения в браузере; данных сайта не меняет; ошибки здесь сайту не мешают.
 
 import { bowlArt, bowlMiniSvg, bowlToySvg, catSvg, miniItemSvg, sceneCatBox, sceneSvg, yarnArt } from './cat-art.mjs';
 import { createPetCore } from './core/index.mjs';
@@ -13,7 +15,7 @@ import * as R from './pet-rules.mjs';
 import * as P from './pet-place.mjs';
 import * as Room from './pet-room.mjs';
 import { cancelMove, initMover, moving, startMoveMode, stopMover, watchDrag } from './pet-move.mjs';
-import { cancelStroke, gesturing, hitsHtml, initPlay, release, watchStroke } from './pet-play.mjs';
+import { cancelStroke, hitsHtml, initPlay, release, watchStroke } from './pet-play.mjs';
 import { bowlHome, initToys, mountToys, moveBowl, resetToys, rollBall, unmountToys, watchToys } from './pet-toys.mjs';
 import { createWebStorage } from './web/storage.mjs';
 
@@ -70,7 +72,6 @@ const initial = () => ({
   look: R.defaultLook(), // показанный облик кота и собаки (снимок ядра)
   shownHidden: false, // показано ли место «спрятан» (renderAll); сравнивается со свежим «скрыт»
   settings: R.companionView(R.defaultSettings(), R.defaultCompanion()),
-  director: R.createDirector(),
   reduced: null,
   dock: null,
   side: null,
@@ -79,17 +80,11 @@ const initial = () => ({
   sheet: null,
   live: null,
   opener: null,
-  form: false,
-  resting: false,
-  lastActivity: Date.now(),
-  timers: {},
+  timers: {}, // таймеры отображения: конец микродвижения, подсказка «Поиграть», ввод (typing), имя, итог редактора
   said: new Set(), // ждущие объявления (announce)
-  lastPhrase: '',
-  scenePhrase: '',
+  reaction: 0, // номер реакции ядра, уже показанной (новая с той же позой в «Поиграть» — движения заново)
   petTimes: [],
   toyTimes: [], // полные реакции на миску и мячик (тот же лимит частоты, свой счёт)
-  tryOn: '',
-  mini: '',
   info: R.progressInfo(0),
   sheetStage: -1, // ступень, которую сейчас показывает открытый уголок (ui.info.stage может уйти вперёд)
   sheetY: 0,
@@ -104,8 +99,6 @@ const initial = () => ({
   placeLater: false, // изменение другой вкладки пришло во время переноса — применить после него
   media: [], // медиазапросы мест (P.PLACE_MEDIA)
   layoutTimer: 0, // раскладка после пачки изменений медиазапросов
-  saying: '', // реплика, которая сейчас в облаке (перерисованное место показывает её дальше)
-  sayingShort: '', // та же реплика без имени — для узкого облака боковой панели (сценка с длинным именем)
   arrive: null, // место, где идёт появление, и его слушатель конца анимации
   float: null, // компьютер: внизу экрана
   bar: null, // телефон: в нижней панели
@@ -119,6 +112,7 @@ const initial = () => ({
   playOutcome: '', // последний итог сцены (ключ playResults) — пересчитать текст при смене имени
   sceneNext: null, // редкая сценка после реакции занятия: { type, key, until } — до показа, отмены или срока
   sceneChecked: new Set(), // события, для которых сценку уже выбирали (одна попытка на событие)
+  sceneAfter: new Set(), // события, после реакции которых выбрана сценка (сигналы ядра scene start / end — только им)
   room: null, // редактор: { pos — черновик, live — идущий перенос, pick, saved, other, failed }
   roomY: 0, // прокрутка уголка до редактора — вернуть при выходе
   presence: 'always', // ключ presence: always | on-call
@@ -233,9 +227,11 @@ function infoOf(state) {
   return { marks: p.marks, stage: p.stage, computed: p.computed, current: R.STAGES[p.stage], next: R.STAGES[p.stage + 1] ?? null, toNext: p.toNext };
 }
 
-// Простые данные для решений ядра среза, которые зависят от ещё не перенесённого (PL04): питомец на виду (присутствие и
-// открытый диалог) и открытый вид.
-const sight = () => ({ around: around(), view: ui.room ? 'room' : ui.play ? 'play' : ui.sheet?.open ? 'corner' : null });
+// Простые данные для решений ядра, которые зависят от ещё не перенесённого (присутствие и виды — PL04.2): питомец на виду
+// (присутствие и открытый диалог) и открытый вид. syncSight — ядру при каждой смене (временный вход setSight; source
+// открытия: pet — уголок, call — вызов «по зову»).
+const sight = () => ({ around: around(), view: ui.room ? 'room' : ui.play ? 'play' : ui.sheetOpen ? 'corner' : null });
+const syncSight = (source = ui.source || 'pet') => ui.core.setSight({ ...sight(), source });
 
 // Команда ядра изменила настройки: показ оболочки — по снимку, подсказка о сохранении — по статусу ключей.
 function settingsChanged() {
@@ -322,7 +318,8 @@ function syncStoreNote() {
   if (note && note.textContent !== storeNote()) note.textContent = storeNote();
 }
 
-const motion = () => R.effectiveMotion(ui.settings, ui.reduced?.matches);
+// Режим движения — снимок ядра: итог выбора владельца и системного «уменьшить движение» (setReducedMotion).
+const motion = () => snap().prefs.effectiveMotion;
 const profile = () => R.profileOf(ui.kind);
 const name = () => R.companionName(ui.settings);
 const now = () => Date.now();
@@ -333,7 +330,10 @@ const art = (options) => (ui.kind === 'dog' ? dogSvg({ coat: ui.look.dog, ...opt
 const pickerArt = (kind, look, id, acc) =>
   (kind === 'dog' ? dogSvg : catSvg)({ id: `${kind}-${id}`, view: 'portrait', coat: look }).replace('data-acc="scarf"', `data-acc="${acc}"`);
 
-// ---------- таймеры ----------
+// ---------- таймеры отображения ----------
+// Смысловые задачи (конец реакции и продолжение, облако, покой и дремота, полночь, приветствие) — у ядра (порт scheduler).
+// Здесь — только показ: конец микродвижения, подсказка «Поиграть», проверка ухода из поля ввода (typing, 250 мс), имя,
+// итог редактора.
 
 function later(key, ms, fn) {
   clearTimeout(ui.timers[key]);
@@ -346,7 +346,7 @@ function stopTimers() {
   ui.timers = {};
 }
 
-// Смена напарника: декоративные таймеры прежнего не доигрывают на новом; конец тишины ввода (typing) — про страницу.
+// Смена напарника, фон: таймеры показа прежнего не доигрывают; проверка конца ввода (typing) — про страницу.
 function stopDecor() {
   for (const key of Object.keys(ui.timers)) {
     if (key === 'typing') continue;
@@ -355,92 +355,53 @@ function stopDecor() {
   }
 }
 
-// Полночь — служебная; декоративное — только пока питомец на виду (по зову — в открытом диалоге).
-const live = () => ui.mounted && !ui.settings.hidden && !document.hidden;
-const active = () => live() && around();
+// Питомец на странице: подключён, не спрятан, вкладка видна, на виду (по зову — в открытом диалоге). Нужен конвейеру
+// редкой сценки (до PL04.2); задачи покоя и полуночи решает ядро.
+const active = () => ui.mounted && !ui.settings.hidden && !document.hidden && around();
 
-function scheduleIdle() {
-  scheduleIdleBlink();
-  scheduleIdleMicro();
-  scheduleRest();
-  scheduleMidnight();
-}
-
-// Новый день в открытой вкладке: лакомство снова ждёт занятия, довольная поза — обычный покой.
-function scheduleMidnight() {
-  if (live()) later('midnight', R.msToMidnight(new Date(now())), () => {
-    refreshInfo();
-    syncTreat();
-    syncLearn();
-    paint();
-    scheduleMidnight();
-  });
-}
-
-function scheduleIdleBlink() {
-  if (active()) later('blink', R.blinkDelay(motion()), () => {
-    micro('blink');
-    scheduleIdleBlink();
-  });
-}
-
-function scheduleIdleMicro() {
-  if (active()) later('micro', R.microDelay(motion()), () => {
-    const kinds = R.microKinds(ui.kind);
-    if (motion() === 'normal' && !ui.form && !gesturing() && Math.random() < 0.18) play(R.request(ui.director, 'yawn', { now: now(), context: 'calm' }));
-    else micro(kinds[Math.floor(Math.random() * kinds.length)]);
-    scheduleIdleMicro();
-  });
-}
-
-function scheduleRest() {
-  if (!active() || ui.resting) return;
-  const left = R.REST_AFTER_MS - (now() - ui.lastActivity);
-  later('rest', Math.max(1000, left), () => {
-    if (now() - ui.lastActivity >= R.REST_AFTER_MS && !quiet() && !playing()) {
-      ui.resting = true;
-      paint();
-    } else scheduleRest();
-  });
-}
-
-// Небольшое движение в покое: только если питомец спокоен, не спит и ничем не занят.
-function micro(kind) {
-  if (!active() || motion() === 'none' || quiet() || playing() || ui.resting || gesturing()) return;
+// Одиночное движение покоя (моргание, ухо, хвост, взгляд, наклон) — эффект ядра micro: атрибут рисунков на ms.
+function showMicro(kind, ms) {
   for (const art of arts()) art.dataset.micro = kind;
-  later('micro-end', R.MICRO_MS[kind] ?? 600, () => {
+  later('micro-end', ms, () => {
     for (const art of arts()) delete art.dataset.micro;
   });
 }
 
 // ---------- поза ----------
 
-const quiet = () => ui.director.quiet.size > 0;
-const playing = () => Boolean(ui.director.current && ui.director.current.until > now());
+const quiet = () => snap().context.quiet.length > 0;
+// Реакция ядра идёт: её срок ещё не прошёл.
+const playing = () => {
+  const reaction = snap().pose.reaction;
+  return Boolean(reaction && reaction.until > now());
+};
 
 function arts() {
   return [...document.querySelectorAll('.cat-art[data-cat-managed]')];
 }
 
-// В «Поиграть» питомец спокоен и не засыпает (области поглаживания — для сидящего), на прямое действие откликается и в
-// тишине (reaction.explicit) — рисунки на странице тогда тихие; пока гладят — доволен и между откликами.
+// Поза — снимок ядра: на странице — pose.page (реакция, кроме сценки и прямого действия «Поиграть» в тишине, иначе покой,
+// внимание или дремота), в редакторе — pose.still. В «Поиграть» питомец спокоен и не засыпает (области поглаживания — для
+// сидящего): реакция (не сценка), пока гладят — довольный и между откликами (жест — отображение до PL04.3), иначе
+// pose.still. Редкая сценка — data-scene поверх позы покоя там, где её вариант читается.
 function paint() {
-  const reaction = playing() ? ui.director.current : null;
-  // Редкая сценка — data-scene поверх позы покоя; в сцене «Поиграть» её нет.
-  const scene = reaction && R.REACTIONS[reaction.type].scene ? reaction.type : '';
-  const content = ui.treat === 'fed';
-  const base = R.basePose({ quiet: quiet(), focus: ui.form, resting: ui.resting, content });
-  const still = ui.strokeHeld ? 'pet' : R.basePose({ content });
-  const acc = ui.tryOn || snap().pets[ui.kind].worn;
-  const move = motion();
+  const state = snap();
+  const { pose } = state;
+  const reaction = pose.reaction;
+  const scene = reaction?.scene ? reaction.type : '';
+  const own = reaction && !scene ? reaction.pose : '';
+  const still = ui.strokeHeld ? 'pet' : pose.still;
+  const acc = reaction?.tryOn || state.pets[ui.kind].worn;
+  const move = state.prefs.effectiveMotion;
+  const hushed = state.context.quiet.length > 0;
   // Тот же режим — всему интерфейсу питомца (pet.css).
   if (document.documentElement.dataset.catMotion !== move) document.documentElement.dataset.catMotion = move;
   for (const art of arts()) {
     const inPlay = Boolean(art.closest('.cat-play'));
     // В редакторе питомец спокоен: без реакций и сценок.
     const inRoom = Boolean(art.closest('.cat-room'));
-    const own = reaction && !scene && !inRoom && (inPlay || !(reaction.explicit && quiet())) ? reaction.pose : '';
-    art.dataset.pose = own || (inPlay ? still : inRoom ? R.basePose({ content }) : base);
+    const posed = inPlay ? own || still : inRoom ? pose.still : pose.page;
+    art.dataset.pose = posed;
     // Только там, где сценка читается: клубок — у целого питомца (уголок открыт — портрет за ним остаётся в покое).
     if (scene && !inPlay && !inRoom && R.sceneTypes(ui.kind, art.dataset.view === 'full').includes(scene)) art.dataset.scene = scene;
     else delete art.dataset.scene;
@@ -449,59 +410,43 @@ function paint() {
     else delete art.dataset.toward;
     art.dataset.acc = acc;
     art.dataset.motion = move;
-    if (move === 'normal' && (inPlay || inRoom || !quiet()) && !document.hidden) art.dataset.breathe = '';
+    if (move === 'normal' && (inPlay || inRoom || !hushed) && !document.hidden) art.dataset.breathe = '';
     else delete art.dataset.breathe;
-    if (own || scene) delete art.dataset.micro;
+    if ((own && posed === own && !inRoom) || scene) delete art.dataset.micro;
   }
 }
 
 // ---------- реплики ----------
+// Реплику выбирает ядро: phrase — облако на странице (компьютер — рядом с питомцем в боковой панели и внизу экрана;
+// телефон — без текста в панелях, реплики — в уголке), scenePhrase — под сценой открытого вида. Узкое облако не растёт
+// за край: не помещается фраза с длинным именем — её короткий вариант (phrase.short).
 
-// Компьютер — облако рядом с питомцем (боковая панель, внизу экрана); уголок — под сценой. Телефон — без текста в
-// панелях: питомец реагирует позой, реплики — в уголке.
-function say(text, short = '') {
-  if (!text || !ui.settings.phrases) return;
-  ui.lastPhrase = text;
-  // В тишине (явный отклик в сцене) облаков на странице нет — только реплика в диалоге.
-  if (!quiet()) {
-    ui.saying = text;
-    ui.sayingShort = short;
-    showSaying();
-    const side = ui.side?.querySelector('.cat-side-say');
-    if (side) {
-      side.textContent = text;
-      ui.side.classList.add('is-saying');
-    }
-  }
-  if (ui.sheet?.open) setScenePhrase(text);
-  later('say-end', 3200, hush);
-}
-
-// Облако реплики — по ui.saying, и после перерисовки места. Узкое облако боковой панели не растёт за её край: не
-// помещается фраза с длинным именем — без имени (ui.sayingShort).
 function showSaying() {
+  const phrase = snap().phrase;
   for (const box of [ui.dock?.querySelector('.cat-dock-say'), ui.float?.querySelector('.cat-float-say')]) {
-    if (!box || !ui.saying) continue;
+    if (!box) continue;
+    if (!phrase) {
+      box.classList.remove('is-saying');
+      continue;
+    }
     const bubble = box.querySelector('.cat-bubble');
-    bubble.textContent = ui.saying;
-    if (ui.sayingShort && bubble.offsetTop + bubble.offsetHeight > box.clientHeight) bubble.textContent = ui.sayingShort;
+    bubble.textContent = phrase.text;
+    if (phrase.short && bubble.offsetTop + bubble.offsetHeight > box.clientHeight) bubble.textContent = phrase.short;
     box.classList.add('is-saying');
   }
+  const side = ui.side?.querySelector('.cat-side-say');
+  if (phrase && side) {
+    side.textContent = phrase.text;
+    ui.side.classList.add('is-saying');
+  } else ui.side?.classList.remove('is-saying');
 }
 
-function hush() {
-  ui.saying = '';
-  ui.dock?.querySelector('.cat-dock-say')?.classList.remove('is-saying');
-  ui.float?.querySelector('.cat-float-say')?.classList.remove('is-saying');
-  ui.side?.classList.remove('is-saying');
-}
-
-// Реплика под сценой уголка и в сцене «Поиграть».
-function setScenePhrase(text) {
-  ui.scenePhrase = text;
+// Реплика под сценой уголка и в сцене «Поиграть»; реплики выключены — скрыта.
+function showScenePhrase() {
+  const state = snap();
   for (const box of ui.sheet?.querySelectorAll('[data-cat-phrase]') ?? []) {
-    box.hidden = !text || !ui.settings.phrases;
-    box.querySelector('span').textContent = text;
+    box.hidden = !state.scenePhrase || !state.prefs.phrases;
+    box.querySelector('span').textContent = state.scenePhrase;
   }
 }
 
@@ -521,59 +466,28 @@ function announce(text) {
 }
 
 // ---------- реакции ----------
+// Проигрывает ядро (режиссёр, сроки, продолжения, реплика). Здесь — показ после каждого его обновления.
 
-function play(result) {
-  if (!result) return;
-  if (result.action === 'stop') {
-    clearTimeout(ui.timers.reaction);
-    endExtras();
-    hush();
-    paint();
-    return;
-  }
-  if (result.action !== 'play') return;
-  const reaction = result.reaction;
-  // Реакция занятия ждала ввода, диктовки или таймера — её сценка через тишину не переносится.
-  if (reaction.after && ui.sceneNext?.key === reaction.after && R.sceneWaited(ui.sceneNext, now())) ui.sceneNext = null;
-  ui.resting = false;
-  ui.tryOn = reaction.tryOn ?? '';
-  showMini(reaction.mini ?? '');
-  // Та же поза в сцене (гладят дальше) — её движения заново (data-again).
-  for (const art of ui.sheet?.querySelectorAll('.cat-play .cat-art') ?? []) if (art.dataset.pose === reaction.pose) art.toggleAttribute('data-again');
+function render() {
   paint();
-  const group = reaction.phrases ?? R.REACTIONS[reaction.type].phrases;
-  if (reaction.say) say(reaction.say, reaction.sayShort);
-  else if (group) say(R.pickPhrase(group, { last: ui.lastPhrase, stage: ui.info.stage, kind: ui.kind }));
-  later('reaction', Math.max(50, reaction.until - now()), () => {
-    endExtras();
-    const next = R.finish(ui.director, now());
-    if (next.action === 'play') play(next);
-    else {
-      paint();
-      // Реакция занятия доиграла — может начаться редкая сценка.
-      if (reaction.after) sceneSoon(reaction.after);
-    }
-    scheduleRest();
-  });
+  showSaying();
+  showMini();
+  showScenePhrase();
 }
 
-function endExtras() {
-  ui.tryOn = '';
-  showMini('');
-}
-
-// Новая вещь или миска рядом с питомцем (боковая панель, внизу экрана) на время реакции.
-function showMini(item) {
-  ui.mini = item;
+// Новая вещь или миска рядом с питомцем (боковая панель, внизу экрана) на время реакции — её поле mini; рисунок вещи
+// заменяется, только когда вещь другая.
+const miniShown = new WeakMap();
+function showMini() {
+  const item = snap().pose.reaction?.mini ?? '';
   for (const slot of [ui.dock, ui.float].map((box) => box?.querySelector('.cat-dock-mini'))) {
     if (!slot) continue;
-    slot.innerHTML = item === 'ball' ? ballMiniSvg() : item === 'bowl' || item === 'bowl-empty' ? bowlMiniSvg({ full: item === 'bowl' }) : item ? miniItemSvg(item) : '';
+    if (miniShown.get(slot) !== item) {
+      slot.innerHTML = item === 'ball' ? ballMiniSvg() : item === 'bowl' || item === 'bowl-empty' ? bowlMiniSvg({ full: item === 'bowl' }) : item ? miniItemSvg(item) : '';
+      miniShown.set(slot, item);
+    }
     slot.classList.toggle('is-on', Boolean(item));
   }
-}
-
-function contextNow() {
-  return ui.form ? 'focus' : 'calm';
 }
 
 // ---------- редкие сценки после занятия ----------
@@ -581,14 +495,25 @@ function contextNow() {
 // Питомец виден целиком: открытый уголок (сцена комнаты) или место на странице; иначе — портрет.
 const sceneFull = () => Boolean(ui.sheet?.open) || ui.layout?.view === 'full';
 
-// Решается при подтверждённом занятии — один раз на событие; начнётся после его реакции (sceneSoon), если она не ждала
-// тишины (play). Попытка — { type, key, day, at, until } до показа, отмены или срока.
+// Решается при подтверждённом занятии — один раз на событие; начнётся после его реакции (сигнал ядра scene end), если она
+// не ждала тишины (сигнал scene start). Попытка — { type, key, day, at, until } до показа, отмены или срока. Выбор и
+// резервирование дня — отображение до PL04.2; реакцию сценки играет ядро.
 function sceneFor(key, outcome, celebrate, at) {
   const day = R.localDay();
   // Хранилище не прочиталось при подключении — сценки нет (её день записывать нельзя).
   const type = offline() ? '' : R.pickScene({ key, checked: ui.sceneChecked, outcome, celebrate, day, record: readStored(K.scene, R.parseScene), kind: ui.kind, available: R.sceneTypes(ui.kind, sceneFull()) });
   ui.sceneNext = type ? { type, key, day, at, until: at + R.SCENE_FRESH_MS } : null;
+  if (type) ui.sceneAfter.add(key);
   return type;
+}
+
+// Сигналы ядра о реакции события key (эффект scene): start — реакция началась (ждала ввода, диктовки или таймера —
+// сценка через тишину не переносится), end — доиграла и ничего не продолжилось (сценка может начаться), cancel —
+// тишина, фон, другой питомец, «скрыть», новое движение (ждущая не начнётся).
+function sceneCue({ step, key }) {
+  if (step === 'cancel') ui.sceneNext = null;
+  else if (step === 'start' && ui.sceneAfter.has(key) && ui.sceneNext?.key === key && R.sceneWaited(ui.sceneNext, now())) ui.sceneNext = null;
+  else if (step === 'end' && ui.sceneAfter.delete(key)) sceneSoon(key);
 }
 
 // «Поиграть» и редактор — занятость: сценки нет.
@@ -628,27 +553,25 @@ function sceneSoon(key) {
     if (record) copy = { day: record.day, by: record.by, ...(ui.kind === 'cat' ? { cat: record.cat } : {}) };
     return record;
   };
+  // Показ — реакция сценки в ядре (без анимации — статичная поза; текст облака — имя и действие).
   const show = () => {
-    const at = now();
-    play(R.request(ui.director, next.type, { now: at, context: contextNow(), extra: { say: R.sceneText(next.type, name()), sayShort: R.sceneText(next.type), ...(motion() === 'none' ? { until: at + R.REACTIONS[next.type].still } : {}) } }));
-    shown = ui.director.current;
+    const result = ui.core.react(next.type, { extra: { say: R.sceneText(next.type, name()), sayShort: R.sceneText(next.type) } });
+    shown = result.ok && result.played ? result.id : null;
   };
   void R.sceneTurn(sceneIdb(), keys.db, decide, show).then(
     safe((result) => {
       if (ui !== owner || !ui.mounted) return;
       if (result === 'shown') writeKey(keys.scene, (text) => R.sceneRecord(text, copy), true);
-      else if (result === 'lost' && shown && ui.director.current === shown) stopScene();
+      else if (result === 'lost' && shown && snap().pose.reaction?.id === shown) stopScene();
     }),
   );
 }
 
-// Отмена (тишина, ввод, ручное действие, смена вида, облика, места или движения, «Поиграть», перенос): ждущая не
-// начнётся, идущая останавливается — поза покоя без data-scene и мячика; прерванная не возобновляется.
+// Отмена отображением (ввод, ручное действие, смена вида, облика или места, «Поиграть», редактор, перенос): ждущая не
+// начнётся, идущая останавливается в ядре — поза покоя без data-scene и мячика; прерванная не возобновляется.
 function stopScene() {
   ui.sceneNext = null;
-  if (!playing() || !R.REACTIONS[ui.director.current.type].scene) return;
-  ui.director.current = null;
-  play({ action: 'stop' });
+  ui.core?.stopScene();
 }
 
 // ---------- прогресс: знаки от сайта ----------
@@ -882,7 +805,7 @@ function applyLayout({ explicit = false } = {}) {
     refreshInfo();
     // Идущая реакция продолжается и на перерисованном месте: реплика и маленькая вещь.
     showSaying();
-    showMini(ui.mini);
+    showMini();
     paint();
     if (explicit) settle();
   }
@@ -906,7 +829,8 @@ function settle() {
     box.classList.add('is-arriving');
     for (const type of ['animationend', 'animationcancel']) box.addEventListener(type, done);
   }
-  play(R.request(ui.director, 'settle', { now: now(), context: contextNow() }));
+  // «Устроился» — декоративный отклик ядра: в тишине и поверх другой реакции не играет.
+  ui.core.react('settle');
 }
 
 function endArrive() {
@@ -933,7 +857,7 @@ function choosePlace(id) {
   if (!P.placeIds(device).includes(id)) return;
   const saved = storePlace({ [device]: { place: id } });
   ui.place = readPlace();
-  ui.lastActivity = now();
+  ui.core.activity();
   applyLayout({ explicit: true });
   announce(`Место: ${P.placeTitle(device, id).toLowerCase()}.${ui.layout.moved ? ` Сейчас там нет места — питомец временно ${P.placeTitle(device, ui.layout.at).toLowerCase()}.` : ''}${saved ? '' : ' Не сохранилось в этом браузере — действует до перезагрузки.'}`);
 }
@@ -944,7 +868,7 @@ function chooseView(view) {
   if (!P.VIEWS.some((item) => item.id === view)) return;
   const saved = storePlace(P.viewPatch(ui.place, env(), view, readStored(K.place, rawOf)));
   ui.place = readPlace();
-  ui.lastActivity = now();
+  ui.core.activity();
   applyLayout({ explicit: true });
   const title = P.VIEWS.find((item) => item.id === view).title.toLowerCase();
   announce(`Вид: ${title}.${ui.layout.squeezed ? ' Сейчас здесь помещается только портрет.' : ''}${saved ? '' : ' Не сохранилось в этом браузере — действует до перезагрузки.'}`);
@@ -1187,7 +1111,7 @@ function keepView(edge, change) {
 
 // Переход к шагу: уголок закрывается без возврата фокуса и прокрутки — их ставит сайт.
 function goLearn(event, link) {
-  ui.lastActivity = now();
+  ui.core.activity();
   if (!O.go) {
     closeSheet({ restore: false });
     return;
@@ -1267,7 +1191,7 @@ function chooseCoat(value) {
   const result = ui.core.setAppearance({ coat: value });
   if (!result.ok) return;
   ui.look = lookOf(snap());
-  ui.lastActivity = now();
+  ui.core.activity();
   applyCoat();
   announce(`Облик: ${R.coatTitle(kind, value).toLowerCase()}.${result.save.status === 'failed' ? ' Не сохранился в этом браузере — действует до перезагрузки.' : ''}`);
 }
@@ -1423,9 +1347,10 @@ function applyPresence() {
   cancelMove('presence');
   const focused = focusedControl();
   renderAll();
-  if (around()) scheduleIdle();
-  else {
-    calmDown();
+  // На виду — задачи покоя заново, ушёл (по зову и закрыт) — ничего не доигрывает: решает ядро.
+  syncSight();
+  if (!around()) {
+    dropShown();
     clearSheet();
   }
   syncPresenceBox();
@@ -1435,7 +1360,7 @@ function applyPresence() {
 function choosePresence(mode) {
   if (P.presenceOf(mode) !== mode || mode === ui.presence) return;
   const saved = storePresence(mode);
-  ui.lastActivity = now();
+  ui.core.activity();
   applyPresence();
   announce(`${P.PRESENCES.find((item) => item.id === mode).title}.${saved ? '' : ' Не сохранилось в этом браузере — действует до перезагрузки.'}`);
 }
@@ -1537,7 +1462,7 @@ function renderSheet(fresh = []) {
   ui.sheet.querySelector('[data-cat-body]').innerHTML = bodyHtml(fresh);
   ui.sheetStage = ui.info.stage;
   paintCorner();
-  setScenePhrase(ui.scenePhrase);
+  showScenePhrase();
   paint();
 }
 
@@ -1614,8 +1539,9 @@ function syncTreat({ focus = false } = {}) {
   if (focus || had) act.firstElementChild?.focus({ preventScroll: true });
 }
 
-// «Покормить»: решение и запись — ядро (день заново, отметка до реакции — второго лакомства нет; объявление — его эффект
-// по итогу записи). Отказ (сегодня ещё нет занятия, уже угостили — другая вкладка, полночь) — карточка по свежему счёту.
+// «Покормить»: решение, запись и реакция «ест» → «доволен» — ядро (день заново, отметка до реакции — второго лакомства
+// нет; объявление — его эффект по итогу записи). Отказ (сегодня ещё нет занятия, уже угостили — другая вкладка,
+// полночь) — карточка по свежему счёту.
 function feed() {
   const result = ui.core.feed(sight());
   if (!result.ok) {
@@ -1626,9 +1552,6 @@ function feed() {
   }
   showProgress();
   syncTreat({ focus: true });
-  ui.lastActivity = now();
-  ui.resting = false;
-  if (result.reaction) play(R.request(ui.director, result.reaction.type, { now: now(), key: result.reaction.key, context: 'calm', extra: result.reaction.extra }));
   paint();
 }
 
@@ -1652,7 +1575,8 @@ function syncNamePick({ chips = false, offer = false } = {}) {
 function pickName(value) {
   const chosen = R.cleanName(value);
   if (!chosen) return;
-  ui.core.setName(chosen);
+  // Выбор готового имени — отклик named в ядре (пауза повтора 4 с), и когда имя то же.
+  ui.core.setName(chosen, { pick: true });
   settingsChanged();
   const page = R.namePageOf(ui.kind, chosen);
   const turn = page !== ui.namePage;
@@ -1663,7 +1587,6 @@ function pickName(value) {
   const chip = [...(ui.sheet?.querySelectorAll('[data-cat-names] [data-cat-name-pick]') ?? [])].find((item) => item.dataset.catNamePick === chosen);
   if (chip && document.activeElement !== chip) chip.focus({ preventScroll: true });
   announce(`Имя: ${name()}.`);
-  play(R.request(ui.director, 'named', { now: now(), context: contextNow() }));
 }
 
 // «Другие имена»: следующая страница подборки по кругу; фокус остаётся на этой кнопке.
@@ -1703,6 +1626,8 @@ function syncKindNames() {
 }
 
 // source (до закрытия): pet — уголок и markSeen; call — сразу «Поиграть», вид до showModal, без markSeen и реакций.
+// Открытие — ядру (setSight до разметки): реплика вида по позе до пробуждения, пробуждение, задачи покоя (по зову — все,
+// пока вызван), движение «заметил гостя» (не при вызове).
 function openSheet(opener, source = 'pet') {
   if (!ui.sheet || ui.sheet.open || ui.settings.hidden) return;
   stopScene();
@@ -1715,14 +1640,13 @@ function openSheet(opener, source = 'pet') {
   ui.look = lookOf(snap());
   if (coat() !== was) applyCoat();
   refreshInfo();
-  ui.scenePhrase = ui.settings.phrases ? R.pickPhrase(ui.resting ? 'rest' : 'scene', { last: ui.lastPhrase, stage: ui.info.stage, kind: ui.kind }) : '';
-  ui.lastPhrase = ui.scenePhrase || ui.lastPhrase;
+  ui.sheetOpen = true;
+  ui.core.setSight({ around: around(), view: call ? 'play' : 'corner', source });
   renderSheet(unseenItems());
   if (!call) markSeen();
   ui.sheetY = window.scrollY;
   document.documentElement.classList.add('cat-open');
   for (const button of openers()) button.setAttribute('aria-expanded', 'true');
-  ui.sheetOpen = true;
   if (call) {
     enterPlay();
     ui.playY = 0;
@@ -1731,17 +1655,6 @@ function openSheet(opener, source = 'pet') {
   // Прокрутку закрытого уголка браузер помнит — новое открытие сверху, со сценой.
   ui.sheet.querySelector('[data-cat-body]').scrollTop = 0;
   ui.sheet.querySelector(call ? '[data-cat-play-close]' : '[data-cat-close]').focus();
-  // Открыли уголок — питомец проснулся (только поза).
-  if (ui.resting) {
-    ui.resting = false;
-    paint();
-  }
-  ui.lastActivity = now();
-  // По зову движения покоя — только пока вызван.
-  if (ui.presence === 'on-call') scheduleIdle();
-  else scheduleRest();
-  // Повторный визит: питомец замечает гостя — ухо, взгляд или наклон головы.
-  if (!call) later('open-micro', 600, () => micro(profile().open[Math.random() < 0.5 ? 0 : 1]));
 }
 
 // Закрытие — один раз: событие close после закрытия кодом (переход, скрытие) уже ничего не делает и не возвращает
@@ -1755,9 +1668,10 @@ function closeSheet({ restore = true } = {}) {
   if (ui.sheet.open) ui.sheet.close();
   document.documentElement.classList.remove('cat-open');
   for (const button of openers()) button.setAttribute('aria-expanded', 'false');
-  // По зову питомец ушёл: ничего не доигрывает и не ждёт вызова; рисунка нет.
+  // По зову питомец ушёл: ничего не доигрывает и не ждёт вызова (ядро); рисунка нет.
+  syncSight();
   if (!around()) {
-    calmDown();
+    dropShown();
     clearSheet();
   }
   if (!restore) return;
@@ -1775,6 +1689,7 @@ const PLAY_HINT = 'Проведи по питомцу, чтобы поглади
 
 // Вызванная — ещё «Уголок».
 function playHtml() {
+  const said = snap().scenePhrase;
   return `<div class="cat-play-head">
       <h2 id="cat-play-title"><span class="${C.sr}">Поиграть: </span><span data-cat-play-name>${esc(name())}</span></h2>
       ${ui.source === 'call' ? `<button class="${C.close} cat-play-corner" type="button" data-cat-play-corner aria-label="Уголок ${profile().gen}">Уголок</button>` : ''}
@@ -1787,7 +1702,7 @@ function playHtml() {
     <div class="cat-play-stage" data-play-stage>
       <div class="cat-play-pet" data-play-pet data-kind="${ui.kind}">${managed(art({ id: `${ui.kind}-play`, view: 'full' }))}${hitsHtml(ui.kind)}</div>
       <span class="cat-play-floor" data-play-floor aria-hidden="true"></span>
-      <p class="cat-scene-say cat-play-say" data-cat-phrase${ui.scenePhrase && ui.settings.phrases ? '' : ' hidden'}><span>${esc(ui.scenePhrase)}</span></p>
+      <p class="cat-scene-say cat-play-say" data-cat-phrase${said && ui.settings.phrases ? '' : ' hidden'}><span>${esc(said)}</span></p>
       <span class="cat-play-touch" data-play-touch aria-hidden="true"></span>
       <div class="cat-play-toys" aria-hidden="true">
         <span class="cat-play-toy" data-play-toy="bowl">${bowlToySvg(ui.treat)}</span>
@@ -1830,8 +1745,8 @@ function enterPlay() {
   renderPlay();
   ui.sheet.setAttribute('aria-labelledby', 'cat-play-title');
   ui.sheet.querySelector('[data-cat-play-close]').focus();
-  ui.resting = false;
-  ui.lastActivity = now();
+  // «Поиграть» будит (ядро).
+  syncSight();
   paint();
 }
 
@@ -1847,6 +1762,7 @@ function leavePlay({ restore = true } = {}) {
   delete ui.sheet.dataset.view;
   ui.sheet.setAttribute('aria-labelledby', 'cat-sheet-title');
   ui.sheet.querySelector('[data-cat-play-view]').innerHTML = '';
+  syncSight();
   paint();
   if (!restore) return;
   ui.sheet.querySelector('[data-cat-body]').scrollTop = ui.playY;
@@ -1897,7 +1813,7 @@ function showResult(key, { tell = true } = {}) {
     delete hint.dataset.nudge;
     hint.textContent = text;
     hint.dataset.result = '';
-    later('play-status', Math.max(900, (playing() ? ui.director.current.until : 0) - now()), resetHint);
+    later('play-status', Math.max(900, (playing() ? snap().pose.reaction.until : 0) - now()), resetHint);
   }
   if (tell) announce(text);
   return text;
@@ -1908,15 +1824,14 @@ function showResult(key, { tell = true } = {}) {
 function onToy({ toy, closer, toward }) {
   const at = now();
   const full = R.petMood(ui.toyTimes, at) === 'pet';
-  ui.lastActivity = at;
+  ui.core.activity();
   const type = full && toy === 'ball' ? 'ball' : full && closer ? 'sniff' : 'watch';
-  const result = R.request(ui.director, type, { now: at, context: 'calm', extra: { toward }, explicit: true });
-  if (result.action === 'play') {
-    ui.toyTimes = [...ui.toyTimes.filter((time) => at - time < 60_000), at];
-    play(result);
-  }
+  // Прямой отклик — режиссёр ядра (сменяет отклик на предмет и декоративное, более важное не обходит).
+  const result = ui.core.react(type, { explicit: true, extra: { toward } });
+  const played = Boolean(result.ok && result.played);
+  if (played) ui.toyTimes = [...ui.toyTimes.filter((time) => at - time < 60_000), at];
   syncBowl();
-  showResult(result.action !== 'play' ? `${toy}Moved` : toy === 'ball' ? 'ball' : type === 'sniff' ? 'sniff' : 'look');
+  showResult(!played ? `${toy}Moved` : toy === 'ball' ? 'ball' : type === 'sniff' ? 'sniff' : 'look');
 }
 
 // «Подвинуть миску» / «Вернуть миску» — по месту миски (фокус остаётся на кнопке).
@@ -1950,7 +1865,7 @@ function onStrokeEnd() {
   if (!ui.strokeHeld) return;
   ui.strokeHeld = false;
   paint();
-  if (playing()) later('play-status', ui.director.current.until - now(), resetHint);
+  if (playing()) later('play-status', snap().pose.reaction.until - now(), resetHint);
   else resetHint();
 }
 
@@ -1991,12 +1906,12 @@ function keepFocus(element) {
 function interact(type, quietType, { explicit = false } = {}) {
   const at = now();
   const mood = R.petMood(ui.petTimes, at);
-  ui.lastActivity = at;
-  const result = R.request(ui.director, mood === 'quiet' ? quietType : type, { now: at, context: 'calm', extra: mood === 'enough' ? { phrases: 'petEnough' } : {}, explicit });
-  if (!explicit || result.action === 'play') ui.petTimes = [...ui.petTimes.filter((time) => at - time < 60_000), at];
-  if (result.action !== 'play') return '';
-  play(result);
-  return mood;
+  ui.core.activity();
+  // Отклик — режиссёр ядра; лимит частоты (petTimes) — у отображения до PL04.3.
+  const result = ui.core.react(mood === 'quiet' ? quietType : type, { explicit, extra: mood === 'enough' ? { phrases: 'petEnough' } : {} });
+  const played = Boolean(result.ok && result.played);
+  if (!explicit || played) ui.petTimes = [...ui.petTimes.filter((time) => at - time < 60_000), at];
+  return played ? mood : '';
 }
 
 const pet = () => interact('pet', 'calmPet');
@@ -2085,12 +2000,12 @@ function enterRoom() {
   const saved = roomSaved(ui.sheetStage).pos;
   // touched — предметы, которые здесь передвигали (перенос, кнопки, «Вернуть обычную»): только их пишет «Сохранить».
   ui.room = { pos: { ...saved }, saved, touched: new Set(), pick: 'rest', live: null, other: false, failed: false };
+  // Редактор будит (ядро).
+  syncSight();
   ui.sheet.dataset.view = 'room';
   renderRoom();
   ui.sheet.setAttribute('aria-labelledby', 'cat-room-title');
   ui.sheet.querySelector('[data-room-pick="rest"]').focus();
-  ui.resting = false;
-  ui.lastActivity = now();
 }
 
 // Назад в уголок: перенос отменён, редактор пуст, комната — по сохранённой; restore — фокус на входе и прокрутка уголка.
@@ -2098,6 +2013,7 @@ function leaveRoom({ restore = true } = {}) {
   if (!ui.room) return;
   Room.cancelArrange('close');
   ui.room = null;
+  syncSight();
   delete ui.sheet.dataset.view;
   ui.sheet.setAttribute('aria-labelledby', 'cat-sheet-title');
   ui.sheet.querySelector('[data-cat-room-view]').innerHTML = '';
@@ -2238,28 +2154,27 @@ const roomHooks = {
   }),
 };
 
+// «Скрыть»: ядро снимает реакции, облако, сценку и все свои задачи (с полуночью), но помнит обработанные события, причины
+// тишины и паузы повторов до отключения (исправление Р1: прежде здесь создавался новый режиссёр). Здесь — вид, места,
+// таймеры показа (проверка конца ввода остаётся), объявление и фокус.
 function hideCat() {
   cancelMove('hide');
   ui.core.hide();
   settingsChanged();
   closeSheet({ restore: false });
   clearSheet();
-  stopTimers();
-  ui.director = R.createDirector();
+  stopDecor();
   ui.sceneNext = null;
-  ui.resting = false;
-  hush();
   renderAll();
   announce(`${name()} спрятан. Вернуть — «${returnLabel()}»${T.back}.`);
   fallbackFocus()?.focus({ preventScroll: true });
 }
 
+// «Показать»: покой и полночь заново — ядро (без приветствия); здесь — места, фокус, объявление.
 function showCat() {
   ui.core.show();
   settingsChanged();
-  ui.lastActivity = now();
   renderAll();
-  scheduleIdle();
   const owner = ui;
   const focusCat = () => ui === owner && ui.mounted && fallbackFocus()?.focus({ preventScroll: true });
   // «Показать …» в открытом диалоге сайта: тот при закрытии возвращает фокус на свою кнопку — питомец получает его после.
@@ -2324,14 +2239,15 @@ function onSheetChange(event) {
     syncPickerAcc();
     paint();
   } else if (field.name === 'cat-motion' && field.checked) {
+    // Новый режим: сценка отменена, интервалы покоя заново — ядро; здесь поза и режим рисунков.
     ui.core.setPreferences({ motion: field.value });
     settingsChanged();
-    restartIdle();
+    paint();
   } else if (field.name === 'cat-phrases') {
+    // Выключены — облако и реплика вида исчезают (ядро).
     ui.core.setPreferences({ phrases: field.checked });
     settingsChanged();
-    if (!field.checked) hush();
-    setScenePhrase(field.checked ? ui.scenePhrase : '');
+    render();
   }
 }
 
@@ -2348,31 +2264,25 @@ function onSheetFocusOut(event) {
   });
 }
 
-// Движение изменилось (настройка, системное «уменьшить движение», другая вкладка): поза заново, таймеры покоя — с новыми
-// интервалами. Реакция, реплика и конец микродвижения доигрывают по своим таймерам.
-function restartIdle() {
-  stopScene();
-  paint();
-  scheduleIdle();
-}
-
-// Системное «уменьшить движение»: режим пересчитан, выбор в настройках не меняется; подсказка в уголке — по факту.
+// Системное «уменьшить движение»: режим пересчитан в ядре (сценка отменена, интервалы покоя заново), выбор в настройках
+// не меняется; подсказка в уголке — по факту.
 function onReducedChange() {
-  restartIdle();
+  ui.core.setReducedMotion(Boolean(ui.reduced.matches));
+  paint();
   const note = ui.sheet?.querySelector('[data-cat-reduced]');
   if (note) note.hidden = !ui.reduced.matches;
 }
 
 // ---------- выбор напарника ----------
 
-// Выбрали в уголке: команда ядра (другие вкладки переключатся тоже), новый напарник здоровается.
+// Выбрали в уголке: команда ядра (другие вкладки переключатся тоже); прежний не доигрывает, новый здоровается (meet) —
+// ядро.
 function chooseKind(kind) {
   if (kind === ui.kind || !ui.core.setPet(kind).ok) return;
   settingsChanged();
   applyShown(kind);
   // Фокус — на выбранном (переключатель перерисован вместе с уголком): Tab и стрелки работают дальше.
   ui.sheet?.querySelector('input[name="cat-kind"]:checked')?.focus({ preventScroll: true });
-  if (!ui.settings.hidden) play(R.request(ui.director, 'meet', { now: now(), context: contextNow() }));
 }
 
 // Показать сохранённое: вид напарника и «скрыт» — по снимку ядра (оба ключа, с поглощёнными изменениями других вкладок).
@@ -2385,24 +2295,12 @@ function applyShown(kind = snap().pet.shown) {
   return true;
 }
 
-// Прежний напарник не доигрывает: таймеры, реакция и отложенная реакция, реплика, примерка и маленькая вещь снимаются;
-// тишина (ввод, диктовка, таймер) и уже отыгранные события (handled) остаются.
+// Прежний напарник (или ушедший по зову) не доигрывает на странице: таймеры показа и ждущая сценка снимаются. Реакцию,
+// отложенную, облако, примерку, вещь и задачи снимает ядро; тишина и уже отыгранные события (память ядра) остаются,
+// полночь ядро оставляет.
 function dropShown() {
   stopDecor();
-  ui.director.current = null;
-  ui.director.pending = null;
   ui.sceneNext = null;
-  endExtras();
-  hush();
-  ui.resting = false;
-  ui.lastActivity = now();
-  ui.lastPhrase = '';
-}
-
-// Питомец больше не на виду: ничего не доигрывает и не ждёт вызова; полночь остаётся.
-function calmDown() {
-  dropShown();
-  scheduleMidnight();
 }
 
 // Спрятали или вернули (возможно, вместе со сменой вида) в другой вкладке: места целиком по сохранённому, без
@@ -2415,10 +2313,8 @@ function setShown(kind, next) {
   dropShown();
   ui.kind = kind;
   ui.settings = next;
-  ui.scenePhrase = '';
   clearSheet();
   renderAll();
-  if (!next.hidden) scheduleIdle();
   keepFocus(focused);
 }
 
@@ -2434,7 +2330,6 @@ function switchKind(kind, next) {
   dropShown();
   ui.kind = kind;
   ui.settings = next;
-  ui.scenePhrase = memo && ui.settings.phrases ? R.pickPhrase('scene', { stage: ui.info.stage, kind }) : '';
   if (ui.settings.hidden) {
     // Спрятан: меняется только подпись «Показать …» — кнопки те же, фокус на месте.
     const back = ui.side?.querySelector('[data-cat-return]');
@@ -2453,7 +2348,6 @@ function switchKind(kind, next) {
   else clearSheet();
   if (ui.play) renderPlay();
   paint();
-  if (!ui.settings.hidden) scheduleIdle();
 }
 
 // Закрытый уголок нарисуется заново при открытии — прежний рисунок в нём не остаётся.
@@ -2515,15 +2409,8 @@ function restoreSheet(memo) {
 }
 
 // ---------- тихий режим и активность ----------
-
-function setQuiet(reason, on) {
-  if (ui.director.quiet.has(reason) === on) return;
-  if (on) stopScene();
-  const result = R.setQuiet(ui.director, reason, on, now());
-  if (on) hush();
-  if (result.action === 'play' || result.action === 'stop') play(result);
-  else paint();
-}
+// Распознавание ввода в поля страницы (focusin, focusout и проверка через 250 мс) и действий пользователя — здесь; тишина
+// (причина typing), её снятие, отложенная реакция, пробуждение и отсчёт покоя — ядро.
 
 const isTextField = (element) => Boolean(element?.matches?.(TEXT_INPUT)) && !element.closest('.cat-sheet');
 
@@ -2532,50 +2419,43 @@ function onFocusIn(event) {
   if (!isTextField(event.target)) return;
   // Ввод продолжился (и при уже идущей тишине) — сценка не начнётся и конца ввода не ждёт.
   stopScene();
-  setQuiet('typing', true);
+  ui.core.setContext({ typing: true });
 }
 
 // Фокус ушёл в никуда со спрятанного входа — вернёт applyLayout.
 function onFocusOut({ target, relatedTarget }) {
   if (!relatedTarget && openers().includes(target) && !shown(target)) ui.lostEntry = true;
   later('typing', 250, () => {
-    if (!isTextField(document.activeElement)) setQuiet('typing', false);
+    if (!isTextField(document.activeElement)) ui.core.setContext({ typing: false });
   });
 }
 
+// Действие пользователя (нажатие, клавиша, колесо, касание, прокрутка) — ядру: пробуждение, отсчёт покоя заново (не чаще
+// раза в 500 мс).
 function onActivity() {
-  const at = now();
-  if (at - ui.lastActivity < 500 && !ui.resting) return;
-  ui.lastActivity = at;
-  if (ui.resting) {
-    ui.resting = false;
-    paint();
-  }
-  if (active()) scheduleRest();
+  ui.core.activity();
 }
 
+// Фон и возврат — ядру (setVisible): в фоне реакция, облако, примерка, вещь, сценка и задачи сняты; при возврате —
+// дремота после долгого отсутствия, новый день и лакомство, задачи заново, без приветствия. Здесь — показ.
 function onVisibility() {
   document.documentElement.classList.toggle('cat-paused', document.hidden);
   if (document.hidden) {
-    // Реакция не доигрывается в фоне: примерка и маленькая вещь снимаются, поза — обычная; в сцене — подсказка.
-    stopTimers();
-    hush();
-    endExtras();
+    // В сцене — подсказка вместо итога; таймеры показа прежнего не доигрывают.
+    stopDecor();
     resetHint();
-    ui.director.current = null;
     ui.sceneNext = null;
+    ui.core.setVisible(false);
     return;
   }
+  ui.core.setVisible(true);
   if (!ui.mounted || ui.settings.hidden) return;
-  // Вернулись после долгого отсутствия — питомец успел задремать; проснётся от первого действия.
-  if (now() - ui.lastActivity >= R.REST_AFTER_MS && !quiet()) ui.resting = true;
   // Пока вкладка была в фоне, мог наступить новый день или другая вкладка — угостить; окно — измениться.
   applyLayout();
-  refreshInfo();
+  showProgress();
   syncTreat();
   syncLearn();
   paint();
-  scheduleIdle();
 }
 
 function onStorage(event) {
@@ -2623,19 +2503,36 @@ function views(state) {
   };
 }
 
-// Обновление ядра. Эффекты — всегда: объявления (кормление, праздник ступени) и предупреждение о повреждённом значении
-// ключа при загрузке. Изменение другой вкладки, поглощённое ядром (reason 'storage', docs/ARCHITECTURE.md § 8.6), — тихо,
-// как прежнее событие storage: облик, карточка лакомства, другой напарник или «скрыт», имя, реплики, движение, открытый
-// уголок. Так же приходит сохранённое до команды и найденное её сверкой (§ 5.5, шаг 1а): событие storage ещё не пришло
-// или его не будет (сайт восстановил значение на этой странице). Свои команды оболочка показывает сама после вызова.
+// Обновление ядра — каждое (команда, сработавшая задача ядра, изменение хранилища): поза, облако, вещь рядом и реплика вида
+// — по снимку (render); новая реакция с той же позой в «Поиграть» — её движения заново (data-again). Эффекты: объявления
+// (кормление, праздник ступени), предупреждение о повреждённом значении ключа при загрузке, одиночное движение покоя
+// (micro), сигналы конвейеру редкой сценки (scene). Изменение другой вкладки, поглощённое ядром (reason 'storage',
+// docs/ARCHITECTURE.md § 8.6), — ещё и тихо, как прежнее событие storage: облик, карточка лакомства, другой напарник или
+// «скрыт», имя, движение, открытый уголок (следствия для реакций и задач — ядро). Так же приходит сохранённое до команды и
+// найденное её сверкой (§ 5.5, шаг 1а). Остальное своё оболочка показывает после вызова.
 function onCore({ effects, reason }) {
   if (!ui.mounted) return;
+  const state = snap();
+  const reaction = state.pose.reaction;
+  if (reaction && reaction.id !== ui.reaction) {
+    ui.reaction = reaction.id;
+    // Та же поза в сцене (гладят дальше) — её движения заново.
+    for (const art of ui.sheet?.querySelectorAll('.cat-play .cat-art') ?? []) if (art.dataset.pose === reaction.pose) art.toggleAttribute('data-again');
+  }
+  render();
+  // Новый местный день (задача ядра): знаки, лакомство снова ждёт занятия, учебный шаг открытого уголка.
+  if (reason === 'midnight') {
+    showProgress();
+    syncTreat();
+    syncLearn();
+  }
   for (const effect of effects) {
     if (effect.type === 'announce') announce(effect.text);
     else if (effect.type === 'warning' && effect.code === 'corrupt') console.warn(corruptNote(K[effect.key]));
+    else if (effect.type === 'micro') showMicro(effect.kind, effect.ms);
+    else if (effect.type === 'scene') sceneCue(effect);
   }
   const was = ui.mirror;
-  const state = snap();
   ui.mirror = state;
   if (reason !== 'storage' || !was) return;
   const shown = views(was);
@@ -2654,16 +2551,10 @@ function onCore({ effects, reason }) {
   syncStoreNote();
   // Другая вкладка выбрала другого напарника, спрятала или вернула его — здесь так же, тихо.
   if (applyShown()) return;
-  const before = ui.settings;
   ui.settings = readSettings();
   showName();
-  // Реплики выключили в другой вкладке — показанные облака и реплика уголка исчезают сразу.
-  if (!ui.settings.phrases) {
-    hush();
-    setScenePhrase('');
-  }
-  if (before.motion !== ui.settings.motion) restartIdle();
-  paint();
+  // Реплики выключили или сменили движение в другой вкладке: облако и реплика вида, сценка и покой — ядро, показ — здесь.
+  render();
   // Открытый уголок согласован с сохранённым; ступень — если её подняла увиденная в другой вкладке (seenStage).
   syncControls();
   syncSheet();
@@ -2829,7 +2720,7 @@ function start(options) {
   });
   // Запоздалое close прошлой сессии не закрывает уже новую (вызвали сразу после закрытия).
   on(ui.sheet, 'close', safe(() => !ui.sheet.open && closeSheet({ restore: true })));
-  initPlay({ stroke: safe(onStroke), end: safe(onStrokeEnd), paw: safe(() => playAct('paw')), motion }, ui.abort.signal);
+  initPlay({ stroke: safe(onStroke), end: safe(onStrokeEnd), paw: safe(() => playAct('paw')), motion, busy: safe((on) => ui.core.setBusy(on)) }, ui.abort.signal);
   initToys({ done: safe(onToy), motion });
   watchStroke(ui.sheet.querySelector('[data-cat-play-view]'));
   watchToys(ui.sheet.querySelector('[data-cat-play-view]'));
@@ -2853,22 +2744,22 @@ function start(options) {
 
   ui.mounted = true;
   document.documentElement.classList.toggle('cat-paused', document.hidden);
-  // Ядро: первое включение (история — молча) и приветствие дня — решение и неявная запись ядра; спрятан и «по зову» — без
-  // приветствия. Отказ запуска (progress() сайта бросил) — отказ подключения: mountPet откатит всё созданное.
+  // До запуска ядро знает, что видно: системное «уменьшить движение», видимость вкладки, питомец на виду (по зову — нет).
   ui.presence = readPresence();
+  ui.core.setReducedMotion(Boolean(ui.reduced.matches));
+  ui.core.setVisible(!document.hidden);
+  ui.core.setSight({ around: P.petAround({ mode: ui.presence, open: false }), view: null });
+  // Ядро: первое включение (история — молча) и приветствие дня — решение и неявная запись; покой, полночь и приветствие
+  // (через 0,9 с; после паузы в два дня и больше — спокойное «рад, что ты здесь», без упрёков) — его задачи; спрятан и
+  // «по зову» — без приветствия. Отказ запуска (progress() сайта бросил) — отказ подключения: mountPet откатит всё.
   ui.starting = true;
-  const started = ui.core.start({ around: P.petAround({ mode: ui.presence, open: false }) });
+  const started = ui.core.start();
   ui.starting = false;
   if (!started.ok) throw ui.startError ?? new Error(started.error.message);
   ui.settings = readSettings();
   renderAll();
   if (ui.settings.hidden) return;
-  if (isTextField(document.activeElement)) setQuiet('typing', true);
-  scheduleIdle();
-  // Первое открытие за день — приветствие (решение ядра, один раз). После паузы в два дня и больше — спокойное «рад, что
-  // ты здесь», без упрёков. Проигрывание — здесь до PL04.1.
-  const greet = started.greet;
-  if (greet) later('greet', 900, () => play(R.request(ui.director, 'greet', { now: now(), key: `greet:${greet.day}`, context: contextNow(), extra: greet.welcome ? { phrases: 'welcome' } : {} })));
+  if (isTextField(document.activeElement)) ui.core.setContext({ typing: true });
 }
 
 // Журнал ядра — «Питомец: …» в консоли. Во время core.start предупреждение о сбое — причина отказа подключения (её
@@ -2888,6 +2779,7 @@ function coreWarn(owner, message, error) {
 function destroy() {
   ui.mounted = false;
   ui.sceneNext = null;
+  ui.sceneAfter.clear();
   const html = document.documentElement;
   for (const step of [
     () => ui.sheet?.open && ui.sheet.close(),
@@ -2919,41 +2811,35 @@ function update(flags) {
     syncSheet();
     return;
   }
-  const changed = 'focus' in flags && ui.form !== Boolean(flags.focus);
-  if ('focus' in flags) ui.form = Boolean(flags.focus);
-  for (const reason of ['timer', 'dictation', 'dialog']) {
-    if (!(reason in flags)) continue;
-    // Открылся важный диалог — перенос питомца отменяется.
-    if (reason === 'dialog' && flags.dialog) cancelMove('dialog');
-    setQuiet(reason, Boolean(flags[reason]));
-  }
-  if (changed) paint();
+  // Переданный флаг меняется, непереданный сохраняется (ядро: контекст и независимые причины тишины).
+  const context = {};
+  for (const key of ['focus', 'timer', 'dictation', 'dialog']) if (key in flags) context[key] = Boolean(flags[key]);
+  // Открылся важный диалог — перенос питомца отменяется.
+  if (context.dialog) cancelMove('dialog');
+  ui.core.setContext(context);
 }
 
-// Подтверждённое занятие (detail — { key, counted, hard, first }; null — запись не учебная). Решение — ядро: знаки
-// заново, первое включение, радость или поддержка, праздник новой ступени (не в «Поиграть» и редакторе) с отметкой
-// увиденной, продолжение с новой вещью, подсказка про миску; спрятан или «по зову» и закрыт — только числа. Здесь — показ
-// и проигрывание: числа, открытый уголок, редкая сценка (PL04.2) и реакция прежним режиссёром (повтор key — его память).
-// Событие без key — как 0.1.4: ключ String(detail.key).
+// Подтверждённое занятие (detail — { key, counted, hard, first }; null — запись не учебная). Решение и реакция — ядро:
+// знаки заново, первое включение, радость или поддержка (повтор key в экземпляре — без реакции), праздник новой ступени
+// (не в «Поиграть» и редакторе) с отметкой увиденной, продолжение с новой вещью, подсказка про миску; спрятан или «по зову»
+// и закрыт — только числа. Здесь — показ: числа, открытый уголок, выбор редкой сценки (до PL04.2). Событие без key — как
+// 0.1.4: ядру — ключ String(detail.key), сценки у него нет (pickScene по исходному key).
 function saved(detail) {
   const event = detail ? { key: String(detail.key), counted: Boolean(detail.counted), hard: Boolean(detail.hard), first: Boolean(detail.first) } : null;
+  const at = now();
   const result = ui.core.notify('saved', event, sight());
   ui.settings = readSettings();
   showProgress();
   if (!result.ok || !result.reaction) return;
-  const at = now();
   // Уголок открыли, пока занятие сохранялось: числа и ступень догоняют, праздник — реакцией.
   syncSheet();
-  // Редкая сценка — после этой реакции, если выпала и всё ещё уместна; праздник ступени её исключает.
-  const key = detail.key;
-  const after = sceneFor(key, result.scene.outcome, result.scene.stage, at) ? { after: key } : {};
-  play(R.request(ui.director, result.reaction.type, { now: at, key: result.reaction.key, context: contextNow(), extra: { ...result.reaction.extra, ...after } }));
+  // Редкая сценка — после этой реакции (сигнал ядра), если выпала и всё ещё уместна; праздник ступени её исключает.
+  sceneFor(detail.key, result.scene.outcome, result.scene.stage, at);
 }
 
-// Занятие не сохранилось: награды нет, только нейтральное ожидание (решение ядра); ошибку показывает сайт.
+// Занятие не сохранилось: награды нет, только нейтральное ожидание (решение и реакция — ядро); ошибку показывает сайт.
 function failed() {
-  const result = ui.core.notify('failed', null, sight());
-  if (result.ok && result.reaction) play(R.request(ui.director, result.reaction.type, { now: now(), context: contextNow() }));
+  ui.core.notify('failed', null, sight());
 }
 
 let current = null;

@@ -111,6 +111,7 @@ export function grab(event, el, on) {
   // Страницу пальцем не прокручивает touch-action области.
   event.preventDefault();
   Object.assign(one, { id: event.pointerId, el, on });
+  st.hooks?.busy?.(true);
   try {
     el.setPointerCapture(event.pointerId);
   } catch {
@@ -152,6 +153,7 @@ export function release(reason = 'cancel', event = null) {
     // захвата уже нет
   }
   Object.assign(one, { id: null, el: null, on: null });
+  st.hooks?.busy?.(false);
   const moved = on.end(reason, event);
   if (reason === 'up') {
     if (moved) swallowClick();
@@ -162,7 +164,8 @@ const st = { hooks: null, g: null, pet: null, kind: 'cat', rect: null, x: 0, y: 
 
 export const stroking = () => Boolean(st.g);
 
-// При подключении: hooks = { stroke({ first }) → отклик, paw() — касание лапы, end() — жест кончился, motion() }; signal
+// При подключении: hooks = { stroke({ first }) → отклик, paw() — касание лапы, end() — жест кончился, motion(), busy(on) —
+// жест указателем начат или кончился (поглаживание, предмет, перенос в редакторе: покой без движений) }; signal
 // снимает слушатели при отключении. Скрытая вкладка, изменение окна, уход со страницы — конец любого жеста сцены.
 export function initPlay(hooks, signal) {
   st.hooks = hooks;

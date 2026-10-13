@@ -44,22 +44,25 @@ test('создание без побочных действий: не пишет
   assert.equal(core.getState(), state, 'стабильная ссылка');
 });
 
-test('start: один раз — первое включение молча и приветствие дня; повторный — already-started; random и scheduler не нужны', () => {
+test('start: один раз — первое включение молча и приветствие дня; повторный — already-started; до start портов random и scheduler нет, запуск планирует задачи PL04.1', () => {
   const quiet = idle();
   const { core, json, store } = started({}, { counts: host(9, 0), quiet });
   // До start команды меняют состояние, реакций нет.
   assert.equal(core.setName('Пух').save.status, 'saved');
   const early = core.notify('saved', { key: 'e', counted: true }, SEEN);
   assert.deepEqual([early.ok, early.reacted, early.reaction], [true, false, null]);
+  assert.deepEqual(quiet.calls, { random: 0, scheduler: 0 }, 'до start — ни задач, ни случайности');
   const result = core.start(SEEN);
   assert.deepEqual([result.ok, result.greet], [true, { day: DAY, welcome: false }]);
   assert.deepEqual(json('cat'), { v: 1, name: 'Пух', seenStage: 2, greetDay: DAY }, 'первое включение (9 знаков — «Наш ритуал») и день приветствия');
   const state = core.getState();
   assert.deepEqual([state.status, state.progress.stage, state.progress.unseen, state.progress.fresh], ['running', 2, false, []], 'история без праздника');
   const writes = store.writes.length;
+  const planned = { ...quiet.calls };
+  assert.ok(planned.scheduler >= 5 && planned.random >= 2, `запуск: покой, полночь и приветствие — задачи, интервалы — random: ${JSON.stringify(planned)}`);
   assert.equal(core.start(SEEN).error.code, 'already-started');
   assert.equal(store.writes.length, writes);
-  assert.deepEqual(quiet.calls, { random: 0, scheduler: 0 });
+  assert.deepEqual(quiet.calls, planned, 'повторный start ничего не планирует');
 });
 
 test('destroy: синхронно и идемпотентно; последнее обновление — destroyed; команды — destroyed без эффектов; снимок стабилен', () => {
@@ -192,7 +195,8 @@ test('ступени 0, 3, 9, 18, 30: первое подключение мол
   const marks = host(8, 0);
   const second = make(site.storage, { counts: marks });
   const announced = [];
-  second.core.subscribe((update) => announced.push(...update.effects.filter((effect) => effect.type !== 'save')), { initial: false });
+  // Сигналы конвейеру сценки (PL04.1) — не решение праздника.
+  second.core.subscribe((update) => announced.push(...update.effects.filter((effect) => effect.type !== 'save' && effect.type !== 'scene')), { initial: false });
   second.core.start(SEEN);
   assert.equal(site.json('cat').seenStage, 1);
   marks.set(9, 1);
@@ -514,7 +518,8 @@ test('внутренний сбой до применения: progress() бро
     if (failing) throw new Error('сайт упал');
     return { marks: 3, today: 1 };
   };
-  const core = createPetCore({ storage: site.storage, progress, clock: time.port, log: log.port });
+  const quiet = idle();
+  const core = createPetCore({ storage: site.storage, progress, clock: time.port, log: log.port, random: quiet.random, scheduler: quiet.scheduler });
   core.start(SEEN);
   const state = core.getState();
   const writes = site.store.writes.length;

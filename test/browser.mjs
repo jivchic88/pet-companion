@@ -14,7 +14,8 @@
 // без дублей; две копии модуля по разным адресам (/pet/ и /pet2/) — один питомец, отключение прежнего не задевает нового,
 // отложенное прежней копии молчит; версия 0.1.1 (/old/) — новая копия отказывает; стили сайта до и после CSS модуля и
 // подключения — минимальный сайт и сайт с общими правилами button, input, h2, dialog; сохранность данных (PL02) —
-// test/browser-storage.mjs. Часы — page.clock (таймеры модуля — по runFor). Запуск: npm run test:browser (нужен
+// test/browser-storage.mjs; реакции и время на ядре (PL04.1, Р1 настоящими кнопками) — test/browser-life.mjs. Часы —
+// page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
 // установленный Google Chrome).
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -24,6 +25,7 @@ import { chromium } from 'playwright-core';
 import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
 import { coreQa, freshQa } from './browser-core.mjs';
+import { lifeQa } from './browser-life.mjs';
 import { storageQa } from './browser-storage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,12 +88,13 @@ function serve() {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ base: `http://127.0.0.1:${server.address().port}/`, close: () => new Promise((done) => server.close(done)) })));
 }
 
-// Только QA: сработавшие отложенные вызовы модуля (стек — /pet/pet.mjs) и созданные медиазапросы (для подсчёта слушателей).
+// Только QA: сработавшие отложенные вызовы модуля (стек — файл модуля /pet/…: оболочка и, с PL04.1, системный планировщик
+// ядра core/ports.mjs) и созданные медиазапросы (для подсчёта слушателей).
 function hooks() {
   const set = window.setTimeout.bind(window);
   window.qaPetFired = 0;
   window.setTimeout = (fn, ms = 0, ...args) => {
-    const pet = (new Error().stack ?? '').includes('/pet/pet.mjs');
+    const pet = /\/pet\/(?:[\w-]+\/)*[\w-]+\.mjs/.test(new Error().stack ?? '');
     return set((...rest) => {
       if (pet) window.qaPetFired += 1;
       if (typeof fn === 'function') fn(...rest);
@@ -300,7 +303,11 @@ async function desktop(browser, base, check, layout) {
     await page.clock.runFor(6000);
     check(`${label}: лакомство после занятия — отметка дня в своём ключе`, fed?.fedDay === DAY, JSON.stringify(fed));
 
-    // Тишина таймера сайта: реакция ждёт, после — играет.
+    // Тишина таймера сайта: реакция ждёт, после — играет. Случайность задана (0,99): сценка этого занятия не выпадает —
+    // иначе (25 %, так было и до PL04.1) она занимает день, и сценки занятия e3 ниже нет.
+    await page.evaluate(() => {
+      Math.random = () => 0.99;
+    });
     await page.evaluate(() => window.stand.pet.update({ timer: true }));
     await page.evaluate(() => window.stand.set(4, 2));
     await page.evaluate(() => window.stand.pet.notify('saved', { key: 'e2', counted: true }));
@@ -1105,6 +1112,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await storageQa(browser, server.base, check, open);
     await coreQa(browser, server.base, check, open);
     await freshQa(browser, server.base, check, open);
+    await lifeQa(browser, server.base, check, open, layout);
   } finally {
     await server.close();
   }

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPetCore } from '../pet/core/index.mjs';
-import { CORE_KEYS, DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
+import { CORE_KEYS, DAY, host, idle, journal, make, manual, spy, web } from './core-kit.mjs';
 
 const SEEN = { around: true };
 const MARS = { v: 1, name: 'Марс', seenStage: 0, greetDay: DAY };
@@ -264,7 +264,8 @@ test('повторный вход в фазе работы: команда из 
     if (mode === 'subscribe') core.subscribe((update) => list.push(`изнутри ${update.reason}`));
     return { marks: 0, today: 1 };
   };
-  core = createPetCore({ storage: site.storage, progress, log: log.port });
+  const quiet = idle();
+  core = createPetCore({ storage: site.storage, progress, log: log.port, random: quiet.random, scheduler: quiet.scheduler });
   core.start(SEEN);
   core.subscribe((update) => list.push(`снаружи ${update.reason}`), { initial: false });
   mode = 'command';
@@ -277,8 +278,9 @@ test('повторный вход в фазе работы: команда из 
   // Запись без события storage (другая вкладка до события, восстановление на странице) найдена сверкой перед командой — своим
   // обновлением storage; начальный снимок подписки из порта — в доставке этого же раунда, после него.
   assert.deepEqual(list, ['снаружи storage', 'изнутри initial'], 'начальный снимок подписки из порта — в доставке этого раунда');
-  const clockCore = createPetCore({ storage: site.storage, clock: { now: () => 0, day: () => (clockCore.setName('Часы').error.code === 'reentrant' ? DAY : 'нет'), nextDay: (at) => at + 1 } });
+  const clockCore = createPetCore({ storage: site.storage, random: quiet.random, scheduler: quiet.scheduler, clock: { now: () => 0, day: () => (clockCore.setName('Часы').error.code === 'reentrant' ? DAY : 'нет'), nextDay: (at) => at + 1 } });
   assert.equal(clockCore.start(SEEN).ok, true);
+  clockCore.destroy();
   mode = 'destroy';
   const result = core.refresh();
   assert.deepEqual([result.ok, core.status, list.at(-1)], [true, 'destroyed', 'изнутри destroyed']);
