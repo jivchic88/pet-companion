@@ -4,10 +4,12 @@
 // обратный случай; праздник уже увиденной, непонятной строки и непонятного числа ступени и нормальное открытие ступени;
 // приветствие, отметка уголка и явная правка, совпавшая с устаревшим кэшем; второе ядро; запоздалое storage; отказ
 // свежего чтения; отказ загрузки и отключённое ядро; асинхронный координатор, pending и destroy. Проверяются решение,
-// реакция и продолжение, эффекты, снимок и фактическое хранилище, а не только текст объявления. Данные синтетические.
+// реакция и продолжение, эффекты, снимок и фактическое хранилище, а не только текст объявления. Граница сверки и фазы
+// команды (повторная проверка PL03): destroy() из чтения сверки, команды из него (reentrant), исключение сверки до чтения
+// и после поглощения внешнего изменения, контроль — destroy() из progress() в фазе самой команды. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DAY, host, make, manual, web } from './core-kit.mjs';
+import { CORE_KEYS, DAY, host, make, manual, spy, web } from './core-kit.mjs';
 
 const SEEN = { around: true };
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
@@ -214,4 +216,192 @@ test('асинхронно: сверка перед командой ничег�
   await store.drain();
   assert.deepEqual([await seen.save.done, store.json('cat').seenStage], ['saved', 1]);
   assert.deepEqual([B.notify('saved', { key: 'one', counted: true }, SEEN).celebrate, store.waiting.length], [null, 0]);
+});
+
+// ---------- граница сверки и фазы команды ----------
+
+const MARS = { v: 1, name: 'Марс', seenStage: 0, greetDay: DAY };
+
+// Подключение, чья сверка бросает: fault.when — 'before' (до чтения), 'after' (после настоящей сверки) или null (обычная);
+// остальные методы — настоящего подключения.
+function faulty(storage, fault) {
+  return {
+    get status() {
+      return storage.status;
+    },
+    load: () => storage.load(),
+    connect() {
+      const client = storage.connect();
+      return {
+        ...client,
+        sync(keys) {
+          if (fault.when === 'after') client.sync(keys);
+          if (fault.when) throw new Error('sync fault');
+          client.sync(keys);
+        },
+      };
+    },
+  };
+}
+
+// Два запущенных ядра на одном веб-координаторе со шпионом (A — подключение a через faulty, B — b) и журнал: сверка,
+// чтения и записи хранилища, постановки, settle, поглощения, доставки; got — обновления слушателей.
+function edge(initial, { counts = host(1, 1), fault = { when: null } } = {}) {
+  const list = [];
+  const site = web(initial, { journal: list });
+  assert.equal(site.storage.load(), 'ready');
+  const watched = spy(site.storage, list, ['a', 'b']);
+  const A = make(faulty(watched, fault), { counts });
+  const B = make(watched, { counts });
+  assert.equal(A.core.start(SEEN).ok, true);
+  assert.equal(B.core.start(SEEN).ok, true);
+  const got = { a: [], b: [] };
+  const line = (update) => [update.reason, update.snapshot.status, update.snapshot.name.display, update.snapshot.treat].join(' ');
+  A.core.subscribe((update) => (got.a.push(line(update)), list.push(`deliver la ${update.reason}`)), { initial: false });
+  B.core.subscribe((update) => (got.b.push(line(update)), list.push(`deliver lb ${update.reason}`)), { initial: false });
+  list.length = 0;
+  const fresh = (who) => [`sync ${who}`, ...CORE_KEYS.map((name) => `getItem ${site.keys[name]}`)];
+  return { ...site, list, got, fresh, watched, A: A.core, B: B.core, logA: A.log.list, logB: B.log.list };
+}
+
+// Чтение хранилища, которое один раз (первым чтением следующей сверки) вызывает action.
+function once(s, action) {
+  const get = s.store.getItem;
+  let armed = true;
+  s.store.getItem = (key) => {
+    if (armed) {
+      armed = false;
+      action();
+    }
+    return get(key);
+  };
+}
+
+for (const [name, command] of [
+  ['setName', (core) => core.setName('После отключения')],
+  ['feed', (core) => core.feed(SEEN)],
+]) {
+  test(`граница сверки: destroy() из чтения сверки, затем ${name} не выполняется — destroyed без правки, write и эффектов; destroyed доставлен один раз; снимок стабилен; дальше — без действий; второе ядро живо`, () => {
+    const s = edge({ cat: MARS, treat: { v: 1, fedDay: '' } });
+    once(s, () => s.A.destroy());
+    const writes = s.store.writes.length;
+    const raw = [s.raw('cat'), s.raw('treat')];
+    const result = command(s.A);
+    assert.deepEqual(result, { ok: false, error: { code: 'destroyed', message: 'Питомец отключён.' } }, JSON.stringify(result));
+    // Сверка дочитана (подключение закрыто в конце её фазы), затем ни постановки, ни поглощения B, ни обновлений команды.
+    assert.deepEqual(s.list, [...s.fresh('a'), 'deliver la destroyed']);
+    assert.deepEqual([s.A.status, s.store.writes.length, [s.raw('cat'), s.raw('treat')]], ['destroyed', writes, raw]);
+    const state = s.A.getState();
+    assert.deepEqual([state.status, state.name.value, state.treat, state.save.cat.status, state.save.treat.status], ['destroyed', 'Марс', 'ready', 'saved', 'saved']);
+    assert.deepEqual(s.got, { a: ['destroyed destroyed Марс ready'], b: [] }, 'без объявления и реакции; B ничего не поглощал');
+    s.list.length = 0;
+    for (const again of [() => s.A.setName('Ещё'), () => s.A.feed(SEEN), () => s.A.notify('saved', { key: 'k', counted: true }, SEEN), () => s.A.refresh(), () => s.A.markSeen(), () => s.A.hide()]) assert.equal(again().error.code, 'destroyed');
+    s.A.destroy();
+    assert.equal(s.A.getState(), state, 'снимок destroyed — тот же объект');
+    assert.deepEqual([s.list, s.got.a.length, s.logA], [[], 1, []]);
+    // B живо: его команда пишет; закрытое подключение A не поглощает, снимок A прежний.
+    const named = s.B.setName('Пиксель');
+    assert.deepEqual([named.ok, named.save.status, s.json('cat').name], [true, 'saved', 'Пиксель']);
+    assert.deepEqual(s.list, [...s.fresh('b'), 'write b cat', `getItem ${s.keys.cat}`, `setItem ${s.keys.cat}`, 'settle b true', 'settled b', 'deliver lb setName']);
+    assert.deepEqual([s.A.getState(), s.got.a.length, s.logB], [state, 1, []]);
+  });
+}
+
+test('граница сверки: из чтения сверки команды A и B — reentrant без изменений и журнала, destroy() B — в конце фазы сверки; команда A выполняется по сверенному, B только destroyed', () => {
+  const s = edge({ cat: MARS, treat: { v: 1, fedDay: '' } });
+  let inner = null;
+  once(s, () => {
+    inner = [s.A.setName('Изнутри'), s.B.feed(SEEN)];
+    s.B.destroy();
+  });
+  const treat = s.raw('treat');
+  const result = s.A.setName('Барсик');
+  assert.deepEqual(inner.map((item) => [item.ok, item.error.code]), [[false, 'reentrant'], [false, 'reentrant']]);
+  assert.deepEqual([result.ok, result.changed, result.save.status, s.json('cat').name, s.raw('treat')], [true, true, 'saved', 'Барсик', treat]);
+  assert.deepEqual(s.list, [...s.fresh('a'), 'write a cat', `getItem ${s.keys.cat}`, `setItem ${s.keys.cat}`, 'settle a true', 'settled a', 'deliver lb destroyed', 'deliver la setName']);
+  assert.deepEqual(s.got, { a: ['setName running Барсик ready'], b: ['destroyed destroyed Марс ready'] });
+  assert.deepEqual([s.B.status, s.logA, s.logB], ['destroyed', [], []]);
+});
+
+test('граница сверки: исключение сверки до чтения — каждая команда internal, не бросает: без чтения, правки, записи и обновлений, журнал; раунд завершён — подписка сразу получает снимок, дальше команды A и B выполняются', () => {
+  const fault = { when: null };
+  const s = edge({ cat: MARS, treat: { v: 1, fedDay: '' } }, { fault });
+  fault.when = 'before';
+  const state = s.A.getState();
+  const writes = s.store.writes.length;
+  const commands = {
+    refresh: () => s.A.refresh(),
+    notify: () => s.A.notify('saved', { key: 'k', counted: true }, SEEN),
+    feed: () => s.A.feed(SEEN),
+    markSeen: () => s.A.markSeen(),
+    setName: () => s.A.setName('Барсик'),
+    setPet: () => s.A.setPet('dog'),
+    setAppearance: () => s.A.setAppearance({ coat: 'tuxedo' }),
+    setPreferences: () => s.A.setPreferences({ motion: 'calm' }),
+    hide: () => s.A.hide(),
+  };
+  for (const [name, run] of Object.entries(commands)) {
+    let result;
+    assert.doesNotThrow(() => (result = run()), name);
+    assert.deepEqual(result, { ok: false, error: { code: 'internal', message: 'Внутренний сбой: sync fault' } }, name);
+  }
+  assert.equal(s.A.getState(), state, 'снимок прежний');
+  assert.deepEqual([s.list, s.store.writes.length, s.got, s.logB], [[], writes, { a: [], b: [] }, []]);
+  assert.deepEqual(s.logA, Object.keys(commands).map((name) => `сбой команды ${name}: sync fault`));
+  // start нового ядра — тоже internal: не запущено, ничего не записано.
+  const C = make(faulty(s.watched, { when: 'before' }), { counts: host(1, 1) });
+  assert.deepEqual([C.core.start(SEEN).error?.code, C.core.status, C.log.list, s.store.writes.length], ['internal', 'created', ['сбой команды start: sync fault'], writes]);
+  C.core.destroy();
+  // Раунд не остался в фазе сверки или работы: начальный снимок подписки — до возврата subscribe.
+  fault.when = null;
+  s.list.length = 0;
+  const initial = [];
+  s.A.subscribe((update) => initial.push(update.reason))();
+  assert.deepEqual(initial, ['initial']);
+  const named = s.A.setName('Барсик');
+  const fed = s.B.feed(SEEN);
+  assert.deepEqual([named.ok, named.save.status, fed.ok, fed.save.status], [true, 'saved', true, 'saved']);
+  assert.deepEqual([s.json('cat').name, s.json('treat').fedDay], ['Барсик', DAY]);
+  assert.deepEqual(s.got, { a: ['setName running Барсик ready', 'storage running Барсик fed'], b: ['storage running Барсик ready', 'feed running Барсик fed'] });
+});
+
+test('граница сверки: исключение после поглощения внешнего изменения — поглощённое не откатывается и доставлено обоим ядрам (storage); команда — internal без записи; запоздалое storage — без эффектов', () => {
+  const fault = { when: null };
+  const s = edge({ cat: MARS, treat: { v: 1, fedDay: '' } }, { fault });
+  fault.when = 'after';
+  s.put('treat', { v: 1, fedDay: DAY });
+  const raw = s.raw('treat');
+  const writes = s.store.writes.length;
+  let result;
+  assert.doesNotThrow(() => (result = s.A.feed(SEEN)));
+  assert.deepEqual(result, { ok: false, error: { code: 'internal', message: 'Внутренний сбой: sync fault' } });
+  assert.deepEqual(s.list, [...s.fresh('a'), 'absorb a treat', 'absorb b treat', 'deliver la storage', 'deliver lb storage']);
+  assert.deepEqual(s.got, { a: ['storage running Марс fed'], b: ['storage running Марс fed'] });
+  assert.deepEqual([s.store.writes.length, s.raw('treat'), s.logA, s.logB], [writes, raw, ['сбой команды feed: sync fault'], []]);
+  fault.when = null;
+  s.events.fire(s.keys.treat);
+  assert.deepEqual([s.A.feed(SEEN).error.code, s.B.feed(SEEN).error.code, s.got.a.length, s.got.b.length, s.store.writes.length, s.raw('treat')], ['treat-fed', 'treat-fed', 1, 1, writes, raw]);
+});
+
+test('граница сверки, контроль: destroy() из progress() в фазе самой команды — прежняя семантика: команда выполнена и записана, отключение в конце её фазы; слушателям A — только destroyed', () => {
+  let armed = false;
+  let core = null;
+  const counts = {
+    progress: () => {
+      if (armed) {
+        armed = false;
+        core.destroy();
+      }
+      return { marks: 1, today: 1, limit: 3 };
+    },
+  };
+  const s = edge({ cat: MARS, treat: { v: 1, fedDay: '' } }, { counts });
+  core = s.A;
+  armed = true;
+  const result = s.A.feed(SEEN);
+  assert.deepEqual([result.ok, result.changed, result.save.status, result.reaction?.type, s.A.status], [true, true, 'saved', 'feed', 'destroyed']);
+  assert.deepEqual(s.json('treat'), { v: 1, fedDay: DAY });
+  assert.deepEqual(s.list, [...s.fresh('a'), 'write a treat', `getItem ${s.keys.treat}`, `setItem ${s.keys.treat}`, 'absorb b treat', 'settle a true', 'settled a', 'deliver la destroyed', 'deliver lb storage']);
+  assert.deepEqual(s.got, { a: ['destroyed destroyed Марс fed'], b: ['storage running Марс fed'] });
+  assert.deepEqual([s.A.feed(SEEN).error.code, s.B.feed(SEEN).error.code, s.logA], ['destroyed', 'treat-fed', []]);
 });

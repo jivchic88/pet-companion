@@ -368,15 +368,25 @@ function core({ storage, progress, clock, log }) {
   // событие storage ещё не пришло; восстановление на этой странице) поглощается до решения — всеми подключениями, как
   // событие storage, и приходит своим обновлением 'storage', а не изменением команды; ok: false команды по-прежнему
   // значит: сама она ничего не изменила и не поставила. Фазы — одного раунда: доставка после команды.
+  // Граница фаз (повторная проверка): destroy() из порта хранения в сверке выполнен в конце её фазы — после неё снова
+  // шаг 1, команда не выполняется; исключение сверки — сбой до применения (internal в фазе команды), поглощённое до него
+  // остаётся и доставляется.
   function act(name, body) {
     if (status === 'destroyed') return fail('destroyed', 'Питомец отключён.');
     if (Round.working()) return fail('reentrant', 'Команда вызвана во время обработки другого вызова (из порта или progress()).');
     return Round.hold(() => {
-      client.sync(KEYS);
+      let fault = null;
+      try {
+        client.sync(KEYS);
+      } catch (error) {
+        fault = { error };
+      }
+      if (status === 'destroyed') return fail('destroyed', 'Питомец отключён.');
       return Round.run(order, () => {
         const step = { applied: false, save: null };
         mark(name);
         try {
+          if (fault) throw fault.error;
           return body(step);
         } catch (error) {
           if (!step.applied) {

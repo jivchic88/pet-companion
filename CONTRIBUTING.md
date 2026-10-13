@@ -12,7 +12,7 @@
 | `example.html` | полный пример — первый блок html README (проверка сверяет) |
 | `examples/importmap.html` | пример пакета из `node_modules` без сборщика (в пакет не входит) |
 | `scripts/sync-version.mjs` | шаг `npm version`: номер из `package.json` → `VERSION`, README, CHANGELOG |
-| `test/*.test.mjs` | правила, хранение, рисунки, стили, форма пакета — `node:test`, без браузера; ядро — `core.test.mjs`, `core-storage.test.mjs` (контракт хранения), `core-round.test.mjs` (раунд доставки), `core-fresh.test.mjs` (решение по подтверждённому: сверка перед командой), `core-globals.test.mjs` (ловушки браузерных глобалов); общие подделки — `core-kit.mjs` |
+| `test/*.test.mjs` | правила, хранение, рисунки, стили, форма пакета — `node:test`, без браузера; ядро — `core.test.mjs`, `core-storage.test.mjs` (контракт хранения), `core-round.test.mjs` (раунд доставки), `core-fresh.test.mjs` (решение по подтверждённому: сверка перед командой и её граница с фазой команды), `core-globals.test.mjs` (ловушки браузерных глобалов); общие подделки — `core-kit.mjs` |
 | `test/browser.mjs`, `test/browser-storage.mjs`, `test/browser-core.mjs`, `test/stand.html` | модуль в Chrome на проверочном стенде (компьютер и телефон, отключение, отказ подключения, две копии, стили сайта; сохранность данных — `browser-storage.mjs`; оболочка на ядре и решение по подтверждённому — `browser-core.mjs`) |
 | `test/package.mjs` | упакованный архив: состав, установка в чистый проект, входы Node, типы, пример из архива и из `node_modules` в Chrome |
 | `test/fixtures/pet-0.1.1/` | неизменяемые файлы выпуска 0.1.1 — для сценария «старая копия на странице» |
