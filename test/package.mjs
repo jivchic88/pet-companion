@@ -1,7 +1,8 @@
 // Упакованный пакет — так, как его получат сайты (npm run test:package; нужен установленный Google Chrome): npm pack во
-// временную папку, повтор — те же байты; состав архива — явный список (ни проверок, ни фикстур, ни служебных файлов);
-// установка архива в чистый временный проект без сети; Node: публичные входы, стили по exports, внутренние модули и
-// несуществующий стиль закрыты; TypeScript (bundler и nodenext, noUncheckedSideEffectImports, без общих деклараций CSS у
+// временную папку, повтор — те же байты; состав архива — явный список, с внутренними папками core/ и web/ (ни проверок,
+// ни фикстур, ни служебных файлов); граф импортов из архива — файлы архива, ядро — только core/**; установка архива в
+// чистый временный проект без сети; Node: публичные входы, стили по exports, внутренние модули (и ядро, входа
+// pet-companion/core до PL05 нет) и несуществующий стиль закрыты; TypeScript (bundler и nodenext, noUncheckedSideEffectImports, без общих деклараций CSS у
 // проекта): вход и три стиля подключаются, неверные вызовы — ошибки, несуществующий стиль и внутренние пути закрыты,
 // стиль не экспортирует значений. Браузер, всё по http под вложенным
 // адресом, внешних запросов нет: (1) архив распакован системным tar как есть — example.html из папки package/ (кот,
@@ -25,7 +26,9 @@ const NAME = pkg.name;
 const VERSION = pkg.version;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.json': 'application/json' };
 const START = new Date('2026-10-12T10:00:00');
-const RUNTIME = ['cat-art.mjs', 'css.d.mts', 'dog-art.mjs','dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs'];
+// Файлы pet/ — явный список, с внутренними папками ядра и веб-адаптера (входом пакета они не открыты).
+const CORE = ['core/day.mjs', 'core/errors.mjs', 'core/formats/legacy.mjs', 'core/index.mjs', 'core/pets.mjs', 'core/ports.mjs', 'core/round.mjs', 'core/stages.mjs', 'core/storage.mjs'];
+const RUNTIME = ['cat-art.mjs', ...CORE, 'css.d.mts', 'dog-art.mjs', 'dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'web/storage.mjs'];
 const EXPECTED = ['CHANGELOG.md', 'LICENSE', 'README.md', 'example.html', 'package.json', ...RUNTIME.map((file) => `pet/${file}`)].sort();
 // Ничего из этого не должно попасть в архив.
 const FORBIDDEN = /(^|\/)(test|tests|fixtures|scripts|examples|node_modules|\.github|\.git)(\/|$)|\.env|secret|token|password|progress|\.tgz$|lock/i;
@@ -117,7 +120,7 @@ async function archive(browser, dir) {
         await page.waitForSelector('#head > .cat-side .cat-side-face');
         await page.clock.runFor(3000);
         const version = await page.evaluate(async () => (await import(new URL('pet/pet.mjs', location.href).href)).VERSION);
-        check(`${label} 1280×900: пример загрузил модули и стили из архива, версия ${VERSION}`, version === VERSION && ['pet/pet.mjs', 'pet/pet-rules.mjs', 'pet/cat-art.mjs', 'pet/dog-art.mjs', 'pet/pet-room.mjs', 'pet/pet.css', 'pet/dog.css', 'pet/pet-base.css'].every((file) => server.served.includes(`${prefix}${file}`)), server.served.join(', '));
+        check(`${label} 1280×900: пример загрузил модули (и вложенные — ядро, веб-хранение) и стили из архива, версия ${VERSION}`, version === VERSION && ['pet/pet.mjs', 'pet/pet-rules.mjs', 'pet/cat-art.mjs', 'pet/dog-art.mjs', 'pet/pet-room.mjs', 'pet/core/index.mjs', 'pet/core/formats/legacy.mjs', 'pet/web/storage.mjs', 'pet/pet.css', 'pet/dog.css', 'pet/pet-base.css'].every((file) => server.served.includes(`${prefix}${file}`)), server.served.join(', '));
         await page.locator('.cat-side-face').click();
         check(`${label} 1280×900: кот у логотипа, уголок открыт`, (await sheetOpen(page)) && (await page.evaluate(() => document.getElementById('cat-sheet-title').textContent)) === 'Марс');
         await page.locator('[data-cat-play]').click();
@@ -232,7 +235,7 @@ async function importmap(browser, project) {
     await page.waitForSelector('#head > .cat-side .cat-side-face');
     await page.clock.runFor(3000);
     const base = `${prefix}node_modules/${NAME}/pet/`;
-    check(`${label}: карта импортов — модуль и стили из node_modules/${NAME}/pet/`, ['pet.mjs', 'pet-rules.mjs', 'pet.css', 'dog.css', 'pet-base.css'].every((file) => server.served.includes(`${base}${file}`)), server.served.join(', '));
+    check(`${label}: карта импортов — модуль (и вложенные ядро и веб-хранение) и стили из node_modules/${NAME}/pet/`, ['pet.mjs', 'pet-rules.mjs', 'core/index.mjs', 'web/storage.mjs', 'pet.css', 'dog.css', 'pet-base.css'].every((file) => server.served.includes(`${base}${file}`)), server.served.join(', '));
     // Три занятия — третий знак открывает первую ступень: праздник.
     for (let i = 0; i < 3; i += 1) {
       await page.locator('#done').click();
@@ -273,6 +276,16 @@ try {
   check('архив: распакован системным tar — папка package/ с теми же файлами', JSON.stringify(inside) === JSON.stringify(EXPECTED) && (await readdir(unpacked)).join() === 'package', inside.join(', '));
   const same = await Promise.all(RUNTIME.map(async (file) => sha256(await readFile(path.join(unpacked, 'package', 'pet', file))) === sha256(await readFile(path.join(root, 'pet', file)))));
   check('архив: pet/ — байт в байт файлы репозитория', same.every(Boolean));
+  // Граф импортов из архива: каждый относительный импорт — файл архива внутри pet/; ядро (core/**) — только core/**.
+  const graph = [];
+  for (const file of RUNTIME.filter((name) => name.endsWith('.mjs'))) {
+    const source = await readFile(path.join(unpacked, 'package', 'pet', file), 'utf8');
+    for (const [, from, bare] of source.matchAll(/^(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/gm)) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), from ?? bare));
+      if (!RUNTIME.includes(target) || (file.startsWith('core/') && !target.startsWith('core/'))) graph.push(`${file} → ${from ?? bare}`);
+    }
+  }
+  check('архив: импорты — файлы архива внутри pet/; ядро core/** импортирует только core/**', graph.length === 0, graph.join(', '));
 
   // Чистый проект: установка архива без сети.
   const project = path.join(tmp, 'project');
@@ -288,13 +301,13 @@ try {
     const pet = await import('${NAME}');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts'].map((name) => resolve('${NAME}/' + name));
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'core', 'pet/core/index.mjs', 'pet/core/storage.mjs', 'pet/web/storage.mjs'].map((name) => resolve('${NAME}/' + name));
     console.log(JSON.stringify({ keys: Object.keys(pet).sort(), version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: project });
   const node = JSON.parse(stdout);
   check('Node: вход — mountPet, localDay, VERSION; версия пакета', JSON.stringify(node.keys) === '["VERSION","localDay","mountPet"]' && node.version === VERSION && node.day === '2026-10-12', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
-  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, ядро (pet-companion/core до PL05) и его файлы — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 7 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
 
   // TypeScript: полное подключение, как в README, — вход и три стиля. У проекта нет общих деклараций CSS (declare module
   // '*.css', vite/client): стили находит сам пакет, иначе noUncheckedSideEffectImports даёт TS2307.

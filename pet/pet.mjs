@@ -1,10 +1,13 @@
 // Питомец (кот или собака) — самостоятельный модуль: места рядом со страницей или лапка вызова, один диалог в трёх видах
 // (уголок, «Поиграть», «Обустроить уголок»), реакции и настройки. Подключение, интерфейс, хранение и ограничения — README
-// модуля. Рисунки — cat-art.mjs, dog-art.mjs; правила — pet-rules.mjs; место и
+// модуля. Ядро без DOM (core/index.mjs) — настройки и ключи cat, companion, look, treat, счёт и ступени, решения
+// подтверждённого занятия, кормления и приветствия; хранение — общий координатор (web/storage.mjs). Оболочка показывает
+// снимок ядра и проигрывает его решения. Рисунки — cat-art.mjs, dog-art.mjs; правила оболочки — pet-rules.mjs; место и
 // присутствие — pet-place.mjs; перенос — pet-move.mjs; жест сцены — pet-play.mjs; миска и мячик — pet-toys.mjs; комната —
 // pet-room.mjs. Хранит только предпочтения в браузере; данных сайта не меняет; ошибки здесь сайту не мешают.
 
 import { bowlArt, bowlMiniSvg, bowlToySvg, catSvg, miniItemSvg, sceneCatBox, sceneSvg, yarnArt } from './cat-art.mjs';
+import { createPetCore } from './core/index.mjs';
 import { ballArt, ballMiniSvg, ballToySvg, dogSvg, ropeArt } from './dog-art.mjs';
 import * as R from './pet-rules.mjs';
 import * as P from './pet-place.mjs';
@@ -12,6 +15,7 @@ import * as Room from './pet-room.mjs';
 import { cancelMove, initMover, moving, startMoveMode, stopMover, watchDrag } from './pet-move.mjs';
 import { cancelStroke, gesturing, hitsHtml, initPlay, release, watchStroke } from './pet-play.mjs';
 import { bowlHome, initToys, mountToys, moveBowl, resetToys, rollBall, unmountToys, watchToys } from './pet-toys.mjs';
+import { createWebStorage } from './web/storage.mjs';
 
 // Версия модуля — та же, что в package.json (npm version обновляет её здесь: scripts/sync-version.mjs; README и CHANGELOG
 // сверяет npm run check). Версии форматов данных — v1 в ключах (storageKeys).
@@ -56,15 +60,16 @@ let T = TEXTS;
 const initial = () => ({
   mounted: false,
   abort: null, // снимает все слушатели при отключении
+  core: null, // ядро этого подключения (createPetCore): настройки, ключи cat, companion, look, treat и решения среза
+  mirror: null, // снимок ядра, по которому оболочка уже показана (изменение другой вкладки — разница с ним, onCore)
+  starting: false, // идёт core.start(): предупреждение ядра — причина отказа подключения (startError), а не журнал
+  startError: null,
   storage: 'ok', // 'failed' — при подключении хранилище не прочиталось: до отключения ничего не читается и не пишется
-  seen: {}, // последний прочитанный текст ключа (показ, если следующее чтение не удалось)
-  kind: 'cat', // показанный напарник; выбор другой вкладки приходит событием storage
-  look: R.defaultLook(), // облик кота и собаки (ключ look)
-  lookUnsaved: {}, // облик, который не удалось записать (до перезагрузки страницы), — по животным
+  seen: {}, // последний прочитанный текст ключа оболочки — place, presence, scene, room (показ, если чтение не удалось)
+  kind: 'cat', // показанный напарник; выбор другой вкладки приходит поглощением ядра (onCore)
+  look: R.defaultLook(), // показанный облик кота и собаки (снимок ядра)
   shownHidden: false, // показано ли место «спрятан» (renderAll); сравнивается со свежим «скрыт»
   settings: R.companionView(R.defaultSettings(), R.defaultCompanion()),
-  unsaved: { cat: {}, companion: {} }, // поля, которые не удалось записать (до перезагрузки страницы)
-  stageUnknown: false, // сохранённая увиденная ступень непонятна этой версии (R.unknownStage; readCat, seenStage)
   director: R.createDirector(),
   reduced: null,
   dock: null,
@@ -88,8 +93,7 @@ const initial = () => ({
   info: R.progressInfo(0),
   sheetStage: -1, // ступень, которую сейчас показывает открытый уголок (ui.info.stage может уйти вперёд)
   sheetY: 0,
-  treat: 'waiting', // лакомство дня: waiting / ready / fed (R.treatState)
-  treatUnsaved: '', // день лакомства, который не удалось записать (до перезагрузки страницы)
+  treat: 'waiting', // лакомство дня: waiting / ready / fed (снимок ядра)
   treatLater: false, // карточку лакомства не перерисовывали, пока вводят имя
   learnLater: false, // учебный шаг не обновляли, пока вводят имя
   sheetOpen: false, // уголок открыт (закрытие — один раз: событие close после закрытия кодом ничего не делает)
@@ -145,13 +149,14 @@ const esc = (text) =>
 const on = (target, type, fn, options = {}) => target?.addEventListener?.(type, fn, { ...options, signal: ui.abort.signal });
 
 // ---------- хранение ----------
-// Показ — нормализованное сохранённое (непонятное — по умолчанию); запись — свежий исходный текст ключа + только
-// изменённые поля (функции записи pet-rules.mjs, pet-place.mjs, pet-room.mjs): неизвестные поля, значения и больший v
-// остаются. Поля, которые не удалось записать (хранилище переполнено, запрещено, недоступно или ключ не прочитался), живут
-// в памяти страницы до перезагрузки и читаются поверх сохранённого (у каждого ключа свои); остальные поля читаются
-// свежими — их могла поменять другая вкладка. Удачная запись ключа забирает поля из памяти. README, «Хранение».
+// Ключи cat, companion, look, treat — только ядро (снимок, команды, общий координатор web/storage.mjs): оболочка их не
+// читает и не пишет. Ключи оболочки до PL04 — place, presence, scene, room: показ — нормализованное сохранённое
+// (непонятное — по умолчанию); запись — свежий исходный текст ключа + только изменённые поля (функции записи
+// pet-place.mjs, pet-room.mjs, pet-rules.mjs): неизвестные поля, значения и больший v остаются. Поля, которые не удалось
+// записать, живут в памяти страницы до перезагрузки и читаются поверх сохранённого. Отказ загрузки любого из восьми
+// ключей (координатор) запрещает записи всего подключения. README, «Хранение».
 
-const STORED = ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'];
+const WEB_STORED = ['place', 'presence', 'scene', 'room'];
 const rawOf = (text) => R.readRecord(text).raw ?? {};
 
 // Свежий текст ключа: { ok: true, text } (text — null, если ключа нет) или { ok: false } — отказ чтения.
@@ -172,25 +177,27 @@ function readStored(key, parse) {
   return parse(read.ok ? read.text : (ui.seen[key] ?? null));
 }
 
-// Загрузка при подключении. Ключ не прочитался (исключение хранилища) — экземпляр работает в памяти: показывает умолчания,
-// ничего не пишет и больше не читает; новая попытка — следующее подключение. Повреждённое значение — предупреждение;
-// неявные записи его не трогают (writeKey).
-function loadStorage() {
-  for (const key of STORED.map((name) => K[name])) {
+const corruptNote = (key) => `Питомец: значение ${key} повреждено — показаны значения по умолчанию; оно не перезаписывается, пока эту настройку не изменят.`;
+
+// Загрузка при подключении — координатор (все восемь ключей пространства). Ключ не прочитался (исключение хранилища) —
+// подключение работает в памяти: показывает умолчания, ничего не пишет и больше не читает; новая попытка — следующее
+// подключение. Повреждённое значение — предупреждение (ключи ядра — его эффектом warning, onCore); неявные записи его не
+// трогают.
+function loadStorage(storage) {
+  ui.storage = storage.load() === 'ready' ? 'ok' : 'failed';
+  if (ui.storage === 'failed') {
+    console.warn('Питомец: хранилище недоступно — настройки действуют до перезагрузки и не сохраняются.');
+    return;
+  }
+  for (const key of WEB_STORED.map((name) => K[name])) {
     const read = readText(key);
-    if (!read.ok) {
-      ui.storage = 'failed';
-      ui.seen = {};
-      console.warn('Питомец: хранилище недоступно — настройки действуют до перезагрузки и не сохраняются.');
-      return;
-    }
-    if (R.readRecord(read.text).state === 'corrupt') console.warn(`Питомец: значение ${key} повреждено — показаны значения по умолчанию; оно не перезаписывается, пока эту настройку не изменят.`);
+    if (read.ok && R.readRecord(read.text).state === 'corrupt') console.warn(corruptNote(key));
   }
 }
 
-// Запись ключа: свежий текст → build(text) → setItem. Не пишет, если загрузка не удалась или ключ сейчас не прочитался
-// (отказ чтения — не «пусто»); неявная запись (implicit: приветствие дня, отметка ступени, копия дня сценки) не заменяет
-// повреждённое значение — его заменяет только явное действие. true — только после успешного setItem.
+// Запись ключа оболочки: свежий текст → build(text) → setItem. Не пишет, если загрузка не удалась или ключ сейчас не
+// прочитался (отказ чтения — не «пусто»); неявная запись (копия дня сценки) не заменяет повреждённое значение — его
+// заменяет только явное действие. true — только после успешного setItem.
 function writeKey(key, build, implicit = false) {
   const read = readText(key);
   if (!read.ok || (implicit && R.readRecord(read.text).state === 'corrupt')) return false;
@@ -204,68 +211,36 @@ function writeKey(key, build, implicit = false) {
   }
 }
 
-const keyState = (key) => {
-  const read = readText(key);
-  return read.ok ? R.readRecord(read.text).state : 'failed';
-};
+// ---------- снимок ядра: настройки, облик, счёт, лакомство ----------
+// Показ — снимок последнего закрытого обновления ядра (getState): после команды он уже новый. Правила (ступени, вещи,
+// аксессуары, лакомство, первое включение, праздник, кормление, приветствие) оболочка не повторяет — берёт их итог.
 
-// ---------- настройки ----------
+const snap = () => ui.core.getState();
 
-// Увиденная ступень из памяти уступает свежей сохранённой, которую запись всё равно не заменит (R.stageKept): непонятной
-// этой версии (её восстановила другая вкладка или сайт) или не меньшей. Непонятная сохранённая — ui.stageUnknown.
-function readCat() {
-  const raw = readStored(K.cat, rawOf);
-  if (R.stageKept(raw, ui.unsaved.cat)) delete ui.unsaved.cat.seenStage;
-  ui.stageUnknown = R.unknownStage(raw);
-  return R.normalizeSettings({ ...raw, ...ui.unsaved.cat });
+// Настройки напарника kind в прежней форме оболочки: общие поля и его имя с аксессуаром.
+function settingsOf(state, kind) {
+  const own = state.pets[kind];
+  return { kind, name: own.name.value, accessory: own.accessory, motion: state.prefs.motion, phrases: state.prefs.phrases, hidden: state.presence.hidden };
 }
 
-function readCompanion() {
-  return R.mergeCompanion(readStored(K.companion, R.parseCompanion), ui.unsaved.companion);
+const readSettings = (kind = ui.kind) => settingsOf(snap(), kind);
+const lookOf = (state) => ({ cat: state.pets.cat.coat, dog: state.pets.dog.coat });
+
+// Счёт и ступень — в прежней форме ui.info (только показ).
+function infoOf(state) {
+  const p = state.progress;
+  if (!p) return R.progressInfo(0);
+  return { marks: p.marks, stage: p.stage, computed: p.computed, current: R.STAGES[p.stage], next: R.STAGES[p.stage + 1] ?? null, toNext: p.toNext };
 }
 
-const unsavedAny = () => Object.keys(ui.unsaved.cat).length > 0 || Object.keys(ui.unsaved.companion).length > 0;
+// Простые данные для решений ядра среза, которые зависят от ещё не перенесённого (PL04): питомец на виду (присутствие и
+// открытый диалог) и открытый вид.
+const sight = () => ({ around: around(), view: ui.room ? 'room' : ui.play ? 'play' : ui.sheet?.open ? 'corner' : null });
 
-// Другая вкладка записала ключ: изменённые ею поля (по сохранённым значениям как есть) новее несохранённых здесь —
-// последняя запись побеждает.
-function forgetOverwritten({ key, oldValue, newValue }) {
-  const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
-  const kept = (patch, was, now) => Object.fromEntries(Object.entries(patch).filter(([field]) => !changed(was[field], now[field])));
-  const was = rawOf(oldValue);
-  const now = rawOf(newValue);
-  if (key === K.cat) {
-    ui.unsaved.cat = kept(ui.unsaved.cat, was, now);
-    return;
-  }
-  const dogOf = (raw) => (R.isRecord(raw.dog) ? raw.dog : {});
-  const { dog = {}, ...rest } = ui.unsaved.companion;
-  const keepDog = kept(dog, dogOf(was), dogOf(now));
-  ui.unsaved.companion = { ...kept(rest, was, now), ...(Object.keys(keepDog).length ? { dog: keepDog } : {}) };
-}
-
-// Настройки показанного напарника (ui.kind): общие + его имя и аксессуар. Выбор животного здесь не применяется — его
-// забирают start и onStorage (applyShown), чтобы смена не потерялась.
-function readSettings(kind = ui.kind) {
-  return R.companionView(readCat(), readCompanion(), kind);
-}
-
-// Изменённые поля — в память страницы, затем запись каждого ключа, где они есть: свежее сохранённое + эти поля (и прежние
-// несохранённые). implicit — запись без действия пользователя (приветствие дня, первое включение, отметка увиденной
-// ступени): повреждённый ключ она не заменяет — поля остаются в памяти.
-function updateSettings(fields, implicit = false) {
-  const part = R.splitUpdate(ui.kind, fields);
-  if (Object.keys(part.cat).length) {
-    ui.unsaved.cat = { ...ui.unsaved.cat, ...part.cat };
-    if (writeKey(K.cat, (text) => R.catRecord(text, ui.unsaved.cat), implicit)) ui.unsaved.cat = {};
-  }
-  if (Object.keys(part.companion).length) {
-    const was = ui.unsaved.companion;
-    ui.unsaved.companion = { ...was, ...part.companion, dog: { ...was.dog, ...part.companion.dog } };
-    if (writeKey(K.companion, (text) => R.companionRecord(text, ui.unsaved.companion), implicit)) ui.unsaved.companion = {};
-  }
+// Команда ядра изменила настройки: показ оболочки — по снимку, подсказка о сохранении — по статусу ключей.
+function settingsChanged() {
   ui.settings = readSettings();
   syncStoreNote();
-  return ui.settings;
 }
 
 // Хранилище не прочиталось при подключении — изменения действуют только на этой странице (подсказки мест и облика).
@@ -274,44 +249,20 @@ const OFFLINE = 'Хранилище этого браузера недоступ
 
 // Подсказка в «Настройках»: сохранение обещается, только пока запись удаётся; повреждённые настройки — честно.
 function storeNote() {
-  const corrupt = keyState(K.cat) === 'corrupt' || keyState(K.companion) === 'corrupt';
+  const save = snap().save;
   const head = offline()
     ? OFFLINE
-    : corrupt
+    : save.cat.corrupt || save.companion.corrupt
       ? 'Сохранённые настройки в этом браузере повреждены и не читаются: показаны обычные. Сами они не перезаписываются — изменение настройки здесь их заменит.'
-      : unsavedAny()
+      : save.cat.unsaved.length > 0 || save.companion.unsaved.length > 0
         ? 'Сохранить настройки в этом браузере сейчас не получается: они действуют на этой странице до перезагрузки, другие вкладки их не видят.'
         : 'Настройки напарника, облик, имена и лакомство хранятся в этом браузере: на другом устройстве — свои.';
   return `${head} Имя, облик и аксессуар у кота и собаки свои, движение, реплики и «скрыть» — общие. ${T.origin}`;
 }
 
-// ---------- облик (ключ look) ----------
-// Не записался — в памяти страницы поверх сохранённого; сохранённый догнал память (другая вкладка записала тот же
-// облик) — память забывается, подсказка больше не говорит «не сохранился».
-
-function readLook() {
-  const stored = readStored(K.look, rawOf);
-  for (const kind of R.KINDS) if (ui.lookUnsaved[kind] === stored[kind]) delete ui.lookUnsaved[kind];
-  return R.normalizeLook({ ...stored, ...ui.lookUnsaved });
-}
-
-// Запись по свежему значению ключа: облик другого животного (и непонятный этой версии) и чужие поля сохраняются.
-function storeLook(patch) {
-  ui.lookUnsaved = { ...ui.lookUnsaved, ...patch };
-  if (!writeKey(K.look, (text) => R.lookRecord(text, ui.lookUnsaved))) return false;
-  ui.lookUnsaved = {};
-  return true;
-}
-
-// Другая вкладка записала облик: изменённый ею новее несохранённого здесь.
-function forgetLook({ oldValue, newValue }) {
-  const was = rawOf(oldValue);
-  const next = rawOf(newValue);
-  for (const kind of R.KINDS) if (was[kind] !== next[kind]) delete ui.lookUnsaved[kind];
-}
-
+// Облик: не записался — подсказка «не сохранился» (облик действует в памяти ядра до перезагрузки).
 const coatNote = () =>
-  ui.lookUnsaved[ui.kind]
+  snap().save.look.unsaved.includes(ui.kind)
     ? 'Облик не сохранился в этом браузере: он действует на этой странице до перезагрузки.'
     : offline()
       ? OFFLINE
@@ -365,22 +316,6 @@ function storePresence(mode) {
 // Рядом со страницей: питомец, кнопка или ничего; на виду — рядом или вызван.
 const surface = () => P.presenceSurface(ui.presence, ui.settings.hidden);
 const around = () => P.petAround({ mode: ui.presence, open: ui.sheetOpen });
-
-// ---------- лакомство дня (ключ treat) ----------
-
-// День последнего лакомства: сохранённый или — если запись не удалась — из памяти страницы. Сверка при каждом чтении:
-// спрятанный напарник событие storage пропускает, а при возвращении и открытии уголка день читается заново.
-function fedDay() {
-  const stored = readStored(K.treat, R.parseTreat).fedDay;
-  if (ui.treatUnsaved && stored >= ui.treatUnsaved) ui.treatUnsaved = '';
-  return ui.treatUnsaved || stored;
-}
-
-function storeTreat(day) {
-  const saved = writeKey(K.treat, (text) => R.treatRecord(text, day));
-  ui.treatUnsaved = saved ? '' : day;
-  return saved;
-}
 
 function syncStoreNote() {
   const note = ui.sheet?.querySelector('[data-cat-store]');
@@ -496,7 +431,7 @@ function paint() {
   const content = ui.treat === 'fed';
   const base = R.basePose({ quiet: quiet(), focus: ui.form, resting: ui.resting, content });
   const still = ui.strokeHeld ? 'pet' : R.basePose({ content });
-  const acc = ui.tryOn || R.wornAccessory(ui.settings, ui.info.stage);
+  const acc = ui.tryOn || snap().pets[ui.kind].worn;
   const move = motion();
   // Тот же режим — всему интерфейсу питомца (pet.css).
   if (document.documentElement.dataset.catMotion !== move) document.documentElement.dataset.catMotion = move;
@@ -718,23 +653,23 @@ function stopScene() {
 
 // ---------- прогресс: знаки от сайта ----------
 
-// Всего (marks), за сегодня (today), предел дня (limit — только для подписи).
+// Всего (marks), за сегодня (today), предел дня (limit — только для подписи) — сайт; читает ядро.
 const progress = () => ({ marks: 0, today: 0, ...O.progress?.() });
 
-// Увиденная ступень для первого включения, отметки, точки «новое» и праздника. Сохранённая непонятна этой версии — как
-// увиденная выше всех известных: ничего не отмечается и не празднуется, сохранённое не переписывается; вещи — по знакам
-// (progressInfo получает показ — -1).
-const seenStage = () => (ui.stageUnknown ? R.STAGES.length : ui.settings.seenStage);
-
+// Знаки сайта, ступень и лакомство дня — заново в ядре (первое включение — молча, неявной записью ядра), затем показ.
 function refreshInfo() {
-  const p = progress();
-  ui.info = R.progressInfo(p.marks, ui.settings.seenStage);
-  ui.treat = R.treatState(R.localDay(), fedDay(), p.today);
-  if (seenStage() < 0) {
-    // Первое включение: существующая практика учитывается молча — без исторических наград. Неявная запись.
-    updateSettings({ seenStage: ui.info.stage }, true);
-  }
-  const fresh = ui.info.stage > seenStage();
+  ui.core.refresh();
+  showProgress();
+}
+
+// Счёт, ступень и лакомство — по снимку ядра: точка «новое» и подписи кнопок, ступень в боковой панели; подсказка о
+// сохранении (неявная запись ядра — первое включение, отметка ступени — могла не удаться).
+function showProgress() {
+  const state = snap();
+  ui.info = infoOf(state);
+  ui.treat = state.treat ?? 'waiting';
+  syncStoreNote();
+  const fresh = Boolean(state.progress?.unseen);
   for (const button of openers()) {
     // У кнопки вызова точки нет.
     const call = button.hasAttribute('data-cat-call');
@@ -1102,10 +1037,14 @@ function stageListHtml(info) {
 const accessoryText = (item, open) =>
   `${esc(item.title)}${open ? '' : `<br><span class="${C.muted}">откроется на ${R.marksText(R.STAGES[item.stage].at)}</span>`}`;
 
-function accessoryHtml(info) {
-  const worn = R.wornAccessory(ui.settings, info.stage);
+// Аксессуары, открытые ступенью, и надетый — решение ядра (снимок).
+const openAccessories = () => snap().progress?.accessories ?? [];
+
+function accessoryHtml() {
+  const worn = snap().pets[ui.kind].worn;
+  const opened = openAccessories();
   return R.ACCESSORIES.map((item) => {
-    const open = item.stage <= info.stage;
+    const open = opened.includes(item.id);
     return `<label class="cat-acc-option${open ? '' : ' is-locked'}">
         <input type="radio" name="cat-acc" value="${item.id}"${item.id === worn ? ' checked' : ''}${open ? '' : ' disabled'} />
         <span class="cat-swatch cat-swatch-${item.id}" aria-hidden="true"></span>
@@ -1116,11 +1055,12 @@ function accessoryHtml(info) {
 
 // Аксессуары открытого уголка — на месте: переключатели не пересоздаются, фокус не теряется.
 function syncAccessories() {
-  const worn = R.wornAccessory(ui.settings, ui.info.stage);
+  const worn = snap().pets[ui.kind].worn;
+  const opened = openAccessories();
   for (const item of R.ACCESSORIES) {
     const input = ui.sheet.querySelector(`input[name="cat-acc"][value="${item.id}"]`);
     if (!input) continue;
-    const open = item.stage <= ui.info.stage;
+    const open = opened.includes(item.id);
     input.disabled = !open;
     input.checked = item.id === worn;
     const option = input.closest('.cat-acc-option');
@@ -1157,7 +1097,7 @@ const BOWL_ICON =
 function treatParts(state = ui.treat) {
   if (state === 'fed') {
     return {
-      note: ui.treatUnsaved
+      note: snap().save.treat.unsaved.length
         ? 'Сегодня уже угостили, но отметка не сохранилась в этом браузере: после перезагрузки — снова.'
         : 'Сегодня уже угостили. Новое — завтра, после занятия; отметка — в этом браузере.',
       act: '<p class="cat-treat-done" data-cat-treat-done tabindex="-1"><span aria-hidden="true">✓</span> Угостили</p>',
@@ -1261,7 +1201,7 @@ function goLearn(event, link) {
 
 // Выбор облика показанного напарника: три портрета, выбранный — рамкой, фоном и галочкой (не только цветом).
 function coatHtml() {
-  const acc = R.wornAccessory(ui.settings, ui.info.stage);
+  const acc = snap().pets[ui.kind].worn;
   return `<fieldset class="cat-coat">
       <legend>Облик ${profile().gen}</legend>
       <div class="cat-coat-list">${R.coatsOf(ui.kind)
@@ -1319,20 +1259,22 @@ function syncPickers() {
   if (note && note.textContent !== coatNote()) note.textContent = coatNote();
 }
 
-// Выбрали облик: сохраняется сразу, показывается везде; фокус остаётся на выбранном переключателе.
+// Выбрали облик: команда ядра (запись — его операция ключа look), показывается везде; фокус остаётся на выбранном
+// переключателе; объявление — по итогу записи.
 function chooseCoat(value) {
   const kind = ui.kind;
-  if (R.coatOf(kind, value) !== value || value === coat()) return;
-  const saved = storeLook({ [kind]: value });
-  ui.look = readLook();
+  if (value === coat()) return;
+  const result = ui.core.setAppearance({ coat: value });
+  if (!result.ok) return;
+  ui.look = lookOf(snap());
   ui.lastActivity = now();
   applyCoat();
-  announce(`Облик: ${R.coatTitle(kind, value).toLowerCase()}.${saved ? '' : ' Не сохранился в этом браузере — действует до перезагрузки.'}`);
+  announce(`Облик: ${R.coatTitle(kind, value).toLowerCase()}.${result.save.status === 'failed' ? ' Не сохранился в этом браузере — действует до перезагрузки.' : ''}`);
 }
 
 // Надетый аксессуар — и на портретах выбора (напарник и облик показанного животного).
 function syncPickerAcc() {
-  const acc = R.wornAccessory(ui.settings, ui.info.stage);
+  const acc = snap().pets[ui.kind].worn;
   for (const svg of ui.sheet?.querySelectorAll(`.cat-coat-face .cat-art, [data-cat-kind-face="${ui.kind}"] .cat-art`) ?? []) svg.dataset.acc = acc;
 }
 
@@ -1350,7 +1292,7 @@ function nameHtml() {
   const offer = R.NAME_OFFER[ui.kind];
   return `<fieldset class="cat-name">
       <legend>Имя ${who.gen}</legend>
-      <div class="cat-name-offer" data-cat-offer${R.nameOffered(ui.settings.name) ? '' : ' hidden'}>
+      <div class="cat-name-offer" data-cat-offer${snap().pets[ui.kind].name.chosen ? ' hidden' : ''}>
         <p>Новое имя? Предлагаем «${esc(offer)}» — или оставим «${esc(who.defaultName)}».</p>
         <div class="cat-name-offer-actions">
           <button class="${C.btn} ${C.small}" type="button" data-cat-name-pick="${esc(offer)}">${esc(offer)}</button>
@@ -1366,9 +1308,9 @@ function nameHtml() {
     </fieldset>`;
 }
 
-// «Новое в уголке»: вещи и аксессуары, открытые после увиденной ступени.
+// «Новое в уголке»: вещи и аксессуары, открытые после увиденной ступени (снимок ядра).
 function freshText(fresh) {
-  const accessories = R.unlockedBetween(seenStage(), ui.info.stage, ui.kind).accessories;
+  const accessories = snap().progress?.unseen ? snap().progress.freshAccessories : [];
   const names = [...fresh, ...accessories].map((item) => ITEM_NAMES[item] ?? item);
   return names.length ? `Новое в уголке: ${names.join(', ')}.` : '';
 }
@@ -1379,7 +1321,7 @@ function progressParts() {
   const next = info.next;
   const span = next ? next.at - info.current.at : 1;
   const done = next ? Math.min(span, Math.max(0, info.marks - info.current.at)) : span;
-  const p = progress();
+  const p = snap().progress ?? { today: 0, limit: null };
   return {
     line: `<strong>${R.marksText(info.marks)} практики</strong> · сегодня ${p.today}${p.limit ? ` из ${p.limit}` : ''}`,
     width: `${Math.round((done / span) * 100)}%`,
@@ -1391,14 +1333,14 @@ function progressParts() {
 
 // Выбор напарника: два портрета, выбранный отмечен рамкой, галочкой и словом «рядом»; имя у каждого своё.
 function kindNames() {
-  const cat = readCat();
-  const companion = readCompanion();
-  return { cat: R.companionName({ kind: 'cat', name: cat.name }), dog: R.companionName({ kind: 'dog', name: companion.dog.name }) };
+  const pets = snap().pets;
+  return { cat: pets.cat.name.display, dog: pets.dog.name.display };
 }
 
 function kindHtml() {
   const names = kindNames();
-  const worn = { cat: R.wornAccessory(readCat(), ui.info.stage), dog: R.wornAccessory(readCompanion().dog, ui.info.stage) };
+  const pets = snap().pets;
+  const worn = { cat: pets.cat.worn, dog: pets.dog.worn };
   return `<fieldset class="cat-kind">
       <legend>Напарник</legend>
       <div class="cat-kind-list">${R.KINDS.map((kind) => {
@@ -1569,7 +1511,7 @@ function bodyHtml(fresh) {
     </div>
     <fieldset class="cat-acc">
       <legend>Аксессуар</legend>
-      <div class="cat-acc-list">${accessoryHtml(info)}</div>
+      <div class="cat-acc-list">${accessoryHtml()}</div>
     </fieldset>
     <details class="cat-settings">
       <summary>Настройки ${who.gen}</summary>
@@ -1599,14 +1541,13 @@ function renderSheet(fresh = []) {
   paint();
 }
 
-// Вещи, которых ещё не видели (подсветка в сцене), — от увиденной ступени до текущей.
-const unseenItems = () => (ui.info.stage > seenStage() ? R.unlockedBetween(seenStage(), ui.info.stage, ui.kind).items : []);
+// Вещи, которых ещё не видели (подсветка в сцене), — от увиденной ступени до текущей (снимок ядра).
+const unseenItems = () => (snap().progress?.unseen ? snap().progress.fresh : []);
 
-// Уголок открыт и всё видно — новая ступень увидена: точка на питомце гаснет, праздника нет.
+// Уголок открыт и всё видно — новая ступень увидена (правило и неявная запись — ядро): точка на питомце гаснет, праздника
+// нет.
 function markSeen() {
-  if (ui.info.stage <= seenStage()) return;
-  updateSettings({ seenStage: ui.info.stage }, true);
-  refreshInfo();
+  if (ui.core.markSeen().changed) showProgress();
 }
 
 // Открытый уголок после изменения знаков или ступени: адресно — знаки, «сегодня», шкала, что дальше; если ступень не та,
@@ -1673,23 +1614,22 @@ function syncTreat({ focus = false } = {}) {
   if (focus || had) act.firstElementChild?.focus({ preventScroll: true });
 }
 
-// «Покормить»: день — заново (другая вкладка, полночь); отметка — до реакции (второго лакомства нет).
+// «Покормить»: решение и запись — ядро (день заново, отметка до реакции — второго лакомства нет; объявление — его эффект
+// по итогу записи). Отказ (сегодня ещё нет занятия, уже угостили — другая вкладка, полночь) — карточка по свежему счёту.
 function feed() {
-  refreshInfo();
-  if (ui.treat !== 'ready') {
+  const result = ui.core.feed(sight());
+  if (!result.ok) {
+    refreshInfo();
     syncTreat({ focus: true });
     paint();
     return;
   }
-  const today = R.localDay();
-  const saved = storeTreat(today);
-  refreshInfo();
+  showProgress();
   syncTreat({ focus: true });
   ui.lastActivity = now();
   ui.resting = false;
-  play(R.request(ui.director, 'feed', { now: now(), key: `feed:${today}`, context: 'calm', extra: { mini: 'bowl', follow: { type: 'fed', extra: { mini: 'bowl-empty' } } } }));
+  if (result.reaction) play(R.request(ui.director, result.reaction.type, { now: now(), key: result.reaction.key, context: 'calm', extra: result.reaction.extra }));
   paint();
-  announce(`${name()} получает лакомство. Сегодня уже угостили${saved ? '' : ', но отметка не сохранилась в этом браузере'}.`);
 }
 
 // Готовые имена и предложение открытого уголка — по сохранённому имени: отметка — на месте, кнопки страницы — заново,
@@ -1703,16 +1643,17 @@ function syncNamePick({ chips = false, offer = false } = {}) {
   const field = ui.sheet.querySelector('input[name="cat-name"]');
   if (!box || (!offer && field === document.activeElement)) return;
   const inside = box.contains(document.activeElement);
-  box.hidden = !R.nameOffered(ui.settings.name);
+  box.hidden = snap().pets[ui.kind].name.chosen;
   if (inside && box.hidden) (list.querySelector('[aria-pressed="true"]') ?? field)?.focus({ preventScroll: true });
 }
 
-// Готовое имя (или «Оставить …»): сохраняется сразу; предложение исчезает, подборка — на странице выбранного, фокус —
-// на его кнопке. Короткий отклик, знаков нет.
+// Готовое имя (или «Оставить …»): команда ядра (запись сразу); предложение исчезает, подборка — на странице выбранного,
+// фокус — на его кнопке. Короткий отклик, знаков нет.
 function pickName(value) {
   const chosen = R.cleanName(value);
   if (!chosen) return;
-  updateSettings({ name: chosen });
+  ui.core.setName(chosen);
+  settingsChanged();
   const page = R.namePageOf(ui.kind, chosen);
   const turn = page !== ui.namePage;
   ui.namePage = page;
@@ -1769,9 +1710,9 @@ function openSheet(opener, source = 'pet') {
   ui.opener = opener;
   ui.source = source;
   const call = source === 'call';
-  // Облик — свежий (другая вкладка могла записать тот, что здесь не сохранился, — подсказка верна).
+  // Облик — по снимку ядра (изменение другой вкладки ядро уже поглотило; подсказка о сохранении верна).
   const was = coat();
-  ui.look = readLook();
+  ui.look = lookOf(snap());
   if (coat() !== was) applyCoat();
   refreshInfo();
   ui.scenePhrase = ui.settings.phrases ? R.pickPhrase(ui.resting ? 'rest' : 'scene', { last: ui.lastPhrase, stage: ui.info.stage, kind: ui.kind }) : '';
@@ -2299,7 +2240,8 @@ const roomHooks = {
 
 function hideCat() {
   cancelMove('hide');
-  updateSettings({ hidden: true });
+  ui.core.hide();
+  settingsChanged();
   closeSheet({ restore: false });
   clearSheet();
   stopTimers();
@@ -2313,7 +2255,8 @@ function hideCat() {
 }
 
 function showCat() {
-  updateSettings({ hidden: false });
+  ui.core.show();
+  settingsChanged();
   ui.lastActivity = now();
   renderAll();
   scheduleIdle();
@@ -2328,11 +2271,13 @@ function showCat() {
   announce(surface() === 'call' ? `${CALL} — снова на месте.` : `${name()} снова рядом.`);
 }
 
-// Имя сохраняется сразу, на каждый ввод: декоративные таймеры его не отменят, а закрытие уголка не ждёт отложенной записи.
+// Имя — команда ядра на каждый ввод (очистка и запись — ядро): декоративные таймеры её не отменят, а закрытие уголка не
+// ждёт отложенной записи.
 function onSheetInput(event) {
   const field = event.target;
   if (field.name !== 'cat-name') return;
-  updateSettings({ name: R.cleanName(field.value) });
+  ui.core.setName(field.value);
+  settingsChanged();
   showName();
 }
 
@@ -2374,14 +2319,17 @@ function onSheetChange(event) {
   } else if (field.name === 'cat-view' && field.checked) {
     chooseView(field.value);
   } else if (field.name === 'cat-acc' && field.checked) {
-    updateSettings({ accessory: field.value });
+    ui.core.setAppearance({ accessory: field.value });
+    settingsChanged();
     syncPickerAcc();
     paint();
   } else if (field.name === 'cat-motion' && field.checked) {
-    updateSettings({ motion: field.value });
+    ui.core.setPreferences({ motion: field.value });
+    settingsChanged();
     restartIdle();
   } else if (field.name === 'cat-phrases') {
-    updateSettings({ phrases: field.checked });
+    ui.core.setPreferences({ phrases: field.checked });
+    settingsChanged();
     if (!field.checked) hush();
     setScenePhrase(field.checked ? ui.scenePhrase : '');
   }
@@ -2417,20 +2365,19 @@ function onReducedChange() {
 
 // ---------- выбор напарника ----------
 
-// Выбрали в уголке: выбор сохраняется (другие вкладки переключатся тоже), новый напарник здоровается.
+// Выбрали в уголке: команда ядра (другие вкладки переключатся тоже), новый напарник здоровается.
 function chooseKind(kind) {
-  if (!R.KINDS.includes(kind) || kind === ui.kind) return;
-  updateSettings({ kind });
+  if (kind === ui.kind || !ui.core.setPet(kind).ok) return;
+  settingsChanged();
   applyShown(kind);
   // Фокус — на выбранном (переключатель перерисован вместе с уголком): Tab и стрелки работают дальше.
   ui.sheet?.querySelector('input[name="cat-kind"]:checked')?.focus({ preventScroll: true });
   if (!ui.settings.hidden) play(R.request(ui.director, 'meet', { now: now(), context: contextNow() }));
 }
 
-// Показать сохранённое: вид напарника и «скрыт» — по свежим значениям обоих ключей. Сравнение — с показанным (ui.kind,
-// ui.shownHidden): события storage могут прийти после обеих записей и в любом порядке, а своё действие могло прочитать
-// чужое «скрыт» раньше его события. Возвращает true, если вид или скрытие пришлось показать заново.
-function applyShown(kind = readCompanion().kind) {
+// Показать сохранённое: вид напарника и «скрыт» — по снимку ядра (оба ключа, с поглощёнными изменениями других вкладок).
+// Сравнение — с показанным (ui.kind, ui.shownHidden). Возвращает true, если вид или скрытие пришлось показать заново.
+function applyShown(kind = snap().pet.shown) {
   const next = readSettings(kind);
   if (next.hidden !== ui.shownHidden) setShown(kind, next);
   else if (kind !== ui.kind) switchKind(kind, next);
@@ -2661,25 +2608,48 @@ function onStorage(event) {
     if (event.key === K.place) forgetPlace(event);
     ui.place = readPlace();
     applyLayout();
-    if (event.key === K.place) return;
   }
-  // Облик: тихо; несохранённый здесь облик того животного уступает записанному там.
-  if (event.key === K.look || event.key === null) {
-    if (event.key === K.look) forgetLook(event);
-    ui.look = readLook();
-    if (ui.mounted) applyCoat();
-    if (event.key === K.look) return;
+  // Ключи cat, companion, look, treat событие storage передаёт координатору ядра (свежее чтение и сверка): изменение
+  // приходит обновлением ядра (onCore).
+}
+
+// Что из снимка показывает оболочка по ключам ядра: облик, лакомство, настройки (напарник, «скрыт», имена, аксессуары,
+// движение, реплики, увиденная ступень, сохранность).
+function views(state) {
+  return {
+    look: JSON.stringify([lookOf(state), state.save.look]),
+    treat: JSON.stringify([state.treat, state.save.treat]),
+    settings: JSON.stringify([state.pet, ...['cat', 'dog'].map((kind) => [state.pets[kind].name, state.pets[kind].accessory]), state.prefs, state.presence, state.progress?.seenStage, state.progress?.seenKnown, state.save.cat, state.save.companion]),
+  };
+}
+
+// Обновление ядра. Эффекты — всегда: объявления (кормление, праздник ступени) и предупреждение о повреждённом значении
+// ключа при загрузке. Изменение другой вкладки, поглощённое ядром (reason 'storage', docs/ARCHITECTURE.md § 8.6), — тихо,
+// как прежнее событие storage: облик, карточка лакомства, другой напарник или «скрыт», имя, реплики, движение, открытый
+// уголок. Свои команды оболочка показывает сама после вызова.
+function onCore({ effects, reason }) {
+  if (!ui.mounted) return;
+  for (const effect of effects) {
+    if (effect.type === 'announce') announce(effect.text);
+    else if (effect.type === 'warning' && effect.code === 'corrupt') console.warn(corruptNote(K[effect.key]));
   }
-  // Угостили (или ключ очистили): карточка и поза — тихо; несохранённая здесь отметка того же дня забывается (fedDay).
-  if (event.key === K.treat || event.key === null) {
-    if (!ui.mounted || ui.settings.hidden) return;
+  const was = ui.mirror;
+  const state = snap();
+  ui.mirror = state;
+  if (reason !== 'storage' || !was) return;
+  const shown = views(was);
+  const now = views(state);
+  if (shown.look !== now.look) {
+    ui.look = lookOf(state);
+    applyCoat();
+  }
+  // Угостили в другой вкладке: карточка и поза — тихо.
+  if (shown.treat !== now.treat && !ui.settings.hidden) {
     refreshInfo();
     syncTreat();
     paint();
-    if (event.key === K.treat) return;
   }
-  if (event.key !== K.cat && event.key !== K.companion) return;
-  forgetOverwritten(event);
+  if (shown.settings === now.settings) return;
   syncStoreNote();
   // Другая вкладка выбрала другого напарника, спрятала или вернула его — здесь так же, тихо.
   if (applyShown()) return;
@@ -2717,9 +2687,16 @@ function start(options) {
   K = R.storageKeys(options.storage);
   C = { ...CLASSES, ...options.classes };
   T = { ...TEXTS, ...options.texts };
-  loadStorage();
-  ui.look = readLook();
-  ui.kind = readCompanion().kind;
+  // Хранение: общий координатор пространства имён (загрузка — все восемь ключей) и своё подключение ядра. Ядро создаётся
+  // без записей; первое включение и приветствие — core.start ниже.
+  const storage = createWebStorage({ namespace: options.storage ?? 'pet' });
+  loadStorage(storage);
+  const owner = ui;
+  ui.core = createPetCore({ storage, progress, log: { warn: (message, error) => coreWarn(owner, message, error) } });
+  ui.mirror = snap();
+  ui.core.subscribe(safe(onCore), { initial: false });
+  ui.look = lookOf(snap());
+  ui.kind = snap().pet.shown;
   ui.settings = readSettings();
   ui.reduced = window.matchMedia(REDUCED);
   on(ui.reduced, 'change', safe(onReducedChange));
@@ -2875,18 +2852,33 @@ function start(options) {
 
   ui.mounted = true;
   document.documentElement.classList.toggle('cat-paused', document.hidden);
+  // Ядро: первое включение (история — молча) и приветствие дня — решение и неявная запись ядра; спрятан и «по зову» — без
+  // приветствия. Отказ запуска (progress() сайта бросил) — отказ подключения: mountPet откатит всё созданное.
+  ui.presence = readPresence();
+  ui.starting = true;
+  const started = ui.core.start({ around: P.petAround({ mode: ui.presence, open: false }) });
+  ui.starting = false;
+  if (!started.ok) throw ui.startError ?? new Error(started.error.message);
+  ui.settings = readSettings();
   renderAll();
   if (ui.settings.hidden) return;
   if (isTextField(document.activeElement)) setQuiet('typing', true);
   scheduleIdle();
-  // Первое открытие за день — приветствие (один раз). После паузы в два дня и больше — спокойное «рад, что ты здесь»,
-  // без упрёков. По зову — нет.
-  const today = R.localDay();
-  if (ui.settings.greetDay !== today && surface() === 'pet') {
-    const away = R.daysBetween(ui.settings.greetDay, today);
-    updateSettings({ greetDay: today }, true);
-    later('greet', 900, () => play(R.request(ui.director, 'greet', { now: now(), key: `greet:${today}`, context: contextNow(), extra: away >= 2 ? { phrases: 'welcome' } : {} })));
+  // Первое открытие за день — приветствие (решение ядра, один раз). После паузы в два дня и больше — спокойное «рад, что
+  // ты здесь», без упрёков. Проигрывание — здесь до PL04.1.
+  const greet = started.greet;
+  if (greet) later('greet', 900, () => play(R.request(ui.director, 'greet', { now: now(), key: `greet:${greet.day}`, context: contextNow(), extra: greet.welcome ? { phrases: 'welcome' } : {} })));
+}
+
+// Журнал ядра — «Питомец: …» в консоли. Во время core.start предупреждение о сбое — причина отказа подключения (её
+// сообщает mountPet одной строкой), а не отдельный журнал.
+function coreWarn(owner, message, error) {
+  if (owner.starting) {
+    owner.startError ??= error ?? new Error(message);
+    return;
   }
+  if (error === undefined) console.warn(`Питомец: ${message}`);
+  else console.warn(`Питомец: ${message}`, error);
 }
 
 // Полное отключение (и откат неудачного запуска): жесты и перенос отменены, слушатели, таймеры, наблюдатели и кадры сняты,
@@ -2903,6 +2895,7 @@ function destroy() {
     () => Room.cancelArrange('close'),
     stopMover,
     () => ui.abort?.abort(),
+    () => ui.core?.destroy(),
     stopTimers,
     () => [ui.layoutTimer, ...ui.said].forEach(clearTimeout),
     endArrive,
@@ -2936,47 +2929,30 @@ function update(flags) {
   if (changed) paint();
 }
 
-// Подтверждённое занятие (detail — { key, counted, hard, first }; null — запись не учебная): радость или поддержка,
-// праздник новой ступени, подсказка про миску (first — первое занятие дня), редкая сценка.
+// Подтверждённое занятие (detail — { key, counted, hard, first }; null — запись не учебная). Решение — ядро: знаки
+// заново, первое включение, радость или поддержка, праздник новой ступени (не в «Поиграть» и редакторе) с отметкой
+// увиденной, продолжение с новой вещью, подсказка про миску; спрятан или «по зову» и закрыт — только числа. Здесь — показ
+// и проигрывание: числа, открытый уголок, редкая сценка (PL04.2) и реакция прежним режиссёром (повтор key — его память).
+// Событие без key — как 0.1.4: ключ String(detail.key).
 function saved(detail) {
+  const event = detail ? { key: String(detail.key), counted: Boolean(detail.counted), hard: Boolean(detail.hard), first: Boolean(detail.first) } : null;
+  const result = ui.core.notify('saved', event, sight());
   ui.settings = readSettings();
-  refreshInfo();
-  // По зову (закрыт) — без реакций, праздника и объявлений; ступень увидят в уголке.
-  if (!detail || ui.settings.hidden || !around()) return;
-  const key = detail.key;
-  const outcome = R.doneOutcome(detail, ui.info.marks);
+  showProgress();
+  if (!result.ok || !result.reaction) return;
   const at = now();
-  // Новая ступень — один раз на всех вкладках этого браузера: seenStage записывается сразу. Радость и новая вещь — одно
-  // событие: вещь показывается продолжением радости. В «Поиграть» и редакторе уголок скрыт: без праздника и отметки —
-  // «Новое в уголке» при возврате (syncSheet, markSeen).
-  const stage = R.stageToCelebrate(outcome, seenStage());
-  const celebrate = ui.play || ui.room ? null : stage;
-  let follow = null;
-  if (celebrate !== null) {
-    const { items, accessories } = R.unlockedBetween(Math.max(outcome.stageBefore, seenStage()), celebrate, ui.kind);
-    // Неявная запись: подтверждённое занятие не поручение заменить повреждённые настройки.
-    updateSettings({ seenStage: celebrate }, true);
-    refreshInfo();
-    const opened = R.STAGES[celebrate];
-    const tryOn = accessories.includes('plaid') && !items.length ? 'plaid' : '';
-    // Рядом с напарником — его вещь ступени (у собаки на «Нашем ритуале» — мячик).
-    const mini = (items.includes('ball') ? 'ball' : '') || (items.find((item) => item !== 'cushion' && item !== 'bed') ?? (items.includes('bed') ? 'bed' : ''));
-    follow = { type: 'unlock', extra: { tryOn, mini, phrases: tryOn ? 'plaid' : 'unlock' } };
-    announce(`${name()}: открыта ступень «${opened.title}» — ${gift(celebrate).toLowerCase()}.`);
-  }
   // Уголок открыли, пока занятие сохранялось: числа и ступень догоняют, праздник — реакцией.
   syncSheet();
-  // Первое занятие дня открыло лакомство — радость подсказывает про миску (уголок сам не открывается).
-  const treat = !outcome.hard && ui.treat === 'ready' && detail.first ? { phrases: 'joyTreat' } : {};
   // Редкая сценка — после этой реакции, если выпала и всё ещё уместна; праздник ступени её исключает.
-  const after = sceneFor(key, outcome, stage, at) ? { after: key } : {};
-  play(R.request(ui.director, outcome.hard ? 'support' : 'joy', { now: at, key: `entry:${key}`, context: contextNow(), extra: { ...treat, ...(follow ? { follow } : {}), ...after } }));
+  const key = detail.key;
+  const after = sceneFor(key, result.scene.outcome, result.scene.stage, at) ? { after: key } : {};
+  play(R.request(ui.director, result.reaction.type, { now: at, key: result.reaction.key, context: contextNow(), extra: { ...result.reaction.extra, ...after } }));
 }
 
-// Занятие не сохранилось: награды нет, только нейтральное ожидание; ошибку показывает сайт.
+// Занятие не сохранилось: награды нет, только нейтральное ожидание (решение ядра); ошибку показывает сайт.
 function failed() {
-  if (ui.settings.hidden || !around()) return;
-  play(R.request(ui.director, 'wait', { now: now(), context: contextNow() }));
+  const result = ui.core.notify('failed', null, sight());
+  if (result.ok && result.reaction) play(R.request(ui.director, result.reaction.type, { now: now(), context: contextNow() }));
 }
 
 let current = null;

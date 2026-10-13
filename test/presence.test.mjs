@@ -111,13 +111,15 @@ test('кнопка вызова: лапка без мордашки, точек 
   const close = ui.slice(ui.indexOf('function closeSheet('), ui.indexOf('// ---------- сцена «Поиграть»'));
   assert.match(close, /ui\.source = '';/);
   assert.match(ui, /const playBack = \(\) => \(ui\.source === 'call' \? closeSheet\(\) : leavePlay\(\)\);/);
-  // Закрытый по зову питомец не реагирует на сохранение и не ждёт следующего вызова.
+  // Закрытый по зову питомец не реагирует на сохранение и не ждёт следующего вызова; в «Поиграть» и редакторе праздника,
+  // объявления и seenStage нет (их даёт markSeen при возврате). С PL03 это решение ядра (notify): оболочка передаёт ему,
+  // на виду ли питомец и какой вид открыт (sight), и своего правила праздника не держит; поведение — test/core.test.mjs.
   const saved = ui.slice(ui.indexOf('function saved('), ui.indexOf('function failed('));
-  assert.ok(saved.indexOf('!around()') > 0 && saved.indexOf('!around()') < saved.indexOf('stageToCelebrate'), 'до праздника и seenStage');
-  // Доработка 2026-10-11: в «Поиграть» и редакторе уголок скрыт — праздника, объявления и seenStage нет (их даёт markSeen
-  // при возврате); закрытый по зову диалог очищается и при смене режима; фокус спрятанного медиазапросом входа возвращается.
-  assert.match(saved, /const celebrate = ui\.play \|\| ui\.room \? null : stage;/);
-  assert.ok(saved.indexOf('const celebrate') < saved.indexOf('updateSettings({ seenStage'), 'отметка — только при празднике');
+  assert.match(saved, /ui\.core\.notify\('saved', event, sight\(\)\)/);
+  assert.match(ui, /const sight = \(\) => \(\{ around: around\(\), view: ui\.room \? 'room' : ui\.play \? 'play' : ui\.sheet\?\.open \? 'corner' : null \}\);/);
+  assert.doesNotMatch(ui, /stageToCelebrate|doneOutcome|unlockedBetween|seenStage: /, 'праздник, ступень и её отметка — только в ядре');
+  // Доработка 2026-10-11: закрытый по зову диалог очищается и при смене режима; фокус спрятанного медиазапросом входа
+  // возвращается.
   const presence = ui.slice(ui.indexOf('function applyPresence('), ui.indexOf('function choosePresence('));
   assert.match(presence, /else \{\s*calmDown\(\);\s*clearSheet\(\);\s*\}/);
   assert.match(ui, /if \(!relatedTarget && openers\(\)\.includes\(target\) && !shown\(target\)\) ui\.lostEntry = true;/);

@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
+import { coreQa } from './browser-core.mjs';
 import { storageQa } from './browser-storage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,7 +69,8 @@ function serve() {
     const { pathname } = new URL(req.url, 'http://stand');
     // Пример из README без значка: запрос браузера не считается ошибкой страницы.
     if (pathname === '/favicon.ico') return res.writeHead(204).end();
-    const name = /^\/(pet|pet2|old|old14)\/([\w-]+\.(mjs|css))$/.exec(pathname);
+    // Файлы модуля, в том числе вложенные (core/, web/); без «..» и точек в именах папок.
+    const name = /^\/(pet|pet2|old|old14)\/((?:[\w-]+\/)*[\w-]+\.(mjs|css))$/.exec(pathname);
     const dir = { old: OLD, old14: OLD14 }[name?.[1]] ?? path.join(root, 'pet');
     const file = pathname === '/' ? path.join(root, 'test', 'stand.html') : pathname === '/readme' ? 'readme.html' : pathname.startsWith('/site/') ? 'site.html' : name ? path.join(dir, name[2]) : '';
     try {
@@ -1038,6 +1040,10 @@ const petLook = (page) =>
     [LOOK, BOX],
   );
 
+// Замер вида — после анимации открытия диалога (cat-sheet-in, 0,22 с): CSS-анимация идёт в реальном времени, часы страницы
+// (page.clock) её не держат, и замер посреди неё сдвигает весь диалог.
+const opened = (page) => page.evaluate(() => Promise.all(document.querySelector('.cat-sheet').getAnimations().map((animation) => animation.finished)));
+
 async function styles(browser, base, check) {
   const label = 'модуль: стили сайта';
   const result = {};
@@ -1060,8 +1066,10 @@ async function styles(browser, base, check) {
       const open = changed(before, await computed(page), SIZES);
       check(`${label}, ${title}: открытый уголок — только блокировка прокрутки страницы (overflow у html)`, open.length > 0 && open.every((line) => /^html overflow(-x|-y|-block|-inline)?: visible → hidden$/.test(line)), open.join(' | '));
       await page.locator('.cat-settings > summary').click();
+      await opened(page);
       result[kind] = { corner: await petLook(page) };
       await page.locator('[data-cat-play]').click();
+      await opened(page);
       result[kind].play = await petLook(page);
       await page.keyboard.press('Escape');
       await page.keyboard.press('Escape');
@@ -1095,6 +1103,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await copies(browser, server.base, check);
     await styles(browser, server.base, check);
     await storageQa(browser, server.base, check, open);
+    await coreQa(browser, server.base, check, open);
   } finally {
     await server.close();
   }

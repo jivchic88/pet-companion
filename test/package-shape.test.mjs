@@ -1,11 +1,12 @@
 // Форма пакета без сборки и сети: одна версия (package.json = VERSION = README = CHANGELOG); публичные входы — только
-// mountPet, localDay, VERSION и три стиля; модуль замкнут (импорты — только своя папка, без сети и динамических
-// импортов); CSS без внешних файлов, переменные темы с рабочими значениями; package.json без зависимостей и скриптов
-// установки, exports и files согласованы; пример README = example.html; ссылки руководства — только на файлы пакета;
-// типы описывают те же экспорты, у стилей — своя декларация без значений; лицензия заполнена; в файлах пакета нет
-// следов приложения-источника.
+// mountPet, localDay, VERSION и три стиля; модуль замкнут (импорты — только относительные пути внутри pet/, в том числе
+// вложенные core/ и web/, без сети и динамических импортов); граф ядра pet/core/** — только pet/core/**; CSS без внешних
+// файлов, переменные темы с рабочими значениями; package.json без зависимостей и скриптов установки, exports и files
+// согласованы; пример README = example.html; ссылки руководства — только на файлы пакета; типы описывают те же экспорты,
+// у стилей — своя декларация без значений; лицензия заполнена; в файлах пакета нет следов приложения-источника.
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import * as Pet from '../pet/pet.mjs';
 import * as R from '../pet/pet-rules.mjs';
@@ -13,7 +14,18 @@ import * as R from '../pet/pet-rules.mjs';
 const read = (file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8');
 const pkg = JSON.parse(await read('package.json'));
 const strip = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-const runtime = async (ext) => (await readdir(new URL('../pet/', import.meta.url))).filter((file) => file.endsWith(ext)).sort();
+// Файлы pet/ с вложенными папками — пути от pet/ ('pet.mjs', 'core/index.mjs').
+const runtime = async (ext) => (await readdir(new URL('../pet/', import.meta.url), { recursive: true })).map((file) => file.split(path.sep).join('/')).filter((file) => file.endsWith(ext)).sort();
+const IMPORT = /^(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/gm;
+// Импорты файла pet/<file>: пути, разрешённые от pet/ (или null — вне pet/).
+async function imports(file) {
+  const source = await read(`pet/${file}`);
+  return [...source.matchAll(IMPORT)].map(([, from, bare]) => {
+    const spec = from ?? bare;
+    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
+    return { spec, resolved: resolved.startsWith('../') || path.posix.isAbsolute(resolved) ? null : resolved };
+  });
+}
 
 test('версия одна: package.json = VERSION = README = CHANGELOG', async () => {
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
@@ -35,17 +47,37 @@ test('публичные входы: mountPet, localDay, VERSION; localDay — �
   assert.match(Pet.localDay(), /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test('модуль замкнут: импорты — только файлы своей папки; без сети, динамических импортов и внешних адресов', async () => {
+test('модуль замкнут: импорты — только относительные пути к файлам pet/ (и вложенных папок); без сети, динамических импортов и внешних адресов', async () => {
   const files = await runtime('.mjs');
+  assert.ok(files.includes('core/index.mjs') && files.includes('web/storage.mjs'), files.join(', '));
   for (const file of files) {
-    const source = await read(`pet/${file}`);
-    for (const [, spec] of source.matchAll(/^(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/gm)) {
-      assert.match(spec, /^\.\/[\w-]+\.mjs$/, `${file}: ${spec}`);
-      assert.ok(files.includes(spec.slice(2)), `${file}: ${spec} — есть в pet/`);
+    for (const { spec, resolved } of await imports(file)) {
+      assert.match(spec, /^\.\.?\/(?:[\w-]+\/)*[\w-]+\.mjs$/, `${file}: ${spec} — относительный путь к .mjs`);
+      assert.ok(resolved && files.includes(resolved), `${file}: ${spec} — файл внутри pet/`);
     }
-    const code = strip(source);
+    const code = strip(await read(`pet/${file}`));
     assert.doesNotMatch(code, /\bimport\s*\(|\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|new Worker|serviceWorker|https?:\/\//, `${file}: сеть или внешний адрес`);
   }
+});
+
+test('граф ядра: pet/core/** импортирует только pet/core/** — ни оболочки, ни рисунков, ни стилей, ни веб-адаптеров', async () => {
+  const files = (await runtime('.mjs')).filter((file) => file.startsWith('core/'));
+  // Рекурсивно от входов ядра (экземпляр и координатор хранения — его берут адаптеры): всё достижимое — внутри core/;
+  // каждый файл core/ достижим (нет мёртвых модулей).
+  const seen = new Set();
+  const walk = async (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    for (const { spec, resolved } of await imports(file)) {
+      assert.ok(resolved?.startsWith('core/'), `${file}: ${spec} — вне pet/core/`);
+      await walk(resolved);
+    }
+  };
+  await walk('core/index.mjs');
+  await walk('core/storage.mjs');
+  assert.deepEqual([...seen].sort(), files);
+  // Ядро без обращений к браузеру (исполнение проверяет test/core.test.mjs с глобалами-ловушками).
+  for (const file of files) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto)\b|\bfetch\b/, file);
 });
 
 test('CSS: без внешних файлов; переменные темы --pet-* с рабочими значениями на :root', async () => {
@@ -101,6 +133,6 @@ test('лицензия заполнена; в файлах пакета нет �
   const license = await read('LICENSE');
   assert.match(license, /^MIT License/);
   assert.doesNotMatch(license, /<[^>]+>|\[[^\]]+\]/, 'правообладатель и год заполнены');
-  const files = ['README.md', 'CHANGELOG.md', 'example.html', ...(await readdir(new URL('../pet/', import.meta.url))).map((file) => `pet/${file}`)];
+  const files = ['README.md', 'CHANGELOG.md', 'example.html', ...(await runtime('')).filter((file) => /\.\w+$/.test(file)).map((file) => `pet/${file}`)];
   for (const file of files) assert.doesNotMatch(await read(file), /trainer\/|pet-study|cat-ui|progress\.md|ADR \d|docs\/adr|Team Lead|cloudflare|wrangler/i, file);
 });
