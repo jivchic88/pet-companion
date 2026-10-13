@@ -1,4 +1,6 @@
-// Редкие сценки после занятия (pet/pet-rules.mjs: pickScene, sceneFits, sceneWaited, sceneCommit, sceneTurn; рисунок —
+// Редкие сценки после занятия (правила — pet/core/scenes.mjs, транзакция IndexedDB — pet/web/scenes.mjs; здесь через
+// реэкспорт pet/pet-rules.mjs: pickScene, sceneFits, sceneWaited, sceneCommit, sceneTurn; конвейер попытки в ядре —
+// test/core-scenes.test.mjs и test/core-reserve.test.mjs; рисунок —
 // pet/pet.css, pet/dog.css, pet/dog-art.mjs): только подтверждённое сайтом занятие без праздника ступени; шанс 25% с
 // точной границей; одна попытка на событие; одна показанная сценка за местный день — общая для кота и собаки и для
 // вкладок: проверка и запись дня — одной транзакцией IndexedDB вместе с началом показа (отмена до него ничего не пишет;
@@ -11,6 +13,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as R from '../pet/pet-rules.mjs';
 import { dogSvg } from '../pet/dog-art.mjs';
+import { fakeIdb } from './core-kit.mjs';
 
 const repo = (file) => new URL(`../${file}`, import.meta.url);
 const DB = R.storageKeys('site').db;
@@ -29,99 +32,9 @@ const saved = (key, marks, seenStage = 0) => {
 };
 // Очередь событий: дать отработать всему, что уже запланировано.
 const turn = () => new Promise((resolve) => setImmediate(resolve));
-// IndexedDB на память — по контракту браузера: readwrite-транзакции одного хранилища идут строго по очереди (следующая
-// начинается после конца предыдущей и видит её запись), события — асинхронно; транзакция завершается сама, когда
-// запросов больше нет; исключение в обработчике или сорванная запись — откат, ничего не записано. Общая база для
-// «вкладок»: tab({ name, gate }) — результат чтения этой вкладки отдаётся только после шлюза gate, а её транзакция всё
-// это время открыта (задержка между чтением и записью); started — чьи транзакции начались, по порядку.
-function idbBackend() {
-  const data = new Map();
-  const started = [];
-  let created = false;
-  let queue = Promise.resolve();
-  const connection = (own) => ({
-    createObjectStore: (store) => assert.equal(store, 'scene'),
-    close() {},
-    transaction(store, mode) {
-      assert.deepEqual([store, mode], ['scene', 'readwrite']);
-      const writes = new Map();
-      let pending = 0;
-      let failed = false;
-      const tx = {
-        abort() {
-          failed = true;
-        },
-      };
-      let begin;
-      let end;
-      const running = new Promise((resolve) => (begin = resolve));
-      const ended = new Promise((resolve) => (end = resolve));
-      queue = queue.then(() => {
-        started.push(own.name);
-        begin();
-        return ended;
-      });
-      const settle = () =>
-        turn().then(() => {
-          if (pending) return;
-          if (failed || (own.failPut && writes.size)) tx.onabort?.();
-          else {
-            for (const [key, value] of writes) data.set(key, value);
-            tx.oncomplete?.();
-          }
-          end();
-        });
-      tx.objectStore = (name) => {
-        assert.equal(name, 'scene');
-        return {
-          get(key) {
-            const request = {};
-            pending += 1;
-            void running.then(async () => {
-              if (own.gate) await own.gate;
-              request.result = structuredClone(writes.has(key) ? writes.get(key) : data.get(key));
-              try {
-                request.onsuccess?.();
-              } catch {
-                failed = true;
-              }
-              pending -= 1;
-              void settle();
-            });
-            return request;
-          },
-          put(value, key) {
-            if (own.throwPut) throw new Error('QuotaExceededError');
-            writes.set(key, structuredClone(value));
-            return {};
-          },
-        };
-      };
-      return tx;
-    },
-  });
-  return {
-    data,
-    started,
-    tab: (own = {}) => ({
-      open(name, version) {
-        if (own.deny) throw new Error('SecurityError');
-        assert.deepEqual([name, version], [DB, 1]);
-        const request = {};
-        void turn().then(() => {
-          if (own.openError) return request.onerror?.();
-          request.result = connection(own);
-          if (!created) {
-            created = true;
-            request.onupgradeneeded?.();
-          }
-          request.onsuccess?.();
-        });
-        return request;
-      },
-    }),
-  };
-}
+// IndexedDB на память — по контракту браузера (test/core-kit.mjs fakeIdb): readwrite-транзакции одного хранилища идут строго
+// по очереди, следующая видит запись предыдущей; tab({ name, gate }) — чтение вкладки ждёт шлюза при открытой транзакции.
+const idbBackend = () => fakeIdb(DB);
 // Попытка показа вкладки by (как sceneSoon в pet/pet.mjs): решение — sceneCommit по записи в базе, показ — в shows.
 const attempt = (idb, by, shows, extra = {}) =>
   R.sceneTurn(

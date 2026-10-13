@@ -8,7 +8,19 @@ import { createCoordinator } from '../pet/core/storage.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
 
 export const DAY = '2026-10-13';
-export const CORE_KEYS = ['cat', 'companion', 'look', 'treat'];
+export const CORE_KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene'];
+// Объявление legacy-отображения (PL04.2, docs/ARCHITECTURE.md § 11.1): питомцы, виды и сценки 0.1.4.
+export const VIEWS = ['corner', 'play', 'room'];
+export const LEGACY_DISPLAY = { pets: ['cat', 'dog'], views: VIEWS, scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } };
+
+// Уголок показан и закрыт (смысл прежнего markSeen, PL04.2): виды объявлены, уголок открыт — новая ступень увидена ядром
+// (open → fresh), затем закрыт. Результат — open.
+export function corner(core) {
+  core.setDisplay({ views: VIEWS });
+  const result = core.open('corner');
+  core.close();
+  return result;
+}
 const text = (value) => (typeof value === 'string' ? value : JSON.stringify(value));
 
 // localStorage-подобное хранилище: отказы — регулярные выражения ключей (denyGet, denySet); журнал операций — общий
@@ -262,16 +274,203 @@ export function make(storage, { counts = host(), time = clock(), log = journal()
 
 // Ядро PL04.1 с ручным временем: часы calendar, ручной планировщик, заданный random; журнал обновлений (seen) и эффектов.
 // storage — уже загруженный координатор (по умолчанию — свой веб в отдельном пространстве с initial); scheduler(plan) —
-// порт планировщика поверх ручного (например, отказывающий), по умолчанию — сам ручной.
-export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal(), scheduler = (plan) => plan.port } = {}) {
+// порт планировщика поверх ручного (например, отказывающий), по умолчанию — сам ручной. PL04.2: scenes — порт
+// резервирования сценки (по умолчанию нет), display — объявление отображения до start (по умолчанию не объявлено).
+export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal(), scheduler = (plan) => plan.port, scenes = null, display = null } = {}) {
   const site = storage ? null : web(initial);
   if (site) assert.equal(site.storage.load(), 'ready');
   const plan = planner(time);
-  const core = createPetCore({ storage: storage ?? site.storage, progress: counts.progress, clock: time.port, random: random.port, scheduler: scheduler(plan), log: log.port });
+  const core = createPetCore({ storage: storage ?? site.storage, scenes, progress: counts.progress, clock: time.port, random: random.port, scheduler: scheduler(plan), log: log.port });
   const seen = [];
   core.subscribe((update) => seen.push(update), { initial: false });
+  // Отображение подписывается, затем объявляет возможности (как legacy до start).
+  if (display) assert.equal(core.setDisplay(display).ok, true);
   const effects = (type) => seen.flatMap((update) => update.effects.filter((effect) => !type || effect.type === type));
   return { ...(site ?? {}), core, counts, time, plan, random, log, seen, effects, state: () => core.getState() };
+}
+
+// ---------- резервирование дня сценки (PL04.2, docs/ARCHITECTURE.md § 9) ----------
+
+// Хранилище дня для проверок: записи по пространствам имён (days: ns → запись как есть; нет ключа — записи нет) и очередь
+// на пространство (как readwrite-транзакции IndexedDB: следующая попытка начинается после исхода предыдущей и видит её
+// запись; очередь освобождается исходом, а не жизнью ядра).
+export function sceneStore() {
+  return { days: new Map(), tails: new Map() };
+}
+
+// Порт резервирования (§ 9.1) на sceneStore: reserve(decide, show) → Promise<'shown' | 'skip' | 'fail' | 'lost'>, никогда
+// не отклоняется. mode — поведение, которое проверка меняет: hold — точки удержания без пауз ('enter' — до входа в участок,
+// 'commit' — после постановки записи и начала показа), открывает их open(point); failEnter — блокировка не взята (fail до
+// чтения); throwPut — постановка записи бросила (fail, показа нет); abort — запись откатилась после начала показа (lost).
+// steps — журнал шагов (enter, read, decide, put, show, commit/abort и исход) для проверки порядка.
+export function reserver(store = sceneStore(), ns = 'qa') {
+  const mode = { hold: new Set(), failEnter: false, throwPut: false, abort: false };
+  const calls = { reserve: 0, decide: 0, show: 0 };
+  const steps = [];
+  const waiting = [];
+  const gate = (point) => (mode.hold.has(point) ? new Promise((open) => waiting.push({ point, open })) : null);
+  const port = {
+    reserve(decide, show) {
+      calls.reserve += 1;
+      const run = async () => {
+        await gate('enter');
+        steps.push('enter');
+        if (mode.failEnter) return 'fail';
+        const stored = store.days.has(ns) ? structuredClone(store.days.get(ns)) : undefined;
+        steps.push('read');
+        let record;
+        try {
+          calls.decide += 1;
+          record = decide(stored);
+          steps.push(record ? 'decide record' : 'decide null');
+        } catch {
+          steps.push('decide threw');
+          return 'fail';
+        }
+        if (!record) return 'skip';
+        let put;
+        try {
+          if (mode.throwPut) throw new Error('quota (проверка)');
+          put = structuredClone(record);
+          steps.push('put');
+        } catch {
+          return 'fail';
+        }
+        try {
+          calls.show += 1;
+          show();
+          steps.push('show');
+        } catch {
+          steps.push('show threw');
+          return 'lost';
+        }
+        await gate('commit');
+        if (mode.abort) {
+          steps.push('abort');
+          return 'lost';
+        }
+        store.days.set(ns, put);
+        steps.push('commit');
+        return 'shown';
+      };
+      const before = store.tails.get(ns) ?? Promise.resolve();
+      const result = before.then(run).catch(() => 'fail');
+      store.tails.set(
+        ns,
+        result.then(() => {}),
+      );
+      return result.then((outcome) => (steps.push(`→ ${outcome}`), outcome));
+    },
+  };
+  return {
+    port,
+    mode,
+    calls,
+    steps,
+    waiting,
+    // Открыть первую ожидающую точку point и дать очереди продолжить.
+    async open(point) {
+      const index = waiting.findIndex((item) => item.point === point);
+      assert.ok(index >= 0, `нет ожидания ${point}`);
+      waiting.splice(index, 1)[0].open();
+      await flush();
+    },
+  };
+}
+
+// IndexedDB на память — по контракту браузера (для веб-адаптера pet/web/scenes.mjs без браузера): readwrite-транзакции
+// одного хранилища идут строго по очереди (следующая начинается после конца предыдущей и видит её запись), события —
+// асинхронно; транзакция завершается сама, когда запросов больше нет; исключение в обработчике или сорванная запись —
+// откат, ничего не записано. Общая база для «вкладок»: tab({ name, gate }) — результат чтения этой вкладки отдаётся только
+// после шлюза gate, а её транзакция всё это время открыта; started — чьи транзакции начались, по порядку. db — имя базы.
+export function fakeIdb(db) {
+  const data = new Map();
+  const started = [];
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  let created = false;
+  let queue = Promise.resolve();
+  const connection = (own) => ({
+    createObjectStore: (store) => assert.equal(store, 'scene'),
+    close() {},
+    transaction(store, mode) {
+      assert.deepEqual([store, mode], ['scene', 'readwrite']);
+      const writes = new Map();
+      let pending = 0;
+      let failed = false;
+      const tx = {
+        abort() {
+          failed = true;
+        },
+      };
+      let begin;
+      let end;
+      const running = new Promise((resolve) => (begin = resolve));
+      const ended = new Promise((resolve) => (end = resolve));
+      queue = queue.then(() => {
+        started.push(own.name);
+        begin();
+        return ended;
+      });
+      const settle = () =>
+        turn().then(() => {
+          if (pending) return;
+          if (failed || (own.failPut && writes.size)) tx.onabort?.();
+          else {
+            for (const [key, value] of writes) data.set(key, value);
+            tx.oncomplete?.();
+          }
+          end();
+        });
+      tx.objectStore = (name) => {
+        assert.equal(name, 'scene');
+        return {
+          get(key) {
+            const request = {};
+            pending += 1;
+            void running.then(async () => {
+              if (own.gate) await own.gate;
+              request.result = structuredClone(writes.has(key) ? writes.get(key) : data.get(key));
+              try {
+                request.onsuccess?.();
+              } catch {
+                failed = true;
+              }
+              pending -= 1;
+              void settle();
+            });
+            return request;
+          },
+          put(value, key) {
+            if (own.throwPut) throw new Error('QuotaExceededError');
+            writes.set(key, structuredClone(value));
+            return {};
+          },
+        };
+      };
+      return tx;
+    },
+  });
+  return {
+    data,
+    started,
+    tab: (own = {}) => ({
+      open(name, version) {
+        if (own.deny) throw new Error('SecurityError');
+        assert.deepEqual([name, version], [db, 1]);
+        const request = {};
+        void turn().then(() => {
+          if (own.openError) return request.onerror?.();
+          request.result = connection(own);
+          if (!created) {
+            created = true;
+            request.onupgradeneeded?.();
+          }
+          request.onsuccess?.();
+        });
+        return request;
+      },
+    }),
+  };
 }
 
 // Слушатель с журналом: name — подпись; record(update) → строка журнала.
@@ -308,6 +507,7 @@ export function spy(storage, list, names = []) {
           list.push(`sync ${who}`);
           client.sync(keys);
         },
+        peek: (key) => client.peek(key),
         watch: (absorb) =>
           client.watch((key, old, now) => {
             list.push(`absorb ${who} ${key}`);

@@ -14,11 +14,11 @@ import test from 'node:test';
 import { REACTIONS } from '../pet/core/director.mjs';
 import { createPetCore } from '../pet/core/index.mjs';
 import { PHRASES } from '../pet/core/phrases.mjs';
-import { calendar, DAY, host, journal, life, manual, planner } from './core-kit.mjs';
+import { calendar, DAY, host, journal, LEGACY_DISPLAY, life, manual, planner } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
 const started = (initial = { cat: CAT }, parts = {}) => {
-  const L = life(initial, { counts: host(1, 1), ...parts });
+  const L = life(initial, { counts: host(1, 1), display: LEGACY_DISPLAY, ...parts });
   assert.equal(L.core.start().ok, true);
   return L;
 };
@@ -53,13 +53,14 @@ test('до start ни задач, ни случайности, ни реакци
   const L = life({ cat: CAT }, { counts: host(1, 1) });
   L.core.setContext({ typing: true, focus: true });
   L.core.setContext({ typing: false });
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.setDisplay(LEGACY_DISPLAY);
+  L.core.open('corner');
   L.core.activity();
   L.core.setVisible(false);
   L.core.setVisible(true);
   L.core.setReducedMotion(true);
   assert.deepEqual([L.core.react('pet', { explicit: true }).played, saved(L, 'k').reacted, L.core.notify('failed', null).reacted], [false, false, false]);
-  assert.deepEqual([L.plan.calls, L.random.state.taken, playing(L), L.effects('scene')], [0, 0, null, []]);
+  assert.deepEqual([L.plan.calls, L.random.state.taken, playing(L), L.state().view, L.state().scene.waiting], [0, 0, null, { open: 'corner', source: 'pet' }, null], 'вид до start запомнен, задач нет');
   assert.equal(L.state().context.focus, true, 'контекст до start запомнен');
   assert.equal(L.core.start().ok, true);
   const calls = L.plan.calls;
@@ -100,9 +101,9 @@ test('нет утечек задач: «Скрыть», фон, по зову и
   assert.equal(L.plan.live().length, 0, 'фон');
   L.core.setVisible(true);
   assert.equal(L.plan.live().length, 4);
-  L.core.setSight({ around: false, view: null });
+  L.core.setPresence('on-call');
   assert.deepEqual(plannedMs(L), [50_400_000], 'по зову и не вызван — только полночь');
-  L.core.setSight({ around: true, view: 'play', source: 'call' });
+  L.core.open('play', { source: 'call' });
   assert.equal(L.plan.live().length, 4, 'вызван — покой заново');
   L.core.destroy();
   assert.equal(L.plan.live().length, 0);
@@ -304,7 +305,7 @@ test('местная полночь: задача до начала следую
   L.plan.advance(14 * 3_600_000 - REACTIONS.feed.ms - REACTIONS.fed.ms);
   assert.deepEqual([L.state().treat, L.state().pose.base], ['waiting', 'rest'], 'лакомство ждёт; довольство кончилось (дремота — после 3 мин)');
   assert.ok(plannedMs(L).includes(DAY_MS), 'следующая граница — по nextDay');
-  assert.equal(L.effects('scene').some((effect) => effect.step === 'start'), false, 'полночь не приветствует');
+  assert.equal(L.seen.some((update) => update.snapshot.pose.reaction?.type === 'greet'), false, 'полночь не приветствует');
 });
 
 test('полночь по смене пояса: следующая граница — по clock.nextDay, не 24 ч', () => {
@@ -376,7 +377,7 @@ test('приветствие: спрятан, «по зову», фон при �
   const hidden = started({ cat: { v: 1, seenStage: 0, hidden: true } });
   assert.deepEqual([hidden.plan.live().length, hidden.json('cat').greetDay], [0, undefined], 'спрятан — ни задач, ни дня');
   const away = life({ cat: { v: 1, seenStage: 0 } }, { counts: host(1, 1) });
-  away.core.setSight({ around: false, view: null });
+  away.core.setPresence('on-call');
   assert.equal(away.core.start().greet, null);
   assert.deepEqual(plannedMs(away), [50_400_000], '«по зову» — только полночь');
   const background = life({ cat: { v: 1, seenStage: 0 } }, { counts: host(1, 1) });

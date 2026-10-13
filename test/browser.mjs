@@ -14,7 +14,8 @@
 // без дублей; две копии модуля по разным адресам (/pet/ и /pet2/) — один питомец, отключение прежнего не задевает нового,
 // отложенное прежней копии молчит; версия 0.1.1 (/old/) — новая копия отказывает; стили сайта до и после CSS модуля и
 // подключения — минимальный сайт и сайт с общими правилами button, input, h2, dialog; сохранность данных (PL02) —
-// test/browser-storage.mjs; реакции и время на ядре (PL04.1, Р1 настоящими кнопками) — test/browser-life.mjs. Часы —
+// test/browser-storage.mjs; реакции и время на ядре (PL04.1, Р1 настоящими кнопками) — test/browser-life.mjs; присутствие,
+// виды и сценки на ядре (PL04.2, IndexedDB с управляемым шлюзом, две вкладки, сравнение с Node) — test/browser-presence.mjs. Часы —
 // page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
 // установленный Google Chrome).
 import { readFile } from 'node:fs/promises';
@@ -26,6 +27,7 @@ import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
 import { coreQa, freshQa } from './browser-core.mjs';
 import { lifeQa } from './browser-life.mjs';
+import { presenceQa } from './browser-presence.mjs';
 import { storageQa } from './browser-storage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1113,6 +1115,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await coreQa(browser, server.base, check, open);
     await freshQa(browser, server.base, check, open);
     await lifeQa(browser, server.base, check, open, layout);
+    await presenceQa(browser, server.base, check, open, layout);
   } finally {
     await server.close();
   }

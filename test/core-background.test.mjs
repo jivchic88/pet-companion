@@ -5,34 +5,36 @@
 // не доигрывает. Новые события в фоне: числа, праздник с отметкой ступени, лакомство, учёт key — как всегда, проигрывания и
 // задач нет; прямые отклики, готовое имя, другой питомец, открытие вида — тоже; запуск в фоне. Контроли (проходят и до
 // доработки): идущие реакция и сценка сняты фоном; видимая вкладка — отложенная до срока играет, явное действие «Поиграть» в
-// тишине играет; фон и «Скрыть» сохраняют учтённые события, причины тишины и паузы повторов (Р1). Данные синтетические.
+// тишине играет; фон и «Скрыть» сохраняют учтённые события, причины тишины и паузы повторов (Р1). С PL04.2 сценку
+// показывает ядро (тестовый порт резервирования), вид — open ядра; «сигнал начала сценки» стал внутренним — наблюдается
+// показ сценки и попытка (scene.waiting). Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { REACTIONS } from '../pet/core/director.mjs';
 import { QUIET_REASONS } from '../pet/core/session.mjs';
-import { DAY, host, life } from './core-kit.mjs';
+import { DAY, flush, host, LEGACY_DISPLAY, life, reserver } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY }; // приветствие сегодня уже было — запуск без него
 const started = (initial = { cat: CAT }, parts = {}) => {
-  const L = life(initial, { counts: host(1, 1), ...parts });
+  const L = life(initial, { counts: host(1, 1), display: LEGACY_DISPLAY, ...parts });
   assert.equal(L.core.start().ok, true);
   return L;
 };
 const playing = (L) => L.state().pose.reaction?.type ?? null;
 const saved = (L, key, extra = {}) => L.core.notify('saved', { key, counted: true, ...extra });
 const plannedMs = (L) => L.plan.live().map((item) => item.ms);
-// Обновления с отметки mark: была ли в снимках реакция или облако, какие сигналы сценки и движения.
+// Обновления с отметки mark: была ли в снимках реакция или облако, сценка или её попытка, движения.
 const since = (L, mark) => {
   const list = L.seen.slice(mark);
   return {
     reacted: list.some((update) => update.snapshot.pose.reaction !== null),
     phrase: list.some((update) => update.snapshot.phrase !== null),
-    starts: list.flatMap((update) => update.effects.filter((effect) => effect.type === 'scene' && effect.step === 'start')).length,
+    scene: list.some((update) => update.snapshot.pose.reaction?.scene === true || update.snapshot.scene.waiting !== null),
     micro: list.flatMap((update) => update.effects.filter((effect) => effect.type === 'micro')).length,
     warnings: list.flatMap((update) => update.effects.filter((effect) => effect.type === 'warning')).length,
   };
 };
-const QUIET = { reacted: false, phrase: false, starts: 0, micro: 0, warnings: 0 };
+const QUIET = { reacted: false, phrase: false, scene: false, micro: 0, warnings: 0 };
 
 // ---------- Отложенная и тишина ----------
 
@@ -85,20 +87,29 @@ test('фон: возврат при прежней тишине и её снят
   }
 });
 
-test('контроль: идущие реакция и сценка сняты фоном — возврат их не доигрывает (сигнал отмены, задач нет), как до доработки', () => {
-  const L = started();
-  L.core.react('stretch', { extra: { say: 'Марс потягивается.' } });
+test('контроль: идущие реакция и сценка сняты фоном — возврат их не доигрывает (попытка отменена, задач нет), как до доработки', async () => {
+  const L = started({ cat: CAT }, { scenes: reserver().port });
+  L.random.push(0, 0, 0);
+  saved(L, 'S');
+  L.plan.advance(REACTIONS.joy.ms);
+  await flush();
   assert.equal(playing(L), 'stretch');
   L.core.setVisible(false);
-  assert.deepEqual([playing(L), L.state().phrase, L.plan.live().length, L.effects('scene').at(-1).step], [null, null, 0, 'cancel']);
+  assert.deepEqual([playing(L), L.state().phrase, L.plan.live().length], [null, null, 0]);
   L.core.setVisible(true);
   L.plan.advance(REACTIONS.stretch.ms + 1000);
   assert.equal(playing(L), null, 'сценка не возобновилась');
-  saved(L, 'J');
-  L.core.setVisible(false);
-  L.core.setVisible(true);
-  L.plan.advance(REACTIONS.joy.ms);
-  assert.deepEqual([playing(L), L.effects('scene').filter((effect) => effect.step === 'end')], [null, []], 'прерванная радость не доиграна — сигнала конца нет');
+  // Другой экземпляр, свой день: попытка ждёт конца радости, фон её отменяет — прерванная радость не доиграна, резервирования нет.
+  const port = reserver();
+  const J = started({ cat: CAT }, { scenes: port.port });
+  J.random.push(0, 0, 0);
+  saved(J, 'J');
+  assert.equal(J.state().scene.waiting?.type, 'stretch');
+  J.core.setVisible(false);
+  J.core.setVisible(true);
+  J.plan.advance(REACTIONS.joy.ms);
+  await flush();
+  assert.deepEqual([playing(J), J.state().scene.waiting, port.calls.reserve], [null, null, 0], 'прерванная радость не доиграна — сценка не пробует');
 });
 
 // ---------- Новые события и входы в фоне ----------
@@ -129,8 +140,8 @@ test('фон: failed, лакомство, прямые отклики, гото�
   const fed = L.core.feed();
   assert.deepEqual([fed.ok, fed.reaction.type, fed.save.status, L.json('treat').fedDay, L.state().treat], [true, 'feed', 'saved', DAY, 'fed'], 'лакомство дня отмечено и записано');
   assert.equal(L.effects('announce').at(-1).text, 'Марс получает лакомство. Сегодня уже угостили.');
-  assert.deepEqual([L.core.react('pet', { explicit: true }).played, L.core.react('settle').played, L.core.react('curl', { extra: { say: 'Марс сворачивается клубком.' } }).played], [false, false, false]);
-  L.core.setSight({ around: true, view: 'corner' });
+  assert.deepEqual([L.core.react('pet', { explicit: true }).played, L.core.react('settle').played], [false, false]);
+  L.core.open('corner');
   assert.deepEqual([L.core.setName('Сырник', { pick: true }).reacted, L.json('cat').name], [false, 'Сырник']);
   assert.deepEqual([L.core.setPet('dog').reacted, L.state().pet.shown], [false, 'dog']);
   L.core.setContext({ typing: true });
@@ -171,7 +182,7 @@ test('контроль: в видимой вкладке снятие после
   L.core.setContext({ typing: false });
   assert.deepEqual([playing(L), L.state().phrase !== null, plannedMs(L).includes(REACTIONS.joy.ms)], ['joy', true, true]);
   L.plan.advance(REACTIONS.joy.ms);
-  L.core.setSight({ around: true, view: 'play' });
+  L.core.open('play');
   L.core.setContext({ timer: true });
   assert.deepEqual([L.core.react('pet', { explicit: true }).played, playing(L), L.state().phrase], [true, 'pet', null], 'тишина и фон — разные запреты');
 });

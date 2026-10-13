@@ -7,22 +7,34 @@
 // «Показать» и смену питомца; новое ядро — новая сессия. Тишина: независимые причины, одна самая важная отложенная в
 // пределах 60 с, декоративное не копится, отменённая сценка не возвращается, прямой отклик в тишине — без облака на
 // странице. Реплики: банк и группа, ступень, без немедленного повтора, сроки облака, выключенные реплики, реплика вида,
-// named и meet с паузами, тихий свободный ввод, настройки из другого ядра и свежая сверка. Данные синтетические.
+// named и meet с паузами, тихий свободный ввод, настройки из другого ядра и свежая сверка. С PL04.2 вид — open/close ядра,
+// «по зову» — setPresence, сценка — конвейер ядра (тестовый порт резервирования), а не react отображения; прежние сигналы
+// scene стали внутренними — вместо них наблюдаются начатые реакции и попытка сценки (scene.waiting). Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { REACTIONS } from '../pet/core/director.mjs';
 import { DOG_PHRASES, PHRASES, phraseList } from '../pet/core/phrases.mjs';
-import { DAY, host, life } from './core-kit.mjs';
+import { DAY, flush, host, LEGACY_DISPLAY, life, reserver } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY }; // приветствие сегодня уже было — запуск без него
 const started = (initial = { cat: CAT }, parts = {}) => {
-  const L = life(initial, { counts: host(1, 1), ...parts });
+  const L = life(initial, { counts: host(1, 1), display: LEGACY_DISPLAY, ...parts });
   assert.equal(L.core.start().ok, true);
   return L;
 };
 const now = (L) => L.time.state.now;
 const playing = (L) => L.state().pose.reaction?.type ?? null;
-const cues = (L, step) => L.effects('scene').filter((effect) => !step || effect.step === step).map((effect) => (effect.key === undefined ? effect.step : `${effect.step} ${effect.key}`));
+// Начатые реакции по порядку (новый номер реакции в обновлениях) — их типы.
+const starts = (L) => {
+  const out = [];
+  let last = 0;
+  for (const update of L.seen) {
+    const reaction = update.snapshot.pose.reaction;
+    if (reaction && reaction.id !== last) out.push(reaction.type);
+    if (reaction) last = reaction.id;
+  }
+  return out;
+};
 const saved = (L, key, extra = {}) => L.core.notify('saved', { key, counted: true, ...extra });
 
 // ---------- А. Реакции ----------
@@ -93,11 +105,11 @@ test('приоритеты: более важная сменяет сразу, �
   saved(L, 'c', { hard: true });
   assert.equal(playing(L), 'joy', 'равные — ждут');
   L.plan.advance(REACTIONS.joy.ms);
-  assert.deepEqual(cues(L, 'start'), ['start a', 'start b'], 'отложенная — первая из равных (c не сменила b)');
+  assert.deepEqual(starts(L), ['pet', 'joy', 'joy'], 'отложенная — первая из равных (поддержка c не сменила радость b)');
   assert.equal(playing(L), 'joy');
   L.plan.advance(REACTIONS.joy.ms);
   assert.equal(playing(L), null, 'c не сыграна — очереди нет');
-  assert.deepEqual(cues(L, 'end'), ['end b'], 'конец a — с отложенной (сигнала нет), конец b — сигнал конвейеру сценки');
+  assert.deepEqual(starts(L), ['pet', 'joy', 'joy'], 'c не сыграна и позже');
 });
 
 test('более важная отложенная опережает продолжение того же события', () => {
@@ -107,13 +119,13 @@ test('более важная отложенная опережает продо
   saved(L, 'stage');
   saved(L, 'next');
   L.plan.advance(REACTIONS.joy.ms);
-  assert.deepEqual([playing(L), cues(L, 'start')], ['joy', ['start stage', 'start next']], 'радость (4) важнее новой вещи (5)');
+  assert.deepEqual([playing(L), starts(L)], ['joy', ['joy', 'joy']], 'радость (4) важнее новой вещи (5)');
   L.plan.advance(REACTIONS.joy.ms);
   assert.equal(playing(L), null, 'продолжение не доигрывается позже');
 });
 
-test('декоративные: «устроился» не копится и не играет поверх; пауза повтора 1,5 с; сценка без анимации — статичная поза', () => {
-  const L = started();
+test('декоративные: «устроился» не копится и не играет поверх; пауза повтора 1,5 с; сценка без анимации — статичная поза', async () => {
+  const L = started({ cat: CAT }, { scenes: reserver().port });
   saved(L, 'a');
   assert.deepEqual(L.core.react('settle').played, false, 'поверх радости — нет');
   L.plan.advance(REACTIONS.joy.ms);
@@ -125,7 +137,11 @@ test('декоративные: «устроился» не копится и н
   assert.equal(L.core.react('settle').played, true);
   L.plan.advance(REACTIONS.settle.ms);
   L.core.setReducedMotion(true);
-  L.core.react('curl', { extra: { say: 'Марс сворачивается клубком.', sayShort: 'Сворачивается клубком.' } });
+  // Сценку показывает ядро: занятие (реплика радости, шанс, вариант «клубок»), конец радости — резервирование и показ.
+  L.random.push(0, 0, 0.6);
+  saved(L, 'scene');
+  L.plan.advance(REACTIONS.joy.ms);
+  await flush();
   const reaction = L.state().pose.reaction;
   assert.deepEqual([reaction.type, reaction.scene, reaction.until - now(L), L.state().pose.page], ['curl', true, REACTIONS.curl.still, 'calm'], 'сценка — поверх позы покоя, без анимации — still');
   assert.deepEqual([L.state().phrase.text, L.state().phrase.short], ['Марс сворачивается клубком.', 'Сворачивается клубком.']);
@@ -133,7 +149,7 @@ test('декоративные: «устроился» не копится и н
 
 test('прямой отклик: в тишине — в сцене без облака страницы; не обходит не менее важную и не копится; предмет сменяет предмет и декоративное', () => {
   const L = started();
-  L.core.setSight({ around: true, view: 'play' });
+  L.core.open('play');
   L.core.setContext({ timer: true });
   const pet = L.core.react('pet', { explicit: true });
   assert.equal(pet.played, true);
@@ -157,9 +173,9 @@ test('прямой отклик: в тишине — в сцене без обл
   assert.equal(L.core.react('watch', { explicit: true }).played, true, 'предмет сменяет декоративное');
 });
 
-test('прерывание и окончание без зависших примерки, вещи и облака: тишина, фон, отмена сценки', () => {
+test('прерывание и окончание без зависших примерки, вещи и облака: тишина, фон, отмена сценки', async () => {
   const counts = host(2, 1);
-  const L = started({ cat: CAT }, { counts });
+  const L = started({ cat: CAT }, { counts, scenes: reserver().port });
   counts.set(3, 2);
   saved(L, 'p');
   L.plan.advance(REACTIONS.joy.ms);
@@ -173,10 +189,15 @@ test('прерывание и окончание без зависших при�
   assert.deepEqual([L.state().pose.reaction, L.state().phrase, L.plan.live().length], [null, null, 0], 'фон — реакция, облако и задачи сняты');
   L.core.setVisible(true);
   assert.equal(playing(L), null, 'в фоне ничего не доиграно');
-  L.core.react('stretch', { extra: { say: 'Марс потягивается.' } });
+  L.plan.advance(REACTIONS.fed.ms);
+  counts.set(4, 3);
+  L.random.push(0, 0, 0);
+  saved(L, 'scene');
+  L.plan.advance(REACTIONS.joy.ms);
+  await flush();
   assert.equal(playing(L), 'stretch');
   L.core.stopScene();
-  assert.deepEqual([playing(L), L.state().phrase, cues(L).at(-1)], [null, null, 'cancel']);
+  assert.deepEqual([playing(L), L.state().phrase, L.state().scene.waiting], [null, null, null]);
 });
 
 // ---------- Б. Дедупликация и Р1 ----------
@@ -250,7 +271,7 @@ test('Р1: несколько причин — снятие одной не вы
 
 test('Р1: паузы повторов (ожидание 10 с, имя 4 с) переживают «Скрыть» / «Показать»', () => {
   const L = started();
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.open('corner');
   L.core.notify('failed', null);
   assert.equal(playing(L), 'wait');
   L.core.hide();
@@ -261,7 +282,7 @@ test('Р1: паузы повторов (ожидание 10 с, имя 4 с) п�
   assert.equal(L.core.setName('Сырник', { pick: true }).reacted, true);
   L.core.hide();
   L.core.show();
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.open('corner');
   assert.equal(L.core.setName('Бублик', { pick: true }).reacted, false, 'пауза named помнится');
   L.plan.advance(REACTIONS.named.cooldown);
   assert.equal(L.core.setName('Бублик', { pick: true }).reacted, true, 'и после неё — снова, имя то же');
@@ -274,9 +295,9 @@ test('спрятан или не на виду — событие не учит�
   L.core.show();
   assert.deepEqual([saved(L, 'K').duplicate, playing(L)], [false, 'joy'], 'ключ не был учтён');
   L.plan.advance(REACTIONS.joy.ms);
-  L.core.setSight({ around: false, view: null });
+  L.core.setPresence('on-call');
   assert.equal(saved(L, 'J').reacted, false, '«по зову» и не вызван — без реакции');
-  L.core.setSight({ around: true, view: 'play', source: 'call' });
+  L.core.open('play', { source: 'call' });
   assert.equal(saved(L, 'J').duplicate, false);
 });
 
@@ -289,11 +310,13 @@ test('событие без key — legacy String(undefined): одно на эк
 
 // ---------- В. Тишина ----------
 
-test('тишина: начало снимает реакцию и облако и отменяет сценку (сигнал); одна самая важная отложенная', () => {
-  const L = started();
+test('тишина: начало снимает реакцию и облако и отменяет сценку (попытку); одна самая важная отложенная', () => {
+  const L = started({ cat: CAT }, { scenes: reserver().port });
+  L.random.push(0, 0, 0);
   saved(L, 'a');
+  assert.equal(L.state().scene.waiting?.type, 'stretch', 'попытка сценки ждёт конца радости');
   L.core.setContext({ typing: true });
-  assert.deepEqual([playing(L), L.state().phrase, cues(L).at(-1)], [null, null, 'cancel']);
+  assert.deepEqual([playing(L), L.state().phrase, L.state().scene.waiting], [null, null, null]);
   saved(L, 'b');
   L.core.notify('failed', null); // ожидание важнее радости — заменяет отложенную
   saved(L, 'c', { hard: true });
@@ -317,16 +340,20 @@ test('тишина: отложенная актуальна до 60 с — сн�
   }
 });
 
-test('тишина: декоративное не копится, отменённая сценка не воскресает, явное — в сцене без облака страницы', () => {
-  const L = started();
-  L.core.react('stretch', { extra: { say: 'Марс потягивается.' } });
+test('тишина: декоративное не копится, отменённая сценка не воскресает, явное — в сцене без облака страницы', async () => {
+  const L = started({ cat: CAT }, { scenes: reserver().port });
+  L.random.push(0, 0, 0);
+  saved(L, 'a');
+  L.plan.advance(REACTIONS.joy.ms);
+  await flush();
+  assert.equal(playing(L), 'stretch');
   L.core.setContext({ dictation: true });
   assert.equal(playing(L), null);
   assert.equal(L.core.react('settle').played, false);
-  assert.equal(L.core.react('fetch').played, false, 'сценка в тишине не начинается');
+  assert.equal(L.core.react('fetch').error.code, 'invalid-argument', 'сценку отображение не запускает — только ядро');
   L.core.setContext({ dictation: false });
   assert.equal(playing(L), null, 'ни сценка, ни «устроился» не отложены');
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.open('corner');
   L.core.setContext({ timer: true });
   L.core.react('paw', { explicit: true });
   assert.deepEqual([playing(L), L.state().phrase, L.state().pose.page], ['paw', null, 'attentive']);
@@ -368,7 +395,7 @@ test('реплики: облако 3,2 с; выключены — облака �
   assert.notEqual(L.state().phrase, null);
   L.plan.advance(1);
   assert.equal(L.state().phrase, null, 'облако гаснет');
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.open('corner');
   const scene = L.state().scenePhrase;
   assert.ok(phraseList('scene', 0).includes(scene) && !phraseList('scene', 4).filter((text) => !phraseList('scene', 0).includes(text)).includes(scene), 'реплика уголка — без вещей будущих ступеней');
   L.core.setPreferences({ phrases: false });
@@ -378,17 +405,17 @@ test('реплики: облако 3,2 с; выключены — облака �
   assert.deepEqual([playing(L), L.state().phrase, L.state().scenePhrase], ['joy', null, '']);
   assert.equal(L.random.state.taken, taken + 1, 'реплика выбирается и при выключенных (последовательность random 0.1.4)');
   L.core.setPreferences({ phrases: true });
-  L.core.setSight({ around: true, view: null });
+  L.core.close();
   L.plan.advance(180_000);
   assert.equal(L.state().pose.resting, true);
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.open('corner');
   assert.ok(PHRASES.rest.includes(L.state().scenePhrase), 'дремал — реплика отдыха');
   assert.equal(L.state().pose.resting, false, 'открыли — проснулся');
 });
 
 test('имя: готовое — named (пауза 4 с), и то же имя; свой ввод — тихо; meet при смене питомца (пауза 6 с, помнится при смене)', () => {
   const L = started();
-  L.core.setSight({ around: true, view: 'corner' });
+  L.core.open('corner');
   assert.equal(L.core.setName('Сырник', { pick: true }).reacted, true);
   assert.equal(playing(L), 'named');
   assert.ok(PHRASES.named.includes(L.state().scenePhrase));
@@ -401,7 +428,7 @@ test('имя: готовое — named (пауза 4 с), и то же имя; �
   L.plan.advance(REACTIONS.named.ms);
   saved(L, 'a');
   assert.equal(L.core.setPet('dog').reacted, true);
-  assert.deepEqual([playing(L), cues(L).at(-1)], ['meet', 'cancel'], 'радость кота не доигрывается, собака здоровается');
+  assert.deepEqual(playing(L), 'meet', 'радость кота не доигрывается, собака здоровается');
   assert.ok(DOG_PHRASES.greet.includes(L.state().phrase.text));
   L.plan.advance(REACTIONS.meet.ms);
   assert.equal(L.core.setPet('cat').reacted, false, 'раньше 6 с — без meet, пауза общая');
@@ -412,13 +439,13 @@ test('имя: готовое — named (пауза 4 с), и то же имя; �
 
 test('смена питомца и настроек в другом ядре: прежний не доигрывает, реплика вида — нового, реплики выключены — облака нет; свежая сверка — тоже', () => {
   const one = started();
-  const two = life({}, { storage: one.storage, counts: host(1, 1) });
+  const two = life({}, { storage: one.storage, counts: host(1, 1), display: LEGACY_DISPLAY });
   assert.equal(two.core.start().ok, true);
-  two.core.setSight({ around: true, view: 'corner' });
+  two.core.open('corner');
   saved(two, 'x');
   assert.equal(playing(two), 'joy');
   one.core.setPet('dog');
-  assert.deepEqual([playing(two), two.state().pet.shown, cues(two).at(-1)], [null, 'dog', 'cancel'], 'радость кота во втором ядре не доигрывается');
+  assert.deepEqual([playing(two), two.state().pet.shown], [null, 'dog'], 'радость кота во втором ядре не доигрывается');
   assert.ok(phraseList('scene', 0, 'dog').includes(two.state().scenePhrase), 'реплика вида — собаки');
   saved(two, 'y');
   one.core.setPreferences({ phrases: false });

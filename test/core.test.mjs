@@ -6,9 +6,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPetCore, PetError } from '../pet/core/index.mjs';
-import { clock, DAY, host, idle, journal, make, spy, web } from './core-kit.mjs';
+import { clock, corner, DAY, host, idle, journal, make, spy, VIEWS, web } from './core-kit.mjs';
 
-const SEEN = { around: true };
 const started = (initial = {}, parts = {}) => {
   const site = web(initial);
   assert.equal(site.storage.load(), 'ready');
@@ -49,10 +48,10 @@ test('start: один раз — первое включение молча и �
   const { core, json, store } = started({}, { counts: host(9, 0), quiet });
   // До start команды меняют состояние, реакций нет.
   assert.equal(core.setName('Пух').save.status, 'saved');
-  const early = core.notify('saved', { key: 'e', counted: true }, SEEN);
+  const early = core.notify('saved', { key: 'e', counted: true });
   assert.deepEqual([early.ok, early.reacted, early.reaction], [true, false, null]);
   assert.deepEqual(quiet.calls, { random: 0, scheduler: 0 }, 'до start — ни задач, ни случайности');
-  const result = core.start(SEEN);
+  const result = core.start();
   assert.deepEqual([result.ok, result.greet], [true, { day: DAY, welcome: false }]);
   assert.deepEqual(json('cat'), { v: 1, name: 'Пух', seenStage: 2, greetDay: DAY }, 'первое включение (9 знаков — «Наш ритуал») и день приветствия');
   const state = core.getState();
@@ -60,14 +59,14 @@ test('start: один раз — первое включение молча и �
   const writes = store.writes.length;
   const planned = { ...quiet.calls };
   assert.ok(planned.scheduler >= 5 && planned.random >= 2, `запуск: покой, полночь и приветствие — задачи, интервалы — random: ${JSON.stringify(planned)}`);
-  assert.equal(core.start(SEEN).error.code, 'already-started');
+  assert.equal(core.start().error.code, 'already-started');
   assert.equal(store.writes.length, writes);
   assert.deepEqual(quiet.calls, planned, 'повторный start ничего не планирует');
 });
 
 test('destroy: синхронно и идемпотентно; последнее обновление — destroyed; команды — destroyed без эффектов; снимок стабилен', () => {
   const { core, store } = started();
-  core.start(SEEN);
+  core.start();
   const got = [];
   core.subscribe((update) => got.push(update.reason), { initial: false });
   core.destroy();
@@ -78,7 +77,7 @@ test('destroy: синхронно и идемпотентно; последне�
   assert.ok(Object.isFrozen(dead) && Object.isFrozen(dead.pets.cat));
   assert.equal(core.getState(), dead);
   const writes = store.writes.length;
-  const calls = [core.start(SEEN), core.setName('x'), core.setPet('dog'), core.setAppearance({ coat: 'ginger' }), core.setPreferences({ motion: 'calm' }), core.hide(), core.show(), core.feed(SEEN), core.notify('failed', null, SEEN), core.refresh(), core.markSeen()];
+  const calls = [core.start(), core.setName('x'), core.setPet('dog'), core.setAppearance({ coat: 'ginger' }), core.setPreferences({ motion: 'calm' }), core.hide(), core.show(), core.feed(), core.notify('failed', null), core.refresh(), core.open('corner'), core.close(), core.setPresence('on-call'), core.setDisplay({ full: false })];
   assert.ok(calls.every((result) => result.ok === false && result.error.code === 'destroyed'));
   assert.equal(store.writes.length, writes);
   assert.deepEqual(got, ['destroyed'], 'после destroy слушатели ничего не получают');
@@ -90,7 +89,7 @@ test('destroy: синхронно и идемпотентно; последне�
 
 test('снимок: простые данные, глубоко заморожен, та же ссылка без изменений, новый после изменения', () => {
   const { core } = started({}, { counts: host(3, 1) });
-  core.start(SEEN);
+  core.start();
   const state = core.getState();
   assert.deepEqual(JSON.parse(JSON.stringify(state)), state, 'без функций и DOM');
   const frozen = (value) => !value || typeof value !== 'object' || (Object.isFrozen(value) && Object.values(value).every(frozen));
@@ -109,7 +108,7 @@ test('снимок: простые данные, глубоко замороже
 
 test('подписка: initial синхронно до возврата; initial: false; отписка немедленная; исключение слушателя — журнал, остальные получают', () => {
   const { core, log } = started();
-  core.start(SEEN);
+  core.start();
   const list = [];
   core.subscribe((update) => list.push(`a ${update.reason}`));
   assert.deepEqual(list, ['a initial']);
@@ -135,8 +134,8 @@ test('два ядра на одном координаторе: память и 
   site.storage.load();
   const a = make(site.storage);
   const b = make(site.storage);
-  a.core.start(SEEN);
-  b.core.start(SEEN);
+  a.core.start();
+  b.core.start();
   const got = { a: [], b: [] };
   a.core.subscribe((update) => got.a.push(update.reason), { initial: false });
   b.core.subscribe((update) => got.b.push(update.reason), { initial: false });
@@ -153,7 +152,7 @@ test('два ядра на одном координаторе: память и 
 
 test('ошибки аргументов и бизнес-отказы: ok: false, снимок и хранилище без изменений', () => {
   const { core, store } = started({}, { counts: host(3, 1) });
-  core.start(SEEN);
+  core.start();
   const state = core.getState();
   const writes = store.writes.length;
   const cases = [
@@ -167,11 +166,20 @@ test('ошибки аргументов и бизнес-отказы: ok: false,
     [core.setAppearance({ coat: 'ginger', accessory: 'badge' }), 'locked'],
     [core.setPreferences({ motion: 'fast' }), 'invalid-argument'],
     [core.setPreferences({ phrases: 'да' }), 'invalid-argument'],
-    [core.notify('done', null, SEEN), 'invalid-argument'],
-    [core.notify('saved', { key: 1 }, SEEN), 'invalid-argument'],
-    [core.notify('saved', { key: 'k', counted: 'да' }, SEEN), 'invalid-argument'],
-    [core.notify('saved', { key: 'k' }, { around: 'да' }), 'invalid-argument'],
-    [core.feed({ view: 'kitchen' }), 'invalid-argument'],
+    [core.notify('done', null), 'invalid-argument'],
+    [core.notify('saved', { key: 1 }), 'invalid-argument'],
+    [core.notify('saved', { key: 'k', counted: 'да' }), 'invalid-argument'],
+    [core.notify('saved', { key: 'k' }, { scene: 'да' }), 'invalid-argument'],
+    [core.notify('saved', { key: 'k' }, { around: true }), 'invalid-argument'],
+    [core.setPresence('sometimes'), 'invalid-argument'],
+    [core.open('kitchen'), 'invalid-argument'],
+    [core.open('corner', { source: 'call' }), 'invalid-argument'],
+    [core.open('play', { source: 'tab' }), 'invalid-argument'],
+    [core.open('corner'), 'unsupported'],
+    [core.setDisplay({ views: ['kitchen'] }), 'invalid-argument'],
+    [core.setDisplay({ scenes: { cat: 'stretch' } }), 'invalid-argument'],
+    [core.setDisplay({ full: 'да' }), 'invalid-argument'],
+    [core.setDisplay({ playFloor: [0, 0, 1, 1] }), 'invalid-argument'],
   ];
   for (const [result, code] of cases) assert.deepEqual([result.ok, result.error.code], [false, code], JSON.stringify(result));
   assert.equal(core.getState(), state);
@@ -182,7 +190,7 @@ test('ошибки аргументов и бизнес-отказы: ok: false,
 test('ступени 0, 3, 9, 18, 30: первое подключение молча; праздник только ступени, открытой этим занятием, — с вещами, продолжением и отметкой', () => {
   const counts = host(0, 0);
   const { core, json } = started({}, { counts });
-  core.start(SEEN);
+  core.start();
   const stages = [0, 3, 9, 18, 30].map((marks) => {
     counts.set(marks);
     core.refresh();
@@ -195,100 +203,110 @@ test('ступени 0, 3, 9, 18, 30: первое подключение мол
   const marks = host(8, 0);
   const second = make(site.storage, { counts: marks });
   const announced = [];
-  // Сигналы конвейеру сценки (PL04.1) — не решение праздника.
-  second.core.subscribe((update) => announced.push(...update.effects.filter((effect) => effect.type !== 'save' && effect.type !== 'scene')), { initial: false });
-  second.core.start(SEEN);
+  second.core.subscribe((update) => announced.push(...update.effects.filter((effect) => effect.type !== 'save')), { initial: false });
+  second.core.start();
   assert.equal(site.json('cat').seenStage, 1);
   marks.set(9, 1);
-  const joy = second.core.notify('saved', { key: 'k9', counted: true }, SEEN);
+  const joy = second.core.notify('saved', { key: 'k9', counted: true });
   assert.equal(joy.celebrate, 2);
   assert.deepEqual(joy.reaction, { type: 'joy', key: 'entry:k9', extra: { follow: { type: 'unlock', extra: { tryOn: '', mini: 'mug', phrases: 'unlock' } } } });
   assert.equal(site.json('cat').seenStage, 2, 'отметка увиденной — сразу');
   assert.deepEqual(announced, [{ type: 'celebrate', stage: 2, items: ['mug', 'notebook'], accessories: [] }, { type: 'announce', text: 'Марс: открыта ступень «Наш ритуал» — кружка и блокнот.' }]);
   // Повтор занятия на той же ступени — без праздника; трудное — поддержка.
   marks.set(10, 2);
-  const again = second.core.notify('saved', { key: 'k10', counted: true, hard: true }, SEEN);
+  const again = second.core.notify('saved', { key: 'k10', counted: true, hard: true });
   assert.deepEqual([again.celebrate, again.reaction.type], [null, 'support']);
   // Не counted — знака нет, праздника нет.
-  assert.equal(second.core.notify('saved', { key: 'k11' }, SEEN).celebrate, null);
+  assert.equal(second.core.notify('saved', { key: 'k11' }).celebrate, null);
   assert.equal(json('cat').seenStage, 0, 'первое ядро: молчаливое первое включение на 0 знаков');
 });
 
 test('подтверждённое занятие: «Освоился» — примерка платка; собака на «Нашем ритуале» — мячик; first и готовое лакомство — подсказка про миску', () => {
   const counts = host(2, 0);
   const { core } = started({}, { counts });
-  core.start(SEEN);
+  core.start();
   counts.set(3, 1);
-  const plaid = core.notify('saved', { key: 'p', counted: true, first: true }, SEEN);
+  const plaid = core.notify('saved', { key: 'p', counted: true, first: true });
   assert.deepEqual(plaid.reaction.extra, { phrases: 'joyTreat', follow: { type: 'unlock', extra: { tryOn: 'plaid', mini: '', phrases: 'plaid' } } });
   const dogCounts = host(8, 0);
   const dog = started({ companion: { v: 1, kind: 'dog' } }, { counts: dogCounts });
-  dog.core.start(SEEN);
+  dog.core.start();
   dogCounts.set(9, 1);
-  assert.deepEqual(dog.core.notify('saved', { key: 'd', counted: true }, SEEN).reaction.extra.follow.extra, { tryOn: '', mini: 'ball', phrases: 'unlock' });
+  assert.deepEqual(dog.core.notify('saved', { key: 'd', counted: true }).reaction.extra.follow.extra, { tryOn: '', mini: 'ball', phrases: 'unlock' });
   // Лакомство уже съедено — подсказки нет.
   dogCounts.set(10, 2);
-  dog.core.feed(SEEN);
-  assert.equal(dog.core.notify('saved', { key: 'd2', counted: true, first: true }, SEEN).reaction.extra.phrases, undefined);
+  dog.core.feed();
+  assert.equal(dog.core.notify('saved', { key: 'd2', counted: true, first: true }).reaction.extra.phrases, undefined);
 });
 
-test('подтверждённое занятие: null, спрятан, не на виду — только числа; «Поиграть» и редактор — без праздника и отметки (её даст markSeen)', () => {
+test('подтверждённое занятие: null, спрятан, не на виду — только числа; «Поиграть» и редактор — без праздника и отметки (её даст уголок)', () => {
   const counts = host(2, 0);
   const { core, json } = started({}, { counts });
-  core.start(SEEN);
+  core.setDisplay({ views: VIEWS });
+  core.start();
   counts.set(3, 1);
-  const quiet = core.notify('saved', null, SEEN);
+  const quiet = core.notify('saved', null);
   assert.deepEqual([quiet.reacted, quiet.reaction, core.getState().progress.marks], [false, null, 3], 'null — только числа');
   assert.equal(json('cat').seenStage, 0);
   counts.set(9, 2);
-  const away = core.notify('saved', { key: 'a', counted: true }, { around: false });
+  core.setPresence('on-call');
+  const away = core.notify('saved', { key: 'a', counted: true });
   assert.deepEqual([away.reacted, away.celebrate, json('cat').seenStage], [false, null, 0], '«по зову» и не вызван — без праздника и отметки');
+  core.setPresence('always');
   assert.equal(core.getState().progress.unseen, true, 'новая ступень ждёт уголка');
   core.hide();
   counts.set(18, 3);
-  assert.equal(core.notify('saved', { key: 'h', counted: true }, SEEN).reacted, false, 'спрятан');
+  assert.equal(core.notify('saved', { key: 'h', counted: true }).reacted, false, 'спрятан');
   core.show();
   counts.set(19, 4);
-  const play = core.notify('saved', { key: 'pl', counted: true }, { around: true, view: 'play' });
+  core.open('play');
+  const play = core.notify('saved', { key: 'pl', counted: true });
   assert.deepEqual([play.reacted, play.celebrate, play.scene.stage, json('cat').seenStage], [true, null, null, 0], '18→19 не открывает ступень');
   counts.set(29, 5);
   core.refresh();
   counts.set(30, 6);
-  const room = core.notify('saved', { key: 'r', counted: true }, { around: true, view: 'room' });
+  core.open('room');
+  const room = core.notify('saved', { key: 'r', counted: true });
   assert.deepEqual([room.celebrate, room.scene.stage, json('cat').seenStage], [null, 4, 0], 'в редакторе — без праздника; сценке — ступень события');
   assert.deepEqual(core.getState().progress.fresh, ['mug', 'notebook', 'bed', 'lamp', 'plant', 'board']);
-  assert.equal(core.markSeen().changed, true);
-  assert.deepEqual([json('cat').seenStage, core.getState().progress.unseen], [4, false]);
-  assert.equal(core.markSeen().changed, false);
+  // Возврат в уголок — новая ступень увидена (её вещи — fresh, для «Новое в уголке»); повторно — ничего.
+  const back = core.open('corner');
+  assert.deepEqual([back.fresh, json('cat').seenStage, core.getState().progress.unseen], [['mug', 'notebook', 'bed', 'lamp', 'plant', 'board'], 4, false]);
+  core.close();
+  assert.deepEqual(corner(core).fresh, []);
 });
 
 test('notify failed: нейтральное ожидание; спрятан или не на виду — ничего; до start — ничего', () => {
   const { core } = started();
-  assert.equal(core.notify('failed', null, SEEN).reaction, null, 'до start');
-  core.start(SEEN);
-  assert.deepEqual(core.notify('failed', null, SEEN).reaction, { type: 'wait' });
-  assert.equal(core.notify('failed', null, { around: false }).reaction, null);
+  assert.equal(core.notify('failed', null).reaction, null, 'до start');
+  core.start();
+  assert.deepEqual(core.notify('failed', null).reaction, { type: 'wait' });
+  core.setPresence('on-call');
+  assert.equal(core.notify('failed', null).reaction, null);
+  core.setPresence('always');
   core.hide();
-  assert.equal(core.notify('failed', null, SEEN).reaction, null);
+  assert.equal(core.notify('failed', null).reaction, null);
 });
 
 test('лакомство: день — заново; одно в день, общее для кота и собаки; отметка и запись до реакции; синхронный итог — в объявлении', () => {
   const counts = host(0, 0);
   const time = clock();
   const { core, json, store, keys } = started({}, { counts, time });
-  core.start(SEEN);
+  core.start();
   const state = core.getState();
-  assert.deepEqual([core.feed(SEEN).error.code, core.getState()], ['treat-waiting', state], 'до занятия — отказ без изменений');
+  assert.deepEqual([core.feed().error.code, core.getState()], ['treat-waiting', state], 'до занятия — отказ без изменений');
   counts.set(1, 1);
   const said = [];
   core.subscribe((update) => said.push(...update.effects.filter((effect) => effect.type === 'announce').map((effect) => effect.text)), { initial: false });
-  const fed = core.feed(SEEN);
+  const fed = core.feed();
   assert.deepEqual([fed.ok, fed.save.status, fed.reaction.key, json('treat'), core.getState().treat], [true, 'saved', `feed:${DAY}`, { v: 1, fedDay: DAY }, 'fed']);
   assert.deepEqual(said, ['Марс получает лакомство. Сегодня уже угостили.']);
-  assert.equal(core.feed(SEEN).error.code, 'treat-fed');
+  assert.equal(core.feed().error.code, 'treat-fed');
   core.setPet('dog');
-  assert.equal(core.feed(SEEN).error.code, 'treat-fed', 'общее для кота и собаки');
-  assert.equal(core.feed({ around: false }).error.code, 'away');
+  assert.equal(core.feed().error.code, 'treat-fed', 'общее для кота и собаки');
+  core.setPresence('on-call');
+  assert.equal(core.feed().error.code, 'away', '«по зову» и не вызван — away раньше отказа по дню');
+  core.setPresence('always');
   // Новый местный день: лакомство снова ждёт занятия.
   time.state.day = '2026-10-14';
   counts.set(1, 0);
@@ -296,27 +314,27 @@ test('лакомство: день — заново; одно в день, об�
   assert.equal(core.getState().treat, 'waiting');
   counts.set(2, 1);
   store.denySet = new RegExp(keys.treat);
-  const lost = core.feed(SEEN);
+  const lost = core.feed();
   assert.deepEqual([lost.ok, lost.save.status, core.getState().treat, core.getState().save.treat.status], [true, 'failed', 'fed', 'failed'], 'отказ записи: отметка в памяти, второго лакомства нет');
   assert.equal(said.at(-1), 'Тоби получает лакомство. Сегодня уже угостили, но отметка не сохранилась в этом браузере.');
-  assert.equal(core.feed(SEEN).error.code, 'treat-fed');
+  assert.equal(core.feed().error.code, 'treat-fed');
   core.hide();
-  assert.equal(core.feed(SEEN).error.code, 'hidden');
+  assert.equal(core.feed().error.code, 'hidden');
 });
 
 test('приветствие: раз в местный день; после паузы ≥ 2 дней — welcome; спрятан или «по зову» — нет; непонятный день заменяется', () => {
   const site = web({ cat: { v: 3, greetDay: '2026-10-10', future: 1, seenStage: 0 } });
   site.storage.load();
-  const first = make(site.storage).core.start(SEEN);
+  const first = make(site.storage).core.start();
   assert.deepEqual(first.greet, { day: DAY, welcome: true });
   assert.deepEqual(site.json('cat'), { v: 3, greetDay: DAY, future: 1, seenStage: 0 });
   const writes = site.store.writes.length;
-  assert.equal(make(site.storage).core.start(SEEN).greet, null, 'тот же день — без приветствия и записи');
+  assert.equal(make(site.storage).core.start().greet, null, 'тот же день — без приветствия и записи');
   assert.equal(site.store.writes.length, writes);
   const day = (greetDay) => {
     const one = web({ cat: { v: 1, seenStage: 0, greetDay } });
     one.storage.load();
-    return { greet: make(one.storage).core.start(SEEN).greet, cat: one.json('cat') };
+    return { greet: make(one.storage).core.start().greet, cat: one.json('cat') };
   };
   assert.deepEqual(day('2026-10-12').greet, { day: DAY, welcome: false });
   assert.deepEqual(day('2026-10-11').greet, { day: DAY, welcome: true });
@@ -324,16 +342,16 @@ test('приветствие: раз в местный день; после па
   assert.deepEqual([odd.greet, odd.cat.greetDay], [{ day: DAY, welcome: false }, DAY], 'день приветствия — заменяемое поле');
   const hidden = web({ cat: { v: 1, hidden: true, seenStage: 0 } });
   hidden.storage.load();
-  assert.equal(make(hidden.storage).core.start(SEEN).greet, null);
+  assert.equal(make(hidden.storage).core.start().greet, null);
   assert.equal(hidden.json('cat').greetDay, undefined);
-  const call = web({ cat: { v: 1, seenStage: 0 } });
+  const call = web({ cat: { v: 1, seenStage: 0 }, presence: { v: 1, mode: 'on-call' } });
   call.storage.load();
-  assert.equal(make(call.storage).core.start({ around: false }).greet, null, '«по зову» — без приветствия');
+  assert.equal(make(call.storage).core.start().greet, null, '«по зову» — без приветствия');
   // Повреждённый ключ: решение приветствия есть, неявная запись его не заменяет.
   const broken = web({ cat: '{' });
   broken.storage.load();
   const core = make(broken.storage).core;
-  assert.notEqual(core.start(SEEN).greet, null);
+  assert.notEqual(core.start().greet, null);
   assert.deepEqual([broken.raw('cat'), broken.store.writes.length], ['{', 0]);
   assert.deepEqual(core.getState().save.cat, { status: 'failed', pending: [], unsaved: ['seenStage', 'greetDay'], corrupt: true });
 });
@@ -347,7 +365,7 @@ test('PL02 через команды: неизвестные поля, влож�
   };
   const counts = host(3, 1);
   const { core, json, storage, store } = started(seed, { counts });
-  core.start(SEEN);
+  core.start();
   assert.deepEqual(json('cat'), { ...seed.cat, seenStage: 1, greetDay: DAY });
   const state = core.getState();
   assert.deepEqual([state.pet, state.look.coat, state.name.display, state.look.accessory], [{ id: 'example.bunny', shown: 'cat', available: false }, 'smoke', 'Барсик', 'scarf'], 'непонятное — безопасный показ');
@@ -355,7 +373,7 @@ test('PL02 через команды: неизвестные поля, влож�
   core.setPreferences({ motion: 'calm' });
   core.setAppearance({ accessory: 'plaid' });
   assert.deepEqual(json('cat'), { ...seed.cat, seenStage: 1, greetDay: DAY, name: 'Дымок', motion: 'calm', accessory: 'plaid' });
-  core.feed(SEEN);
+  core.feed();
   assert.deepEqual(json('treat'), { ...seed.treat, fedDay: DAY });
   core.setAppearance({ coat: 'ginger' });
   assert.deepEqual(json('look'), { ...seed.look, cat: 'ginger' });
@@ -373,7 +391,7 @@ test('PL02 через команды: неизвестные поля, влож�
   const writes = store.writes.length;
   assert.equal(storage.load(), 'ready');
   const again = make(storage, { counts }).core;
-  again.start(SEEN);
+  again.start();
   assert.deepEqual([again.getState().pet.shown, again.getState().name.display, again.getState().look.coat, again.getState().treat], ['dog', 'Барклий', 'spotted', 'fed']);
   assert.equal(store.writes.length, writes, 'повторное подключение и запуск в тот же день ничего не пишут');
 });
@@ -383,15 +401,15 @@ for (const odd of [8, 'future-stage']) {
     const stored = { v: 3, name: 'Марс', accessory: 'crown', seenStage: odd, greetDay: DAY, future: { a: 1 } };
     const counts = host(2, 0);
     const { core, json, store, keys } = started({ cat: stored }, { counts });
-    core.start(SEEN);
+    core.start();
     assert.deepEqual([store.writes.filter((key) => key === keys.cat).length, json('cat')], [0, stored], 'подключение ничего не пишет');
     assert.deepEqual([core.getState().progress.seenKnown, core.getState().progress.seenStage], [false, -1]);
     counts.set(3, 1);
-    const result = core.notify('saved', { key: 'u', counted: true }, SEEN);
+    const result = core.notify('saved', { key: 'u', counted: true });
     assert.deepEqual([result.reacted, result.celebrate, core.getState().progress.unseen, core.getState().progress.stage], [true, null, false, 1], 'вещи по знакам, без праздника и «нового»');
     counts.set(9, 2);
     core.refresh();
-    assert.equal(core.markSeen().changed, false);
+    assert.deepEqual(corner(core).fresh, [], 'уголок: непонятная ступень не отмечается');
     assert.deepEqual(json('cat'), stored);
     core.setName('Дымок');
     core.setPreferences({ motion: 'calm' });
@@ -401,9 +419,9 @@ for (const odd of [8, 'future-stage']) {
   test(`непонятная ступень ${JSON.stringify(odd)} после отказа: память правок не уносит ступень; событие другой вкладки её забывает`, () => {
     const counts = host(3, 1);
     const site = started({ cat: { v: 1, seenStage: 0, greetDay: DAY } }, { counts });
-    site.core.start(SEEN);
+    site.core.start();
     site.store.denyGet = new RegExp(site.keys.cat);
-    assert.equal(site.core.markSeen().save.status, 'failed', 'отказ свежего чтения — правка в памяти');
+    assert.equal(corner(site.core).save.status, 'failed', 'отказ свежего чтения — правка в памяти');
     assert.deepEqual(site.core.getState().save.cat.unsaved, ['seenStage']);
     site.store.denyGet = null;
     const restored = { v: 3, name: 'Марс', seenStage: odd, greetDay: DAY, future: { a: 1 } };
@@ -413,9 +431,9 @@ for (const odd of [8, 'future-stage']) {
     assert.deepEqual(site.core.getState().save.cat, { status: 'saved', pending: [], unsaved: [], corrupt: false });
     // Другая вкладка: отказ, затем внешнее неизвестное значение с событием — несохранённое забыто.
     const other = started({ cat: { v: 1, seenStage: 0, greetDay: DAY } }, { counts: host(3, 1) });
-    other.core.start(SEEN);
+    other.core.start();
     other.store.denySet = new RegExp(other.keys.cat);
-    other.core.markSeen();
+    corner(other.core);
     other.store.denySet = null;
     other.put('cat', restored);
     other.events.fire(other.keys.cat);
@@ -427,8 +445,8 @@ for (const odd of [8, 'future-stage']) {
     other.storage.load();
     const writes = other.store.writes.length;
     const again = make(other.storage, { counts: host(9, 2) }).core;
-    again.start(SEEN);
-    again.markSeen();
+    again.start();
+    corner(again);
     assert.equal(other.store.writes.length, writes);
   });
 }
@@ -437,17 +455,17 @@ test('известная ступень правкой из памяти не п
   for (const start of [undefined, { v: 2, name: 'Барсик', greetDay: DAY, future: 1 }, { v: 1, seenStage: -1, greetDay: DAY }]) {
     const counts = host(9, 0);
     const site = started(start ? { cat: start } : {}, { counts });
-    site.core.start(SEEN);
+    site.core.start();
     assert.equal(site.json('cat').seenStage, 2, JSON.stringify(start));
     counts.set(18, 1);
-    assert.equal(site.core.notify('saved', { key: 'n', counted: true }, SEEN).celebrate, 3);
+    assert.equal(site.core.notify('saved', { key: 'n', counted: true }).celebrate, 3);
     assert.equal(site.json('cat').seenStage, 3);
   }
   const counts = host(3, 1);
   const site = started({ cat: { v: 1, seenStage: 0, greetDay: DAY } }, { counts });
-  site.core.start(SEEN);
+  site.core.start();
   site.store.denySet = new RegExp(site.keys.cat);
-  site.core.markSeen(); // в памяти — 1
+  corner(site.core); // в памяти — 1
   site.store.denySet = null;
   site.put('cat', { v: 1, seenStage: 3, greetDay: DAY }); // выше, без события
   site.core.setName('Дымок');
@@ -456,17 +474,17 @@ test('известная ступень правкой из памяти не п
 
 test('четыре случая чтения: нет ключа — запись; повреждено — неявные не пишут, явная заменяет свой ключ; отказ загрузки — ни одной записи', () => {
   const missing = started({}, { counts: host(3, 1) });
-  missing.core.start(SEEN);
+  missing.core.start();
   assert.deepEqual(missing.json('cat'), { v: 1, seenStage: 1, greetDay: DAY });
   for (const value of ['', '{', '[1]', '"текст"', '42', 'null']) {
     const counts = host(2, 0);
     const site = started({ cat: value, companion: value, look: value, treat: value }, { counts });
     const warned = [];
     site.core.subscribe((update) => warned.push(...update.effects.filter((effect) => effect.type === 'warning').map((effect) => effect.key)), { initial: false });
-    site.core.start(SEEN);
+    site.core.start();
     counts.set(3, 1);
-    site.core.notify('saved', { key: 'c', counted: true }, SEEN);
-    site.core.markSeen();
+    site.core.notify('saved', { key: 'c', counted: true });
+    corner(site.core);
     assert.deepEqual([site.store.writes.length, warned], [0, ['cat', 'companion', 'look', 'treat']], JSON.stringify(value));
     assert.ok(['cat', 'companion', 'look', 'treat'].every((key) => site.core.getState().save[key].corrupt));
     site.core.setName('Мурзик');
@@ -481,11 +499,11 @@ test('четыре случая чтения: нет ключа — запись
   assert.equal(site.storage.load(), 'failed');
   site.store.denyGet = null;
   const offline = make(site.storage, { counts: host(3, 1) }).core;
-  offline.start(SEEN);
+  offline.start();
   assert.deepEqual([offline.getState().storage, offline.getState().name.display, offline.getState().save.cat.status], ['failed', 'Марс', 'unavailable']);
   assert.equal(offline.setName('Дымок').save.status, 'failed');
   offline.setAppearance({ coat: 'ginger' });
-  offline.feed(SEEN);
+  offline.feed();
   site.put('cat', { ...original.cat, name: 'Пиксель' });
   site.events.fire(site.keys.cat);
   assert.deepEqual([offline.getState().name.display, site.store.writes.length], ['Дымок', 0], 'чужие записи не читает, своих не делает');
@@ -497,7 +515,7 @@ test('четыре случая чтения: нет ключа — запись
 
 test('повторное подключение: несохранённые правки прежнего не наследуются; подтверждённое — да', () => {
   const site = started();
-  site.core.start(SEEN);
+  site.core.start();
   site.store.denySet = new RegExp(site.keys.cat);
   site.core.setName('Дымок');
   site.store.denySet = null;
@@ -520,11 +538,11 @@ test('внутренний сбой до применения: progress() бро
   };
   const quiet = idle();
   const core = createPetCore({ storage: site.storage, progress, clock: time.port, log: log.port, random: quiet.random, scheduler: quiet.scheduler });
-  core.start(SEEN);
+  core.start();
   const state = core.getState();
   const writes = site.store.writes.length;
   failing = true;
-  for (const result of [core.refresh(), core.notify('saved', { key: 'x', counted: true }, SEEN), core.feed(SEEN)]) assert.deepEqual([result.ok, result.error.code], [false, 'internal'], JSON.stringify(result));
+  for (const result of [core.refresh(), core.notify('saved', { key: 'x', counted: true }), core.feed()]) assert.deepEqual([result.ok, result.error.code], [false, 'internal'], JSON.stringify(result));
   failing = false;
   time.state.day = 'завтра';
   assert.equal(core.refresh().error.code, 'internal');

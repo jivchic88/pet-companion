@@ -172,21 +172,12 @@ export function placeNote(layout) {
 }
 
 // ---------- присутствие (ключ presence): always — рядом, on-call — кнопка вызова; «скрыт» — отдельно ----------
+// Формат, поверхность и «на виду» — правила ядра (pet/core/presence.mjs, PL04.2): здесь реэкспортом для оставшегося
+// веб-кода и проверок; подписи переключателя — у отображения.
+
+export { parsePresence, petAround, presenceOf, presenceRecord, presenceSurface } from './core/presence.mjs';
 
 export const PRESENCES = [
   { id: 'always', title: 'Всегда рядом', note: 'Питомец остаётся рядом со страницей.' },
   { id: 'on-call', title: 'Приходит по зову', note: 'Без постоянной мордашки. Позови кнопкой, когда захочешь.' },
 ];
-export const presenceOf = (value) => (PRESENCES.some((item) => item.id === value) ? value : 'always');
-// Нет ключа, повреждено, неизвестно — always.
-export const parsePresence = (text) => presenceOf(readJson(text).mode);
-// Запись: свежее сохранённое (с полями будущих версий) + режим.
-export function presenceRecord(text, mode) {
-  const keep = readJson(text);
-  return { ...keep, v: Number.isInteger(keep.v) && keep.v > 1 ? keep.v : 1, mode: presenceOf(mode) };
-}
-
-// Рядом со страницей: 'pet', 'call' или 'none' (скрыт).
-export const presenceSurface = (mode, hidden = false) => (hidden ? 'none' : presenceOf(mode) === 'on-call' ? 'call' : 'pet');
-// Питомец на виду (можно декоративное): рядом или вызван, не скрыт, вкладка видна.
-export const petAround = ({ mode, hidden = false, open = false, pageHidden = false } = {}) => !hidden && !pageHidden && (open || presenceOf(mode) !== 'on-call');

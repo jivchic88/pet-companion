@@ -1,29 +1,37 @@
-// Ядро: сессия экземпляра (docs/ARCHITECTURE.md § 4.4–4.5, § 5.1, § 6.4, § 10; срез PL04.1) — проигрывание реакций и их
-// продолжения, память обработанных событий и пауз повторов, тишина и контекст страницы, активность, покой (моргание,
-// одиночные движения, зевок, дремота), местная полночь, видимость, уменьшение движения, реплики и облако, приветствие.
+// Ядро: сессия экземпляра (docs/ARCHITECTURE.md § 4.4–4.5, § 5.1, § 6.4, § 9, § 10; срезы PL04.1 и PL04.2) — проигрывание
+// реакций и их продолжения, память обработанных событий и пауз повторов, тишина и контекст страницы, активность, покой
+// (моргание, одиночные движения, зевок, дремота), местная полночь, видимость, уменьшение движения, реплики и облако,
+// приветствие; с PL04.2 — открытый вид и его источник, присутствие (поверхность и «на виду»), объявление отображения
+// (setDisplay) и редкая сценка: выбор, попытка, отмена и резервирование дня (порт scenes).
 // Только память экземпляра: она живёт до destroy, «Скрыть» и «Показать» её не сбрасывают (исправление Р1). Время,
 // случайность и задачи — порты clock, random, scheduler; хранение, счёт и решения среза PL03 — у экземпляра (index.mjs),
-// который даёт чтение (sense: показанный питомец, настройки, ступень, лакомство), пересчёт счёта и дня (refresh) и раунд
-// для сработавшей задачи (run). Сессия ничего не пишет и слушателей не вызывает: эффекты (emit) и сбои оркестровки (fault)
-// копит экземпляр — сбой даёт результат с degraded, эффект warning internal и журнал (§ 5.5).
+// который даёт чтение (sense: показанный питомец, настройки, присутствие, ступень, лакомство, копия дня сценки), пересчёт
+// счёта и дня (refresh), раунд для сработавшей задачи (run) и для шагов резервирования (stage), свежую копию дня (mirror) и
+// её запись (keep). Сессия сама ничего не пишет и слушателей не вызывает: эффекты (emit) и сбои оркестровки (fault) копит
+// экземпляр — сбой даёт результат с degraded, эффект warning internal и журнал (§ 5.5).
 //
 // Отказ планировщика (later бросил или выполнил задачу внутри себя, отмена бросила) сессия не бросает дальше: остальная
 // оркестровка продолжается, а то, что без своей задачи осталось бы навсегда, не показывается — реакция без задачи конца
 // снята вместе с облаком, облако без задачи — не появляется. Повторного планирования нет.
 //
-// Временная граница до PL04.2/PL04.3 — простые данные, без DOM и колбэков с правилами: sight = { around, view } (питомец на
-// виду и открытый вид — пока присутствие и виды у отображения), source открытия ('pet' | 'call'), занятость жестом (busy),
-// прямой запрос отклика игры, предметов, «устроился» и сценки (react), остановка сценки (stopScene); эффекты
-// { type: 'scene', step: 'cancel' | 'start' | 'end', key } — сигналы оставшемуся у отображения конвейеру редкой сценки.
+// Временная граница до PL04.3 — простые данные, без DOM и колбэков с правилами: занятость жестом (busy), прямой запрос
+// отклика игры, предметов и «устроился» (react), отмена сценки сменой места legacy-раскладки (stopScene).
 
 import { ACTIVITY_MS, basePose, blinkDelay, createDirector, effectiveMotion, finish, GREET_MS, MICRO_MS, microDelay, microKinds, OPEN_MICRO_MS, PHRASE_MS, playing, REACTIONS, REACTION_MIN_MS, request, REST_AFTER_MS, setBackground, setQuiet, YAWN_CHANCE } from './director.mjs';
 import { pickPhrase } from './phrases.mjs';
-import { profileOf } from './pets.mjs';
+import { kindOf, profileOf } from './pets.mjs';
+import { petAround, presenceSurface } from './presence.mjs';
+import { pickScene, SCENE_FRESH_MS, sceneCommit, sceneFits, sceneOptions, sceneText, sceneWaited } from './scenes.mjs';
 
 // Причины тишины — независимы: снятие одной не снимает другие.
 export const QUIET_REASONS = ['timer', 'dictation', 'dialog', 'typing'];
+// Смысловые виды: уголок, «Поиграть», «Обустроить уголок». Какие есть — объявляет отображение (setDisplay({ views })).
+export const VIEW_IDS = ['corner', 'play', 'room'];
+// Исходы резервирования (§ 9.1).
+const OUTCOMES = ['shown', 'skip', 'fail', 'lost'];
+const CLOSED = Object.freeze({ open: null, source: '' });
 
-export function createSession({ clock, random, scheduler, sense, emit, fault, run, refresh }) {
+export function createSession({ clock, random, scheduler, sense, emit, fault, run, refresh, scenes = null, mirror = () => null, keep = () => {}, stage = () => false, guard = (fn) => fn(), warn = () => {} }) {
   const d = createDirector();
   let started = false;
   let alive = true;
@@ -34,21 +42,31 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   let visible = true;
   let reduced = false;
   let busy = false; // идёт жест указателем (поглаживание, предмет, перенос в редакторе) — временный вход до PL04.3
-  let sight = { around: true, view: null };
+  // Открытый вид и источник открытия (pet — уголок или кнопка питомца, call — вызов «по зову»); источник — до закрытия.
+  let view = CLOSED;
+  // Объявление отображения (§ 6.4, setDisplay): full — показ целиком (иначе портрет), moving — идёт перенос, pets —
+  // нарисованные питомцы (null — не объявлено: все зарегистрированные), views — виды (не объявлено — ни одного), scenes —
+  // объявленные сценки { petId: [sceneId, …] } (null — не объявлено: ни одной; это разрешение, а не ограничение).
+  let display = { full: true, moving: false, pets: null, views: [], scenes: null };
+  let attempt = null; // попытка сценки: { type, key, day, at, until, kind } — до решения резервирования, отмены или срока
+  let inflight = null; // идущее резервирование: { attempt, step, id, patch, type }
+  const checked = new Set(); // события, для которых сценку уже выбирали (одна попытка на событие), — до destroy
   let resting = false;
   let lastActivity = 0;
   let phrase = null; // облако на странице: { text, short, until }
   let scenePhrase = ''; // реплика открытого уголка и «Поиграть»
   let lastPhrase = '';
   let seq = 0; // номер реакции — отличить новую реакцию с той же позой и показ сценки
-  let applied = null; // последнее согласованное: питомец, «скрыт», движение, реплики
+  let applied = null; // последнее согласованное: питомец, «скрыт», движение, реплики, присутствие, облик
 
   const now = () => clock.now();
   const quiet = () => d.quiet.size > 0;
   const motionOf = (s) => effectiveMotion(s, reduced);
+  // Питомец на виду: не спрятан и рядом («Всегда рядом») либо вызван (открыт вид). Видимость вкладки — отдельно (visible).
+  const around = (s) => petAround({ mode: s.mode, hidden: s.hidden, open: view.open !== null });
   // Полночь — служебная (питомец не спрятан, вкладка видна); декоративное — только пока питомец на виду.
   const live = (s) => started && alive && !s.hidden && visible;
-  const active = (s) => live(s) && sight.around;
+  const active = (s) => live(s) && around(s);
   const contextNow = () => (focus ? 'focus' : 'calm');
 
   // ---------- задачи ----------
@@ -119,7 +137,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     if (!text || !s.phrases) return;
     lastPhrase = text;
     if (!quiet()) phrase = { text, short, until: now() + PHRASE_MS };
-    if (sight.view !== null) scenePhrase = text;
+    if (view.open !== null) scenePhrase = text;
     const placed = later('phrase', PHRASE_MS, () => {
       phrase = null;
     });
@@ -135,8 +153,9 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
 
   // Итог режиссёра: play — реакция началась (поза, примерка и вещь — её поля, реплика, срок), stop — остановлена.
   // Конец — задача reaction, она ставится первой: без неё реакция снята сразу (вместе с облаком; ждущая сценка события
-  // отменена), а сбой после её постановки (реплика) не оставляет реакцию навсегда. В конце — продолжение того же события
-  // или отложенная; иначе — сигнал конвейеру сценки. Возвращает, идёт ли реакция.
+  // отменена), а сбой после её постановки (реплика) не оставляет реакцию навсегда. Реакция занятия (event) началась —
+  // ждала тишины дольше перехода: ждущая сценка этого события отменяется, а не переносится (sceneWaited). Возвращает, идёт
+  // ли реакция.
   function begin(result) {
     if (result.action === 'stop') {
       stop();
@@ -149,10 +168,10 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     if (!later('reaction', Math.max(REACTION_MIN_MS, r.until - now()), () => end(r))) {
       d.current = null;
       hush();
-      if (r.event !== undefined) emit({ type: 'scene', step: 'cancel' });
+      if (r.event !== undefined) attempt = null;
       return false;
     }
-    if (r.event !== undefined) emit({ type: 'scene', step: 'start', key: r.event });
+    if (r.event !== undefined && attempt?.key === r.event && sceneWaited(attempt, now())) attempt = null;
     const s = sense();
     const group = r.phrases ?? REACTIONS[r.type].phrases;
     if (r.say) say(s, r.say, r.sayShort ?? '');
@@ -160,11 +179,13 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     return true;
   }
 
+  // Конец реакции: продолжение того же события или отложенная; иначе — покой и, если реакция была реакцией занятия с
+  // выбранной сценкой, её показ (если всё ещё уместна).
   function end(r) {
     const next = finish(d, now());
     if (next.action === 'play') begin(next);
-    else if (r.event !== undefined) emit({ type: 'scene', step: 'end', key: r.event });
     scheduleRest(sense());
+    if (next.action !== 'play' && r.event !== undefined) sceneSoon(r.event);
   }
 
   // Запрос режиссёру (до start реакций нет). Сценка без анимации — статичная поза своей длительности (still).
@@ -178,10 +199,11 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     return { played, duplicate, queued: result.action === 'queue', id: played ? d.current.id : null };
   }
 
-  // Отмена сценки: ждущая у отображения не начнётся (эффект), идущая останавливается — прерванная не возобновляется.
+  // Отмена сценки (а не откладывание): ждущая попытка не начнётся (идущее резервирование её решение отклонит — skip),
+  // идущая сценка останавливается — прерванная не возобновляется; начатая запись дня при этом не отменяется (§ 9.3).
   function cancelScene() {
+    attempt = null;
     if (!started) return;
-    emit({ type: 'scene', step: 'cancel' });
     if (playing(d, now()) && REACTIONS[d.current.type].scene) {
       d.current = null;
       stop();
@@ -199,8 +221,9 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   }
 
   // flags — проверенные булевы: focus — экран занятия (поза внимания), остальные — независимые причины тишины. Переданное
-  // меняется, непереданное сохраняется.
+  // меняется, непереданное сохраняется. Ввод в поле (typing: true) отменяет сценку и тогда, когда тишина ввода уже идёт.
   function context(flags) {
+    if (flags.typing === true) cancelScene();
     if ('focus' in flags) focus = flags.focus;
     for (const reason of QUIET_REASONS) if (reason in flags) quietOn(reason, flags[reason]);
   }
@@ -281,7 +304,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   }
 
   // Питомец больше не на виду или сменился показанный: прежний ничего не доигрывает — задачи, реакция и отложенная,
-  // облако; тишина, обработанные события и паузы повторов остаются.
+  // облако, сценка; тишина, обработанные события и паузы повторов остаются.
   function drop() {
     cancelAll();
     d.current = null;
@@ -296,11 +319,11 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   // ---------- входы ----------
 
   // Запуск (один раз): отсчёт покоя, задачи покоя и полуночи; приветствие дня (решение и запись — index.mjs) — через
-  // GREET_MS, пока вкладка видна. Спрятан — ни задач, ни приветствия.
+  // GREET_MS, пока вкладка видна. Спрятан — ни задач, ни приветствия; «по зову» и не вызван — только полночь.
   function start(greet, s) {
     started = true;
     lastActivity = now();
-    applied = view(s);
+    applied = shape(s);
     if (s.hidden) return;
     scheduleIdle(s);
     if (greet && visible)
@@ -342,9 +365,11 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     return true;
   }
 
-  // «Скрыть»: реакция и отложенная, облако, сценка и все задачи (вместе с полуночью) сняты; память событий, тишина и паузы
-  // повторов остаются. «Показать»: отсчёт покоя, задачи покоя и полуночи заново; приветствия нет.
+  // «Скрыть»: вид закрыт; реакция и отложенная, облако, сценка и все задачи (вместе с полуночью) сняты; память событий,
+  // тишина и паузы повторов остаются. «Показать»: отсчёт покоя, задачи покоя и полуночи заново (по зову и не вызван —
+  // только полночь); вид не открывается, приветствия нет.
   function hidden(value, s) {
+    if (value) view = CLOSED;
     if (started) {
       if (value) {
         cancelAll();
@@ -358,27 +383,24 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
         scheduleIdle(s);
       }
     }
-    applied = view(s);
+    applied = shape(s);
   }
 
-  // Питомец на виду и открытый вид (временный вход). Ушёл (по зову закрыли) — ничего не доигрывает, остаётся полночь.
-  // Открыли (source 'pet' — уголок; 'call' — вызов сразу в «Поиграть»): реплика вида — по позе до пробуждения, пробуждение,
-  // задачи (по зову — все), движение «заметил гостя» (не при вызове). «Поиграть» и редактор будят.
-  function see(next, source, s) {
-    const was = sight;
-    sight = next;
+  // Открыт вид (проверенный: поддерживается, не спрятан). Из закрытого (source — pet или call; источник — до закрытия):
+  // реплика вида по позе до пробуждения, пробуждение, задачи (вызванный по зову — все), движение «заметил гостя» (не при
+  // вызове). Смена вида: «Поиграть» и редактор будят. Любое открытие и смена вида отменяют сценку.
+  function openView(next, source, s) {
+    const was = view;
+    const before = around(s);
+    view = { open: next, source: was.open === null ? source : was.source };
+    cancelScene();
     if (!started) return;
-    if (was.around && !next.around) {
-      drop();
-      scheduleMidnight(s);
-      return;
-    }
-    if (was.view === null && next.view !== null) {
+    if (was.open === null) {
       scenePhrase = s.phrases ? pickPhrase(resting ? 'rest' : 'scene', { last: lastPhrase, stage: s.stage, kind: s.kind, random }) : '';
       lastPhrase = scenePhrase || lastPhrase;
       resting = false;
       lastActivity = now();
-      if (!was.around) scheduleIdle(s);
+      if (!before) scheduleIdle(s);
       else scheduleRest(s);
       if (source !== 'call' && visible)
         later('open-micro', OPEN_MICRO_MS, () => {
@@ -387,11 +409,22 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
         });
       return;
     }
-    if ((next.view === 'play' || next.view === 'room') && next.view !== was.view) {
+    if ((next === 'play' || next === 'room') && next !== was.open) {
       resting = false;
       lastActivity = now();
     }
-    if (!was.around && next.around) scheduleIdle(s);
+  }
+
+  // Вид закрыт: сценка отменена; «по зову» — питомец ушёл и ничего не доигрывает, остаётся полночь.
+  function closeView(s) {
+    const before = around(s);
+    view = CLOSED;
+    cancelScene();
+    if (!started) return;
+    if (before && !around(s)) {
+      drop();
+      scheduleMidnight(s);
+    }
   }
 
   function setBusy(on) {
@@ -405,23 +438,46 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     return true;
   }
 
-  const view = (s) => ({ kind: s.kind, hidden: s.hidden, motion: s.motion, phrases: s.phrases });
+  // Объявление отображения (проверенное, нормализованное ядром): переданное свойство заменяет прежнее целиком, не
+  // переданное сохраняется. Изменение full, объявления scenes и начало переноса (moving) отменяют сценку и попытку.
+  function setDisplay(next) {
+    const was = display;
+    display = { ...display, ...next };
+    const cancelled = ('full' in next && next.full !== was.full) || ('scenes' in next && JSON.stringify(next.scenes) !== JSON.stringify(was.scenes)) || (next.moving === true && !was.moving);
+    if (cancelled) cancelScene();
+    return JSON.stringify(display) !== JSON.stringify(was);
+  }
+
+  const shape = (s) => ({ kind: s.kind, hidden: s.hidden, motion: s.motion, phrases: s.phrases, mode: s.mode, coat: s.coat, accessory: s.accessory });
 
   // Согласование с настройками (своя команда или изменение другой вкладки, поглощённое ядром): другой питомец или
-  // «скрыт» — прежний ничего не доигрывает, реплика вида — нового (спрятан — без неё), задачи заново; новое движение —
-  // restartIdle; реплики выключены — облако и реплика вида исчезают.
+  // «скрыт» — прежний ничего не доигрывает, вид закрыт (спрятан), реплика вида — нового (спрятан — без неё), задачи заново;
+  // другое присутствие — сценка отменена, поверхность меняется тихо: «по зову» и не вызван — ушёл (остаётся полночь), снова
+  // рядом — задачи заново, без приветствия, открытый вид и источник остаются; другой облик или аксессуар — сценка отменена;
+  // новое движение — restartIdle; реплики выключены — облако и реплика вида исчезают.
   function reconcile(s) {
-    if (!started || !alive) return;
     const was = applied;
-    const next = view(s);
+    const next = shape(s);
+    if (next.hidden) view = CLOSED;
+    if (!started || !alive) return;
     applied = next;
     if (!was) return;
     if (was.hidden !== next.hidden || was.kind !== next.kind) {
       drop();
-      scenePhrase = was.hidden === next.hidden && sight.view !== null && next.phrases ? pickPhrase('scene', { last: lastPhrase, stage: s.stage, kind: s.kind, random }) : '';
+      scenePhrase = was.hidden === next.hidden && view.open !== null && next.phrases ? pickPhrase('scene', { last: lastPhrase, stage: s.stage, kind: s.kind, random }) : '';
       if (!next.hidden) scheduleIdle(s);
       return;
     }
+    if (was.mode !== next.mode) {
+      cancelScene();
+      const before = petAround({ mode: was.mode, hidden: was.hidden, open: view.open !== null });
+      const after = around(s);
+      if (before && !after) {
+        drop();
+        scheduleMidnight(s);
+      } else if (!before && after) scheduleIdle(s);
+    }
+    if (was.coat !== next.coat || was.accessory !== next.accessory) cancelScene();
     if (was.motion !== next.motion) restartIdle(s);
     if (was.phrases && !next.phrases) {
       hush();
@@ -436,9 +492,138 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     return react(reaction.type, { key: reaction.key, context: 'calm', extra: reaction.extra });
   }
 
+  // ---------- редкие сценки (§ 7.1.1, § 9) ----------
+  // Выбор, реальный допуск и резервирование — разные шаги. Выбор — при подтверждённом занятии с реакцией (одна попытка на
+  // событие); попытка ждёт конца реакции этого события; уместность — перед резервированием и ещё раз в decide, после всех
+  // ожиданий, по часам в момент решения. Отмена между шагами попытку не переносит.
+
+  // Показ целиком: объявлен отображением (место страницы) или открыт вид (уголок рисует питомца целиком).
+  const fullNow = () => display.full || view.open !== null;
+  // Допустимые сценки показанного питомца сейчас (пересечение § 7.1.1); нет резервирования — ни одной.
+  const optionsOf = (s) => (scenes ? sceneOptions(kindOf(s.kind), display.scenes, fullNow()) : []);
+
+  // Подтверждённое занятие с реакцией (не в тишине «спрятан» и не «по зову» закрытым): одна попытка на событие — шанс и
+  // вариант по random только среди допустимых (пусто — без броска, попытка всё равно использована); без counted и при
+  // празднике (stage — ступень к празднику без учёта вида) — сценки нет. Новое событие заменяет прежнюю попытку.
+  function choose({ key, outcome, stage, day, at }, s) {
+    if (!started || !alive) return;
+    const type = pickScene({ key, checked, outcome, celebrate: stage, day, record: s.scene, kind: s.kind, available: optionsOf(s), random });
+    attempt = type ? { type, key, day, at, until: at + SCENE_FRESH_MS, kind: s.kind } : null;
+  }
+
+  // Уместна ли попытка сейчас: тот же питомец, тот же местный день, не позже срока, питомец на виду и вкладка видна,
+  // тишины нет, ничего не играет, «Поиграть» и редактор закрыты, переноса и жеста нет, вариант допустим.
+  function fits(next, s) {
+    const t = now();
+    return (
+      next.kind === s.kind &&
+      next.day === clock.day(t) &&
+      !busy &&
+      sceneFits(next, { now: t, shown: active(s), quiet: quiet(), playing: playing(d, t), play: view.open === 'play' || view.open === 'room', moving: display.moving, kind: s.kind, full: fullNow(), available: optionsOf(s) })
+    );
+  }
+
+  // Реакция события key доиграла и ничего не продолжилось: если сценка этого события всё ещё уместна — резервирование.
+  function sceneSoon(key) {
+    const next = attempt;
+    if (next?.key !== key) return;
+    if (inflight || !fits(next, sense())) {
+      attempt = null;
+      return;
+    }
+    reserve(next);
+  }
+
+  // Порт резервирования (§ 9.1): reserve(decide, show) → Promise<'shown' | 'skip' | 'fail' | 'lost'>, никогда не
+  // отклоняется. decide и show — синхронные функции ядра. Нарушение порта (бросил, отклонил, вернул не исход, вызвал
+  // decide или show не по порядку) — диагностика и безопасный исход, без необработанных ошибок.
+  function reserve(next) {
+    const token = { attempt: next, step: 'queued', id: null, patch: null, type: next.type };
+    inflight = token;
+    let pending;
+    try {
+      pending = scenes.reserve(
+        (stored) => decide(token, stored),
+        () => show(token),
+      );
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    Promise.resolve(pending)
+      .then(
+        (result) => (OUTCOMES.includes(result) ? { result } : { result: 'fail', broken: [`резервирование сценки вернуло не исход: ${String(result)}`] }),
+        (error) => ({ result: 'fail', broken: ['резервирование сценки отказало (порт бросил или отклонил обещание)', error] }),
+      )
+      .then((outcome) => done(token, outcome));
+  }
+
+  // Шаг 3 (§ 9.2) — внутри защищённого участка, после всех ожиданий, синхронно: экземпляр жив, попытка та же и не отменена
+  // (иначе skip); попытка использована — дальше только этот исход; заново уместность по часам сейчас (срок, местный день,
+  // тишина, видимость, присутствие, вид, перенос, вариант и объявление); день не занят ни в записи резервирования (stored:
+  // undefined — записи нет, не объект — повреждена: не свободный день), ни в свежей копии scene (через координатор: mirror).
+  // Метка вкладки by — по random и clock. Отказ чтения копии или порта — исключение: адаптер отвечает fail. Решение — фаза
+  // работы раунда без своих обновлений (guard): ни слушателей, ни журнала до постановки записи и начала показа, а команда,
+  // вызванная портом изнутри, — reentrant (§ 5.4).
+  function decide(token, stored) {
+    return guard(() => judge(token, stored));
+  }
+
+  function judge(token, stored) {
+    if (token.step !== 'queued') return null;
+    token.step = 'decided';
+    if (!alive || attempt !== token.attempt) return null;
+    attempt = null;
+    const next = token.attempt;
+    const s = sense();
+    if (!fits(next, s)) return null;
+    const copy = mirror();
+    const terms = { day: next.day, today: clock.day(now()), by: '-', kind: s.kind, type: next.type, fits: true };
+    if (!sceneCommit(stored, copy, terms)) return null;
+    const record = sceneCommit(stored, copy, { ...terms, by: `${now().toString(36)}-${Math.floor(random() * 0x100000000).toString(36)}` });
+    token.patch = { day: record.day, by: record.by, ...(kindOf(s.kind) === 'cat' ? { cat: record.cat } : {}) };
+    token.step = 'reserved';
+    return record;
+  }
+
+  // Шаг 4 — сразу после постановки записи, в том же синхронном шаге, что decide: начало показа — реакция сценки
+  // единственного режиссёра (без анимации — статичная поза still), своим раундом: слушатели получают её после начала
+  // показа. Не началась (режиссёр или планировщик отказали) — исключение: адаптер откатывает запись (lost).
+  function show(token) {
+    if (token.step !== 'reserved') return;
+    token.step = 'shown';
+    stage('scene', () => {
+      const s = sense();
+      const result = react(token.type, { extra: { say: sceneText(token.type, s.name), sayShort: sceneText(token.type) } });
+      if (!result.played) throw new Error('сценка не началась');
+      token.id = result.id;
+    });
+  }
+
+  // Шаг 6 — исход только живому экземпляру и только этой попытке, своим раундом: shown — копия дня scene обычной неявной
+  // операцией хранения (прерванный показ день не освобождает); lost — остановить только ещё свою текущую реакцию этой
+  // попытки; skip, fail — ничего. После destroy — ничего (нарушение порта — в журнал).
+  function done(token, { result, broken = null }) {
+    if (inflight === token) inflight = null;
+    let issue = broken;
+    if (!issue && result === 'shown' && token.step !== 'shown') issue = [`резервирование сценки: исход shown без показа (шаг ${token.step})`];
+    if (!issue && result !== 'shown' && result !== 'lost' && token.step === 'shown') issue = [`резервирование сценки: исход ${result} после начала показа`];
+    const ran = stage('scene', () => {
+      if (issue) warn(...issue);
+      if (attempt === token.attempt) attempt = null;
+      if (result === 'shown' && token.patch) keep(token.patch);
+      else if (result !== 'shown' && token.step === 'shown' && token.id !== null && d.current?.id === token.id) {
+        d.current = null;
+        stop();
+        scheduleRest(sense());
+      }
+    });
+    if (!ran && issue) warn(...issue);
+  }
+
   function destroy() {
     alive = false;
     generation += 1;
+    attempt = null;
     cancelAll();
   }
 
@@ -459,6 +644,16 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
       visible,
       reducedMotion: reduced,
       effectiveMotion: motionOf(s),
+      presence: { mode: s.mode, hidden: s.hidden, surface: presenceSurface(s.mode, s.hidden), around: around(s) },
+      view: { ...view },
+      display: {
+        full: display.full,
+        moving: display.moving,
+        pets: display.pets ? [...display.pets] : null,
+        views: [...display.views],
+        scenes: display.scenes ? Object.fromEntries(Object.entries(display.scenes).map(([id, list]) => [id, [...list]])) : null,
+      },
+      scene: { waiting: attempt ? { type: attempt.type, until: attempt.until } : null, reserving: inflight !== null },
     };
   }
 
@@ -467,16 +662,21 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     react,
     fed,
     handled: (key) => d.handled.has(key),
-    sight: () => ({ ...sight }),
+    view: () => view,
+    display: () => display,
+    around,
     context,
     activity,
     visibility,
     hidden,
-    see,
+    openView,
+    closeView,
     setBusy,
     setReduced,
+    setDisplay,
     reconcile,
-    stopScene: cancelScene,
+    choose,
+    cancelScene,
     state,
     destroy,
   };

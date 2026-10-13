@@ -5,21 +5,21 @@
 // (задачи покоя, clock.nextDay), перепланирование моргания: команда после применения — ok, честный save, degraded, эффект
 // warning internal и журнал, принятая запись не откатывается; задача — warning в своём обновлении; реакция, примерка и
 // облако без своей задачи не остаются; повторного планирования нет. Контроли PL03: сбой до применения — internal без
-// правки, асинхронная запись, сверка перед решением, destroy в доставке, поздние вызовы. Данные синтетические.
+// правки, асинхронная запись, сверка перед решением, destroy в доставке, поздние вызовы. С PL04.2 ждущая сценка — попытка
+// ядра (scene.waiting, тестовый порт резервирования), а не сигнал отображению. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PHRASE_MS, REACTIONS } from '../pet/core/director.mjs';
-import { calendar, DAY, host, life, manual } from './core-kit.mjs';
+import { calendar, DAY, host, LEGACY_DISPLAY, life, manual, reserver } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
 const started = (initial = { cat: CAT }, parts = {}) => {
-  const L = life(initial, { counts: host(1, 1), ...parts });
+  const L = life(initial, { counts: host(1, 1), display: LEGACY_DISPLAY, ...parts });
   assert.equal(L.core.start().ok, true);
   return L;
 };
 const playing = (L) => L.state().pose.reaction?.type ?? null;
 const saved = (L, key, extra = {}) => L.core.notify('saved', { key, counted: true, ...extra });
-const cues = (L) => L.effects('scene').map((effect) => (effect.key === undefined ? effect.step : `${effect.step} ${effect.key}`));
 // Предупреждения эффектами в обновлениях с причиной reason (без reason — во всех).
 const warned = (L, reason) => L.seen.filter((update) => !reason || update.reason === reason).flatMap((update) => update.effects.filter((effect) => effect.type === 'warning').map((effect) => `${effect.code} ${effect.message}`));
 const lasting = (L) => L.plan.live().filter((item) => item.ms === PHRASE_MS || Object.values(REACTIONS).some((reaction) => reaction.ms === item.ms));
@@ -61,7 +61,7 @@ test('отказ задачи конца реакции: ok, честный save
   assert.deepEqual(warned(L), ['internal задача reaction не запланирована: планировщик отказал (1500 мс)'], 'эффект — в обновлении notify');
   assert.deepEqual(warned(L, 'notify').length, 1);
   assert.ok(L.log.list.includes('задача reaction не запланирована: планировщик отказал (1500 мс)'), L.log.list.join(' | '));
-  assert.deepEqual([playing(L), L.state().pose.page, L.state().phrase, lasting(L), cues(L)], [null, 'calm', null, [], ['cancel']], 'реакции, облака и их задач нет; ждущая сценка события отменена');
+  assert.deepEqual([playing(L), L.state().pose.page, L.state().phrase, lasting(L), L.state().scene.waiting], [null, 'calm', null, [], null], 'реакции, облака и их задач нет; сценки нет');
   L.plan.advance(10_000);
   assert.deepEqual([playing(L), L.state().phrase, warned(L).length], [null, null, 1], 'через 10 с — ничего не висит, повторных попыток нет');
   G.rule = () => '';
@@ -74,13 +74,16 @@ test('отказ задачи конца реакции: ok, честный save
 
 test('отказ задачи облака: реакция идёт и кончается в срок, облака нет; degraded и warning internal', () => {
   const G = gate();
-  const L = started({ cat: CAT }, { scheduler: G.port });
+  const port = reserver();
+  port.mode.hold.add('enter');
+  const L = started({ cat: CAT }, { scheduler: G.port, scenes: port.port });
   G.rule = refuse(PHRASE_MS);
+  L.random.push(0, 0, 0);
   const result = saved(L, 'K');
   assert.deepEqual([result.ok, result.degraded, playing(L), L.state().phrase], [true, true, 'joy', null], 'без задачи облака облака нет');
   assert.deepEqual(warned(L, 'notify'), ['internal задача phrase не запланирована: планировщик отказал (3200 мс)']);
   L.plan.advance(REACTIONS.joy.ms);
-  assert.deepEqual([playing(L), L.state().phrase, cues(L).at(-1)], [null, null, 'end K'], 'реакция кончилась своей задачей');
+  assert.deepEqual([playing(L), L.state().phrase, port.calls.reserve], [null, null, 1], 'реакция кончилась своей задачей — и только тогда попытка сценки события K');
   L.plan.advance(10_000);
   assert.equal(L.state().phrase, null);
 });
@@ -102,21 +105,25 @@ test('отказ продолжения в задаче: «новая вещь»
 
 test('отказ отложенной: при снятии тишины — setContext degraded; из конца реакции — warning задачи; ждущая сценка отменена', () => {
   const G = gate();
-  const L = started({ cat: CAT }, { scheduler: G.port });
+  const port = reserver();
+  const L = started({ cat: CAT }, { scheduler: G.port, scenes: port.port });
   L.core.setContext({ timer: true });
+  L.random.push(0, 0);
   saved(L, 'K');
+  assert.equal(L.state().scene.waiting?.type, 'stretch', 'попытка сценки K ждёт её реакции');
   G.rule = refuse(REACTIONS.joy.ms);
   const off = L.core.setContext({ timer: false });
-  assert.deepEqual([off.ok, off.degraded, playing(L), L.state().context.quiet, cues(L).at(-1)], [true, true, null, [], 'cancel']);
+  assert.deepEqual([off.ok, off.degraded, playing(L), L.state().context.quiet, L.state().scene.waiting], [true, true, null, [], null]);
   assert.deepEqual(warned(L, 'setContext'), ['internal задача reaction не запланирована: планировщик отказал (1500 мс)']);
   G.rule = () => '';
+  L.random.push(0.9, 0.9, 0, 0);
   saved(L, 'A');
   saved(L, 'B');
-  assert.equal(playing(L), 'joy');
+  assert.deepEqual([playing(L), L.state().scene.waiting?.type], ['joy', 'stretch'], 'радость A; у B — попытка');
   G.rule = refuse(REACTIONS.joy.ms);
   L.plan.advance(REACTIONS.joy.ms);
   assert.deepEqual([playing(L), lasting(L)], [null, []], 'отложенная B без задачи конца не играет');
-  assert.deepEqual([cues(L).includes('start B'), cues(L).at(-1), warned(L, 'reaction').length], [false, 'cancel', 1]);
+  assert.deepEqual([L.state().scene.waiting, port.calls.reserve, warned(L, 'reaction').length], [null, 0, 1], 'попытка B отменена, резервирования нет');
   L.plan.advance(10_000);
   assert.equal(playing(L), null);
 });

@@ -1,4 +1,5 @@
-// Присутствие «Всегда рядом» / «Приходит по зову» (pet/pet-place.mjs, pet/pet.mjs, pet/pet.css): свой ключ, разбор
+// Присутствие «Всегда рядом» / «Приходит по зову» (правила — pet/core/presence.mjs, реэкспорт — pet/pet-place.mjs;
+// отображение — pet/pet.mjs, pet/pet.css): свой ключ, разбор
 // без перезаписи, запись с чужими полями и номером будущей версии, независимость от «скрыт» и других предпочтений, что
 // видно рядом со страницей и когда разрешено декоративное (в том числе сценки), кнопка вызова — без мордашки, точек,
 // движения и переноса, прямой вызов — без отметки просмотра уголка, при печати кнопки нет.
@@ -101,35 +102,38 @@ test('кнопка вызова: лапка без мордашки, точек 
   assert.match(call, /\$\{PAW_ICON\}/, 'существующий значок лапки');
   assert.doesNotMatch(call, /data-pet-drag|cat-dot|cat-art|art\(/, 'без переноса, точки и рисунка животного');
   assert.match(ui, /const callLabel = \(\) => `\$\{CALL\}: \$\{name\(\)\}`/, 'доступное название — «Позвать питомца: имя»');
-  // Источник — параметр открытия (кнопка вызова или питомец), до закрытия; не по тексту, режиму или имени.
+  // Источник — параметр открытия (кнопка вызова или питомец), до закрытия; не по тексту, режиму или имени. С PL04.2 вид и
+  // источник — ядро: open('play', { source: 'call' }) до разметки; отметку просмотра уголка и её отсутствие при вызове,
+  // праздник по виду и «на виду» решает ядро (исполнение — test/core-presence.test.mjs).
   const open = ui.slice(ui.indexOf('function openSheet('), ui.indexOf('// Закрытие — один раз'));
   assert.match(open, /function openSheet\(opener, source = 'pet'\)/);
-  assert.match(open, /ui\.source = source;/);
-  assert.match(open, /if \(!call\) markSeen\(\);/, 'вызов не отмечает уголок увиденным');
-  assert.ok(open.indexOf('enterPlay();') < open.indexOf('ui.sheet.showModal();'), 'вид «Поиграть» — до showModal (без вспышки уголка)');
-  assert.doesNotMatch(open, /'greet'|'joy'|'unlock'/, 'без приветствия, радости и праздника');
+  assert.match(open, /const opened = ui\.core\.open\(call \? 'play' : 'corner', \{ source \}\);/);
+  assert.ok(open.indexOf('ui.core.open(') < open.indexOf('enterPlay();') && open.indexOf('enterPlay();') < open.indexOf('ui.sheet.showModal();'), 'вид «Поиграть» — ядру, затем разметка до showModal (без вспышки уголка)');
+  assert.doesNotMatch(open, /'greet'|'joy'|'unlock'|markSeen|setSight/, 'без приветствия, радости, праздника и своей отметки');
   const close = ui.slice(ui.indexOf('function closeSheet('), ui.indexOf('// ---------- сцена «Поиграть»'));
-  assert.match(close, /ui\.source = '';/);
-  assert.match(ui, /const playBack = \(\) => \(ui\.source === 'call' \? closeSheet\(\) : leavePlay\(\)\);/);
-  // Закрытый по зову питомец не реагирует на сохранение и не ждёт следующего вызова; в «Поиграть» и редакторе праздника,
-  // объявления и seenStage нет (их даёт markSeen при возврате). С PL03 это решение ядра (notify): оболочка передаёт ему,
-  // на виду ли питомец и какой вид открыт (sight), и своего правила праздника не держит; поведение — test/core.test.mjs.
+  assert.match(close, /ui\.core\.close\(\);/);
+  assert.match(ui, /const openedBy = \(\) => snap\(\)\.view\.source;/);
+  assert.match(ui, /const playBack = \(\) => \(openedBy\(\) === 'call' \? closeSheet\(\) : leavePlay\(\)\);/);
+  // Присутствие и «на виду» — снимок ядра: своей реализации поверхности, «на виду», правил праздника и отметки ступени,
+  // выбора и резервирования сценки, временных входов sight/markSeen и прямого доступа к IndexedDB в оболочке нет.
+  assert.match(ui, /const surface = \(\) => snap\(\)\.presence\.surface;/);
+  assert.match(ui, /const around = \(\) => snap\(\)\.presence\.around;/);
+  for (const rule of ['presenceSurface', 'petAround', 'presenceRecord', 'stageToCelebrate', 'doneOutcome', 'unlockedBetween', 'seenStage: ', 'pickScene', 'sceneTurn', 'sceneCommit', 'sceneFits', 'sceneWaited', 'indexedDB', 'crypto', 'setSight', 'markSeen', 'sceneNext', 'sceneChecked']) {
+    assert.equal(ui.includes(rule), false, `в оболочке нет ${rule}`);
+  }
   const saved = ui.slice(ui.indexOf('function saved('), ui.indexOf('function failed('));
-  assert.match(saved, /ui\.core\.notify\('saved', event, sight\(\)\)/);
-  // С PL04.1 открытый диалог — ui.sheetOpen (ставится до showModal); то же ядру при каждой смене (syncSight).
-  assert.match(ui, /const sight = \(\) => \(\{ around: around\(\), view: ui\.room \? 'room' : ui\.play \? 'play' : ui\.sheetOpen \? 'corner' : null \}\);/);
-  assert.doesNotMatch(ui, /stageToCelebrate|doneOutcome|unlockedBetween|seenStage: /, 'праздник, ступень и её отметка — только в ядре');
+  assert.match(saved, /ui\.core\.notify\('saved', event, \{ scene: Boolean\(detail\?\.key\) \}\)/, 'событие без key — без сценки (Р2), решение — ядро');
   // Доработка 2026-10-11: закрытый по зову диалог очищается и при смене режима; фокус спрятанного медиазапросом входа
-  // возвращается.
+  // возвращается. «Ничего не доигрывает» — ядро; здесь — таймеры показа и очистка закрытого диалога.
   const presence = ui.slice(ui.indexOf('function applyPresence('), ui.indexOf('function choosePresence('));
-  // С PL04.1 «ничего не доигрывает» — ядро (syncSight: питомец ушёл); здесь — таймеры показа и очистка закрытого диалога.
-  assert.match(presence, /syncSight\(\);\s*if \(!around\(\)\) \{\s*dropShown\(\);\s*clearSheet\(\);\s*\}/);
+  assert.match(presence, /renderAll\(\);\s*if \(!around\(\)\) \{\s*dropShown\(\);\s*clearSheet\(\);\s*\}/);
   assert.match(ui, /if \(!relatedTarget && openers\(\)\.includes\(target\) && !shown\(target\)\) ui\.lostEntry = true;/);
   const layout = ui.slice(ui.indexOf('function applyLayout('), ui.indexOf('const hostBox'));
   assert.match(layout, /if \(lost\) fallbackFocus\(\)\?\.focus\(\{ preventScroll: true \}\);\s*else keepFocus\(focused\);/, 'и для лапки, а не только при смене места питомца');
-  // Запись присутствия — только из выбора (storePresence), не из чтения. С PL02 все записи идут через writeKey (свежее
-  // чтение, отказ, повреждённое): setItem — только в нём.
-  assert.equal([...ui.matchAll(/writeKey\(K\.presence/g)].length, 1);
+  // Запись присутствия — команда ядра (setPresence, координатор хранения); оболочка ключ presence не читает и не пишет.
+  // setItem оболочки — только в writeKey (place, room).
+  assert.match(ui, /ui\.core\.setPresence\(mode\)/);
+  assert.equal(ui.includes('K.presence') || ui.includes('K.scene'), false);
   assert.equal([...ui.matchAll(/setItem\(/g)].length, 1);
 });
 

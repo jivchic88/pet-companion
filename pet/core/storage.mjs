@@ -207,6 +207,14 @@ export function createCoordinator({ keys, backend, opened = () => {}, closed = (
       sync(list) {
         if (!backend.async && client.open && !client.offline) verify(list);
       },
+      // [PL04.2] Свежее значение ключа для решения вне раунда (резервирование сценки, § 9.2, шаг 3): синхронный координатор
+      // читает хранилище сейчас — без фиксации, поглощения и слушателей (кэш сверит следующая операция или сверка этого
+      // ключа); асинхронный синхронного чтения не имеет — подтверждённое (кэш, § 8.9). Отказ чтения — исключение.
+      // Закрытое и созданное при отказе загрузки подключения хранилище не читают.
+      peek(key) {
+        if (!client.open || client.offline || !queues.has(key) || backend.async) return client.offline || !cache.has(key) ? null : cache.get(key);
+        return text(backend.get(key));
+      },
       watch(absorb) {
         client.absorb = absorb;
         return () => {

@@ -9,7 +9,6 @@ import test from 'node:test';
 import { createPetCore } from '../pet/core/index.mjs';
 import { CORE_KEYS, DAY, host, idle, journal, make, manual, spy, web } from './core-kit.mjs';
 
-const SEEN = { around: true };
 const MARS = { v: 1, name: 'Марс', seenStage: 0, greetDay: DAY };
 const view = (update) => `${update.reason} ${update.snapshot.name.display} ${update.snapshot.save.cat.status}`;
 
@@ -20,8 +19,8 @@ function sync() {
   const watched = spy(site.storage, list, ['a', 'b']);
   const A = make(watched, { counts: host(0, 1) });
   const B = make(watched, { counts: host(0, 1) });
-  A.core.start(SEEN);
-  B.core.start(SEEN);
+  A.core.start();
+  B.core.start();
   list.length = 0;
   const key = site.keys.cat;
   // Сверка перед командой (§ 5.5, шаг 1а): синхронный координатор перечитывает четыре ключа среза.
@@ -36,8 +35,8 @@ async function later() {
   const watched = spy(store.storage, list, ['a', 'b']);
   const A = make(watched, { counts: host(0, 1) });
   const B = make(watched, { counts: host(0, 1) });
-  A.core.start(SEEN);
-  B.core.start(SEEN);
+  A.core.start();
+  B.core.start();
   list.length = 0;
   // Асинхронный координатор синхронного чтения не имеет: сверка перед командой ничего не читает.
   return { list, store, A: A.core, B: B.core, fresh: (who) => [`sync ${who}`] };
@@ -79,7 +78,7 @@ test('синхронно, вариант 2 — B пишет другой клю�
     s.list.push(`deliver lb ${update.reason} ${update.snapshot.treat} ${update.effects.filter((effect) => effect.type === 'announce').length}`);
     if (once) return;
     once = true;
-    s.list.push(`return B ${s.B.feed(SEEN).save.status}`);
+    s.list.push(`return B ${s.B.feed().save.status}`);
   }, { initial: false });
   const result = s.A.setName('Барсик');
   s.list.push(`return A ${result.save.status}`);
@@ -223,7 +222,7 @@ test('асинхронно, варианты 2–4: другой ключ, от�
   const said = [];
   two.B.subscribe((update) => {
     said.push(`${update.reason} ${update.snapshot.treat} ${update.snapshot.save.treat.status}`);
-    if (update.reason === 'storage' && update.snapshot.name.display === 'Барсик') two.B.feed(SEEN);
+    if (update.reason === 'storage' && update.snapshot.name.display === 'Барсик') two.B.feed();
   }, { initial: false });
   two.A.setName('Барсик');
   await two.store.drain();
@@ -266,7 +265,7 @@ test('повторный вход в фазе работы: команда из 
   };
   const quiet = idle();
   core = createPetCore({ storage: site.storage, progress, log: log.port, random: quiet.random, scheduler: quiet.scheduler });
-  core.start(SEEN);
+  core.start();
   core.subscribe((update) => list.push(`снаружи ${update.reason}`), { initial: false });
   mode = 'command';
   const state = core.getState();
@@ -279,7 +278,7 @@ test('повторный вход в фазе работы: команда из 
   // обновлением storage; начальный снимок подписки из порта — в доставке этого же раунда, после него.
   assert.deepEqual(list, ['снаружи storage', 'изнутри initial'], 'начальный снимок подписки из порта — в доставке этого раунда');
   const clockCore = createPetCore({ storage: site.storage, random: quiet.random, scheduler: quiet.scheduler, clock: { now: () => 0, day: () => (clockCore.setName('Часы').error.code === 'reentrant' ? DAY : 'нет'), nextDay: (at) => at + 1 } });
-  assert.equal(clockCore.start(SEEN).ok, true);
+  assert.equal(clockCore.start().ok, true);
   clockCore.destroy();
   mode = 'destroy';
   const result = core.refresh();

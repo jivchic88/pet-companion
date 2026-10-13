@@ -13,7 +13,6 @@ import { createPetCore } from '../pet/core/index.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
 import { CORE_KEYS, DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
 
-const SEEN = { around: true };
 const MARS = { v: 1, name: 'Марс', motion: 'normal', seenStage: 0, greetDay: DAY };
 
 // Два ядра на синхронном веб-координаторе; журнал — общий (getItem/setItem и шпион подключений a, b).
@@ -400,14 +399,14 @@ test('асинхронное лакомство: без слов о сохран
   B.core.refresh();
   const said = [];
   feeder.subscribe((update) => said.push(...update.effects.filter((effect) => effect.type === 'announce').map((effect) => `${update.reason}: ${effect.text}`)), { initial: false });
-  const fed = feeder.feed(SEEN);
+  const fed = feeder.feed();
   assert.deepEqual([fed.save.status, feeder.getState().treat, feeder.getState().save.treat.status], ['pending', 'fed', 'pending']);
   assert.deepEqual(said, ['feed: Марс получает лакомство. Сегодня уже угостили.']);
   await store.next('get', 'treat');
   await store.next('set', 'treat', 'fail');
   assert.equal(await fed.save.done, 'failed');
   assert.deepEqual(said.at(-1), 'save: Марс: отметка лакомства не сохранилась в этом браузере.');
-  assert.equal(feeder.feed(SEEN).error.code, 'treat-fed', 'второго лакомства в экземпляре нет');
+  assert.equal(feeder.feed().error.code, 'treat-fed', 'второго лакомства в экземпляре нет');
   // Другой процесс подтвердил отметку дня: второе ядро узнаёт её сверкой барьера — тихо, без объявлений и записи.
   const quiet = [];
   B.core.subscribe((update) => quiet.push(`${update.reason} ${update.snapshot.treat} ${update.effects.length}`), { initial: false });
