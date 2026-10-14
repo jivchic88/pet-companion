@@ -5,7 +5,8 @@
 // непереданное свойство сохраняется, пустое пересечение — ни random, ни reserve, ни show, попытка использована. Выбор: шанс
 // 25 % с точной границей, порядок random (реплика, шанс, вариант только при двух), портрет и уголок целиком, прошлый вариант
 // кота, собака, без counted и при празднике — нет, одна попытка на событие. Попытка: старт реакции позже 500 мс — отмена,
-// срок 10 с, полночь, отмены тишиной, вводом, фоном, «Скрыть», ручным действием, видом, питомцем, обликом, присутствием,
+// срок 10 с, полночь, отмены тишиной, вводом, фоном, «Скрыть», ручным действием (отклик игры, кормление, готовое имя,
+// начало жеста), видом, питомцем, обликом, присутствием,
 // движением, full, scenes, переносом и сменой места — отменяют, а не откладывают. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -205,6 +206,9 @@ const CANCELS = [
   ['фон', (L) => L.core.setVisible(false)],
   ['«Скрыть»', (L) => L.core.hide()],
   ['ручное действие', (L) => L.core.react('pet')],
+  ['кормление', (L) => L.core.feed()],
+  ['готовое имя', (L) => L.core.setName('Бублик', { pick: true })],
+  ['начало жеста', (L) => L.core.setBusy(true)],
   ['открыт уголок', (L) => L.core.open('corner')],
   ['«Поиграть»', (L) => L.core.open('play')],
   ['другой питомец', (L) => L.core.setPet('dog')],
@@ -235,7 +239,7 @@ for (const [title, ...steps] of CANCELS) {
       steps[1](L);
     } else for (const step of steps) step(L);
     assert.equal(L.state().scene.waiting, null);
-    for (const off of [() => L.core.setContext({ typing: false, timer: false }), () => L.core.setVisible(true), () => L.core.show(), () => L.core.close(), () => L.core.setDisplay({ moving: false })]) off();
+    for (const off of [() => L.core.setContext({ typing: false, timer: false }), () => L.core.setVisible(true), () => L.core.show(), () => L.core.close(), () => L.core.setDisplay({ moving: false }), () => L.core.setBusy(false)]) off();
     L.plan.advance(5000);
     await flush();
     assert.deepEqual([L.port.calls.reserve, L.state().pose.reaction?.scene ?? false], [0, false], 'ни резервирования, ни показа');

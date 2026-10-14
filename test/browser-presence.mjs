@@ -3,7 +3,9 @@
 // пауз (транзакция остаётся открытой, решение ядра ждёт сценария). «Приходит по зову» с клавиатуры: лапка, Enter — сразу
 // «Поиграть», «Уголок», Esc — к странице с фокусом на лапке; закрытый по зову ничего не играет, вызов не празднует и не
 // отмечает ступень, «Уголок» после вызова — отмечает; «Скрыть» и «Показать» по зову — лапка без игры. Сценка в уголке и
-// отмена редактором; занятие при открытом уголке поднимает ступень без праздника — она сразу увидена; отмена вводом и отключение, пока решение ждёт в открытой транзакции, — ничего не записано; две вкладки
+// отмена редактором; занятие при открытом уголке поднимает ступень без праздника — она сразу увидена; отмена вводом,
+// отключение и ручное действие настоящими кнопками («Покормить», готовое имя; на телефоне — касание «Покормить»), пока
+// решение ждёт в открытой транзакции, — ничего не записано, даже когда действие кончилось раньше решения; две вкладки
 // одного пространства — одна сценка, разных — две; синтетические более новые и повреждённые записи и повторное
 // подключение; одинаковый сценарий в Chrome и в Node (ядро, веб-координатор, IndexedDB в памяти) — один логический итог.
 // Компьютер 1280×900, телефон 390×844 и боком 844×390: горизонтальной прокрутки, ошибок страницы и внешних запросов нет,
@@ -261,24 +263,31 @@ async function desktop(browser, base, check, open, layout) {
     await page.clock.runFor(100);
     await page.evaluate(() => window.stand.pet.destroy());
 
-    // ---- Решение ждёт в открытой транзакции: ввод отменяет попытку; отключение — тоже; ничего не записано ----
-    for (const [ns, title, interrupt] of [
+    // ---- Решение ждёт в открытой транзакции: ввод отменяет попытку; отключение — тоже; ручное действие в открытом
+    // уголке (настоящие кнопки «Покормить» и готового имени) — окончательно: действие кончилось раньше решения, срок 10 с
+    // не истёк — ничего не записано ----
+    for (const [ns, title, interrupt, { corner = false, run = 0, done = async () => true } = {}] of [
       ['pc', 'ввод в поле сайта', () => page.locator('#site-input').focus()],
       ['pd', 'отключение', () => page.evaluate(() => window.stand.pet.destroy())],
+      ['pj', '«Покормить» в уголке', () => page.locator('[data-cat-feed]').click(), { corner: true, run: 5000, done: async () => (await stored(page, 'pj:treat:v1'))?.fedDay === DAY }],
+      ['pk', 'готовое имя в уголке', () => page.locator('[data-cat-offer] [data-cat-name-pick]').first().click(), { corner: true, run: 1500, done: async () => Boolean((await stored(page, 'pk:cat:v1'))?.name) }],
     ]) {
       await page.evaluate((name) => (window.qaRead[name] = true), `${ns}:scene`);
       await mount(page, ns);
+      if (corner) await page.locator('#cat-dock .cat-dock-btn').click();
       await page.evaluate(() => window.stand.set(5, 2));
       await notify(page, `${ns}1`);
       await page.clock.runFor(1600);
       await until(page, () => window.qaReadHeld);
       await interrupt();
+      if (run) await page.clock.runFor(run);
       await page.evaluate(() => (window.qaReadGo = true));
       await until(page, () => !window.qaReadHeld);
       // Шлюз снят до проверки: своё чтение записи сценарий не задерживает.
       await page.evaluate((name) => delete window.qaRead[name], `${ns}:scene`);
-      const after = { scenes: await scenes(page), day: (await sceneRecord(page, `${ns}:scene`))?.day ?? '', copy: await raw(page, `${ns}:scene:v1`) };
-      check(`${label}: ${title}, пока решение ждёт в транзакции, — skip: ни показа, ни дня, ни копии`, after.scenes.length === 0 && after.day === '' && after.copy === null, JSON.stringify(after));
+      const after = { scenes: await scenes(page), day: (await sceneRecord(page, `${ns}:scene`))?.day ?? '', copy: await raw(page, `${ns}:scene:v1`), action: await done() };
+      check(`${label}: ${title}, пока решение ждёт в транзакции, — skip: ни показа, ни дня, ни копии`, after.scenes.length === 0 && after.day === '' && after.copy === null && after.action, JSON.stringify(after));
+      if (corner) await page.keyboard.press('Escape');
       await page.evaluate(() => window.stand.pet?.mounted && window.stand.pet.destroy());
       await page.locator('#site-check').focus();
     }
@@ -376,6 +385,27 @@ async function phone(browser, base, check, open, layout) {
     try {
       await page.goto(`${base}?manual`);
       await page.waitForFunction(() => Boolean(window.stand));
+      if (viewport.width === 390) {
+        // Касание «Покормить» в уголке, пока решение ждёт в открытой транзакции: кормление кончилось до решения, срок не
+        // истёк — сценка отменена окончательно, ни показа, ни дня, ни копии; лакомство отмечено.
+        await page.evaluate((name) => (window.qaRead[name] = true), 'qf:scene');
+        await mount(page, 'qf');
+        await page.locator('.cat-face').tap();
+        await page.evaluate(() => window.stand.set(5, 2));
+        await notify(page, 'qf1');
+        await page.clock.runFor(1600);
+        await until(page, () => window.qaReadHeld);
+        await page.locator('[data-cat-feed]').tap();
+        await page.clock.runFor(5000);
+        await page.evaluate(() => (window.qaReadGo = true));
+        await until(page, () => !window.qaReadHeld);
+        await page.evaluate((name) => delete window.qaRead[name], 'qf:scene');
+        const fed = { scenes: await scenes(page), day: (await sceneRecord(page, 'qf:scene'))?.day ?? '', copy: await raw(page, 'qf:scene:v1'), treat: (await stored(page, 'qf:treat:v1'))?.fedDay ?? '' };
+        check(`${label}: «Покормить», пока решение ждёт в транзакции, — skip: ни показа, ни дня, ни копии; лакомство отмечено`, fed.scenes.length === 0 && fed.day === '' && fed.copy === null && fed.treat === DAY, JSON.stringify(fed));
+        await layout(page, `${label}, уголок после кормления`);
+        await page.locator('[data-cat-close]').first().tap();
+        await page.evaluate(() => window.stand.pet.destroy());
+      }
       // Сценка у портрета в верхней панели: клубок там не читается — «потягивается».
       await mount(page, 'qa', { cat: { v: 1, seenStage: 1, greetDay: DAY }, extra: { scene: { v: 1, day: '2026-10-10', cat: 'curl' } } });
       await page.evaluate(() => window.stand.set(5, 2));

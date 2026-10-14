@@ -38,7 +38,7 @@ const RECORD = {
 const OPTIONS = ['storage', 'scenes', 'progress', 'clock', 'random', 'scheduler', 'log'];
 // Прямые отклики отображения до PL04.3 (react): игра, предметы, «устроился». Награды и события хоста сюда не входят —
 // только notify и feed; редкую сценку показывает само ядро (резервирование, § 9). Ручное действие (всё, кроме
-// «устроился») отменяет попытку и идущую сценку.
+// «устроился»; также кормление, готовое имя и начало жеста) отменяет попытку и идущую сценку окончательно.
 const DIRECT = ['pet', 'calmPet', 'paw', 'calmPaw', 'sniff', 'watch', 'ball', 'settle'];
 const DIRECT_EXTRA = ['toward', 'phrases'];
 // Объявление отображения (setDisplay, § 6.4): playFloor и игра — PL04.3.
@@ -193,7 +193,16 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     // Копия дня после shown — неявная операция ключа scene в текущем шаге (повреждённое не заменяет).
     keep: (fields) => apply(working, { writes: [{ key: 'scene', fields, implicit: true }] }),
     stage: (name, body) => stage(name, body),
-    guard: (fn) => Round.run(order, fn),
+    // Решение — критическая фаза раунда (§ 5.4, § 9.2): годится, только если её конец пуст и ядро не отключается. Порт,
+    // отключивший ядро изнутри решения (random метки, чтение копии, часы), — destroy в конце фазы, доставка 'destroyed',
+    // решение null (skip): записи дня нет. Подписка или изменение ядра из порта — тоже null: между проверкой, постановкой
+    // записи и началом показа не вызываются ни слушатели, ни журнал.
+    guard: (fn) => {
+      const { value, quiet } = Round.critical(order, fn);
+      return quiet && !dying && status !== 'destroyed' ? value : null;
+    },
+    // Ядро живо и не отключается (destroy, отложенный до конца идущей фазы, — уже отключается).
+    intact: () => status !== 'destroyed' && !dying,
     warn: (message, error) => (status !== 'destroyed' && Round.working() ? warnings.push([message, error]) : warnQuiet(message, error)),
   });
 
@@ -533,10 +542,11 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   }
 
   // Шаг резервирования сценки (начало показа, исход, § 9.2): свой раунд — или часть уже идущей фазы работы, если адаптер
-  // вызвал его синхронно изнутри неё; поздний после destroy — ничего (false). Исключение тела проходит к вызвавшему
-  // (show — адаптеру: запись откатывается), сбои оркестровки — эффектом warning internal и журналом.
+  // вызвал его синхронно изнутри неё; поздний после destroy или уже запрошенного (отложенного) destroy — ничего (false).
+  // Исключение тела проходит к вызвавшему (show — адаптеру: запись откатывается), сбои оркестровки — эффектом warning
+  // internal и журналом.
   function stage(name, body) {
-    if (status === 'destroyed') return false;
+    if (status === 'destroyed' || dying) return false;
     Round.run(order, () => {
       const outer = working;
       working = { applied: true, save: null };
@@ -709,7 +719,8 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // Кормление: день заново, отметка дня — сверенная (act): уже угостили до команды — treat-fed без записи и реакции. Отметка
   // дня в памяти и операция записи — до реакции (второго лакомства в экземпляре нет). Объявление — по известному итогу
   // записи; асинхронно — без слов о сохранности, поздний отказ — отдельным объявлением. Реакцию «ест» → «доволен» играет
-  // сессия (после start).
+  // сессия (после start); успешное кормление — ручное действие: перед реакцией сценка отменена окончательно (ждущая
+  // попытка и идущее резервирование — skip). Бизнес-отказ (ok: false) ничего не меняет — и попытку тоже.
   const feed = () =>
     act('feed', (step) => {
       const where = sight();
@@ -790,22 +801,26 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   const ownerOf = (m) => (m.companion.kind === 'dog' ? { key: 'companion', prefix: 'dog.', settings: m.companion.dog } : { key: 'cat', prefix: '', settings: m.cat });
 
-  // Имя. options.pick — выбор готового имени (кнопка подборки, предложение, «Оставить …»): отклик named (пауза повтора 4 с),
-  // и когда имя не изменилось. Свободный ввод своего имени (без pick) — тихо, как 0.1.4. Временный внутренний вход до PL05.
+  // Имя. options.pick — выбор готового имени (кнопка подборки, предложение, «Оставить …»): ручное действие — сценка
+  // отменена окончательно (ждущая попытка и идущее резервирование — skip, и когда отклик не сыгран: пауза повтора), затем
+  // отклик named (пауза повтора 4 с), и когда имя не изменилось. Свободный ввод своего имени (без pick) — тихо, как 0.1.4
+  // (сценку отменяет ввод в поле, setContext). changed — имя или снимок изменились (отмена ждущей попытки, отклик).
+  // Временный внутренний вход до PL05.
   const setName = (value, options) =>
     act('setName', (step) => {
       if (typeof value !== 'string') return fail('invalid-argument', 'Имя — строка.');
       if (options !== undefined && !(isRecord(options) && (options.pick === undefined || typeof options.pick === 'boolean'))) return fail('invalid-argument', 'Настройки имени — { pick?: boolean }.');
+      const was = build();
       const name = cleanName(value);
       const target = ownerOf(memory());
-      const changed = target.settings.name !== name;
-      if (changed) apply(step, { writes: [{ key: target.key, fields: { [`${target.prefix}name`]: name } }] });
+      const renamed = target.settings.name !== name;
+      if (renamed) apply(step, { writes: [{ key: target.key, fields: { [`${target.prefix}name`]: name } }] });
       let reacted = false;
       if (options?.pick === true) {
         step.applied = true;
-        reacted = session.react('named').played;
+        reacted = session.manual('named').played;
       }
-      return changed ? { ok: true, changed: true, save: step.save, reacted } : { ...unchanged(), reacted };
+      return renamed ? { ok: true, changed: true, save: step.save, reacted } : { ...unchanged(), changed: !same(was, build()), reacted };
     });
 
   // Другой питомец: прежний ничего не доигрывает (реакции, отложенная, облако, задачи — сессия), память событий, тишина и
@@ -990,21 +1005,25 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     return { patch, unknown: [...new Set(unknown)] };
   }
 
+  // Временная граница до PL04.3 (stroke.*, room.drag): идёт жест указателем. Начало жеста — ручное действие: сценка
+  // отменена окончательно (ждущая попытка, идущее резервирование — skip, идущая сценка остановлена); конец жеста попытку
+  // не возвращает. changed — снимок изменился (отменена ждущая попытка или идущая сценка).
   const setBusy = (value) =>
     act(
       'setBusy',
       (step) => {
         if (!bool(value)) return fail('invalid-argument', 'busy — boolean.');
+        const was = build();
         step.applied = true;
         session.setBusy(value);
-        return unchanged();
+        return { ok: true, changed: !same(was, build()), save: report([]) };
       },
       { sync: false },
     );
 
   // Прямой отклик до PL04.3: игра и предметы (explicit — откликается и в тишине страницы, не обходит не менее важную
-  // реакцию и не копится) и «устроился». Ручное действие отменяет попытку и идущую сценку. Лимит поглаживания — пока у
-  // отображения.
+  // реакцию и не копится) и «устроился». Ручное действие (всё, кроме «устроился») — через ручной вход сессии: сценка
+  // отменена окончательно, и когда отклик не сыгран. Лимит поглаживания — пока у отображения.
   const react = (type, options = {}) =>
     act(
       'react',
@@ -1014,10 +1033,11 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         if (!isRecord(options) || (options.explicit !== undefined && !bool(options.explicit)) || !isRecord(extra) || Object.entries(extra).some(([key, value]) => !DIRECT_EXTRA.includes(key) || typeof value !== 'string')) {
           return fail('invalid-argument', 'Отклик — { explicit?: boolean, extra?: { toward?, phrases?: string } }.');
         }
+        const was = build();
         step.applied = true;
-        if (type !== 'settle') session.cancelScene();
-        const result = session.react(type, { explicit: options.explicit === true, extra: { ...extra } });
-        return { ok: true, changed: result.played || result.queued, save: report([]), played: result.played, id: result.id };
+        const how = { explicit: options.explicit === true, extra: { ...extra } };
+        const result = type === 'settle' ? session.react(type, how) : session.manual(type, how);
+        return { ok: true, changed: result.played || result.queued || !same(was, build()), save: report([]), played: result.played, id: result.id };
       },
       { sync: false },
     );

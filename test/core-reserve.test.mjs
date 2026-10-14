@@ -5,13 +5,18 @@
 // пространства — независимы. Отмена в очереди, destroy до решения и после начала показа, поздний shown и lost прежнего
 // ядра, lost не снимает более новую реакцию, новое ядро того же пространства видит день прежнего. Копия scene:v1 — неявная
 // операция ядра: неизвестные поля и v, повреждённая копия, отказ записи, асинхронно pending и запись до destroy. Граница
-// раунда: между decide, постановкой записи и началом показа — ни слушателей, ни журнала, команда порта — reentrant;
-// слушатель после начала показа может выполнить команду, исключение слушателя доставку не обрывает. Отказы планировщика —
-// без зависшей сценки и облака. Данные синтетические.
+// раунда: между decide, постановкой записи и началом реакции сценки — ни слушателей, ни журнала (общий журнал порядка:
+// шаги порта, задачи планировщика, журнал ядра, доставка), команда порта — reentrant; слушатель после начала показа может
+// выполнить команду, исключение слушателя доставку не обрывает. Ручное действие (кормление, готовое имя, поглаживание,
+// жест) — окончательная отмена до и после начала резервирования и во время показа, честный changed, отказ ok: false без
+// побочных изменений. Отключение в критическом шаге: из random, peek, часов и планировщика, обычным вызовом и слушателем
+// после начала показа; нарушение порта (show не в том же шаге). Отказы планировщика — без зависшей сценки и облака.
+// Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PHRASE_MS, REACTIONS } from '../pet/core/director.mjs';
 import { createPetCore } from '../pet/core/index.mjs';
+import { SCENE_FRESH_MS } from '../pet/core/scenes.mjs';
 import { createWebScenes, sceneTurn } from '../pet/web/scenes.mjs';
 import { calendar, DAY, fakeIdb, flush, host, journal, LEGACY_DISPLAY, life, manual, planner, reserver, sceneStore, series } from './core-kit.mjs';
 
@@ -126,13 +131,19 @@ test('порт нарушает контракт: бросил при вызов
     assert.ok(L.log.list.some((line) => line.includes(warning)), `${title}: ${L.log.list.join(' | ')}`);
     assert.deepEqual([playing(L) === 'stretch', L.json('scene')?.day ?? null, L.state().scene.reserving], [false, copy, false], `${title}: без зависшей сценки`);
   }
-  // decide дважды и show без решения или дважды — только первое действует.
+  // decide дважды и show без решения или дважды — только первое действует. show без решения с записью успехом не
+  // притворяется: исключение (адаптер откатывает), показа нет; повтор после начала — тот же показ.
   let second = 'не вызван';
+  let early = 'не бросил';
   const twice = scened({ cat: CAT }, {
     port: {
       port: {
         reserve(decide, show) {
-          show();
+          try {
+            show();
+          } catch (error) {
+            early = error.message;
+          }
           const record = decide(undefined);
           second = decide(undefined);
           show();
@@ -145,7 +156,28 @@ test('порт нарушает контракт: бросил при вызов
   const ids = [];
   twice.core.subscribe((update) => update.snapshot.pose.reaction?.scene && ids.push(update.snapshot.pose.reaction.id), { initial: false });
   await attempt(twice);
+  assert.match(early, /показ сценки не начат: нет решения с записью \(шаг queued\)/);
   assert.deepEqual([second, playing(twice), new Set(ids).size, twice.json('scene').day], [null, 'stretch', 1, DAY], 'один показ, одна копия');
+  // Решение отказало (день занят) — show после него бросает, сценки нет; исход skip.
+  let after = 'не бросил';
+  const refused = scened({ cat: CAT }, {
+    port: {
+      port: {
+        reserve(decide, show) {
+          const record = decide({ v: 1, day: DAY, by: 'другая' });
+          try {
+            show();
+          } catch (error) {
+            after = error.message;
+          }
+          return Promise.resolve(record ? 'shown' : 'skip');
+        },
+      },
+    },
+  });
+  await attempt(refused);
+  assert.match(after, /нет решения с записью \(шаг decided\)/);
+  assert.deepEqual([playing(refused), refused.raw('scene')], [null, null]);
 });
 
 // ---------- З. Два ядра, пространства имён ----------
@@ -284,29 +316,49 @@ test('копия scene асинхронно: pending до подтвержден
 
 // ---------- Л. Граница раунда ----------
 
-test('граница раунда: между decide, постановкой записи и началом показа — ни слушателей, ни журнала; слушатель — после начала показа, его команда выполняется; исключение слушателя не обрывает доставку', async () => {
+// Общий журнал порядка: шаги порта резервирования (enter, read, decide, put, show, commit, исход), постановка задач
+// планировщика (plan <мс>: начало реакции сценки — задача её конца REACTIONS.stretch.ms, затем облако PHRASE_MS), журнал
+// ядра (log …) и доставка подписчику (deliver <reason>). Начало показа (plan внутри show) и доставка — разные записи.
+function ordered(parts = {}, { onPlan = () => {} } = {}) {
   const store = sceneStore();
   const port = reserver(store, 'qa');
-  const log = { list: port.steps, port: { warn: (message) => port.steps.push(`log ${message}`) } };
-  const L = scened({ cat: CAT }, { port, log });
+  const steps = port.steps;
+  const log = { list: steps, port: { warn: (message) => steps.push(`log ${message}`) } };
+  const later = (plan) => ({
+    later(ms, task) {
+      steps.push(`plan ${ms}`);
+      onPlan(ms);
+      return plan.port.later(ms, task);
+    },
+  });
+  const L = scened({ cat: CAT }, { port, log, store, scheduler: later, ...parts });
+  L.core.subscribe((update) => steps.push(`deliver ${update.reason}`), { initial: false });
+  return { ...L, steps };
+}
+const from = (steps, first) => steps.slice(steps.lastIndexOf(first));
+
+test('граница раунда: decide → постановка записи → начало реакции сценки — без слушателей и журнала между ними; доставка — после начала показа, команда слушателя выполняется; исключение слушателя не обрывает доставку', async () => {
+  const L = ordered();
   L.core.subscribe(() => {
     throw new Error('слушатель упал');
   }, { initial: false });
   let hid = null;
   L.core.subscribe((update) => {
-    port.steps.push(`deliver ${update.reason}`);
     if (update.snapshot.pose.reaction?.scene && !hid) hid = L.core.setContext({ typing: true });
   }, { initial: false });
+  L.port.mode.hold.add('enter');
   await attempt(L);
-  const steps = port.steps;
-  const decided = steps.indexOf('decide record');
-  assert.deepEqual(steps.slice(decided, decided + 2), ['decide record', 'put'], 'сразу постановка записи');
-  const shown = steps.indexOf('show', decided);
-  assert.ok(steps.slice(decided, shown).every((step) => !step.startsWith('log') && !step.startsWith('deliver')) || steps.slice(decided + 2, shown).every((step) => step.startsWith('deliver') || step.startsWith('log слушатель') || step.startsWith('log исключение')), steps.join(' | '));
-  assert.ok(steps.slice(decided + 2, shown).includes('deliver scene'), 'обновление начала показа доставлено слушателям уже после постановки записи (в самом show)');
-  assert.ok(steps.slice(decided, decided + 2).every((step) => !step.startsWith('log')), 'журнал — не между решением и постановкой');
-  assert.deepEqual([hid?.ok, playing(L), steps.includes('→ shown'), L.json('scene').day], [true, null, true, DAY], 'команда слушателя после начала показа выполнена; день подтверждён');
-  assert.ok(steps.some((step) => step.startsWith('log исключение подписчика')), 'исключение слушателя — журнал, доставка продолжена');
+  await L.port.open('enter');
+  await flush();
+  // Ровно: вход, чтение, решение, постановка, начало реакции (задача конца сценки и облако) — и только затем доставка
+  // начала показа и журнал исключения подписчика; show возвращается после доставки (свой раунд), затем запись.
+  assert.deepEqual(from(L.steps, 'enter').slice(0, 8), ['enter', 'read', 'decide record', 'put', `plan ${REACTIONS.stretch.ms}`, `plan ${PHRASE_MS}`, 'deliver scene', 'log исключение подписчика — доставка продолжается'], L.steps.join(' | '));
+  const tail = from(L.steps, 'put');
+  const started = tail.indexOf(`plan ${REACTIONS.stretch.ms}`);
+  const delivered = tail.indexOf('deliver scene');
+  const returned = tail.indexOf('show');
+  assert.ok(started === 1 && delivered > started && returned > delivered && tail.indexOf('commit') > returned, `начало реакции → доставка → возврат show → запись: ${tail.join(' | ')}`);
+  assert.deepEqual([hid?.ok, playing(L), tail[tail.indexOf('commit') + 1], L.json('scene').day], [true, null, '→ shown', DAY], 'команда слушателя после начала показа выполнена; день подтверждён');
 });
 
 test('граница раунда: команда, вызванная портом изнутри решения (random метки вкладки), — reentrant без изменений', async () => {
@@ -334,6 +386,293 @@ test('граница раунда: команда, вызванная порто
   L.plan.advance(REACTIONS.joy.ms);
   await flush();
   assert.deepEqual([inner?.error?.code, L.state().name.display, L.port.steps.at(-1)], ['reentrant', 'Марс', '→ shown']);
+});
+
+// ---------- Н. Ручное действие — окончательная отмена (§ 9.3) ----------
+
+// Ручные действия настоящими командами и длительность их отклика: кормление (feed → fed), готовое имя (named),
+// поглаживание (прямой отклик игры), жест (начало и конец — временная граница до PL04.3).
+const MANUAL = [
+  ['кормление', (L) => L.core.feed(), REACTIONS.feed.ms + REACTIONS.fed.ms],
+  ['готовое имя', (L) => L.core.setName('Бублик', { pick: true }), REACTIONS.named.ms],
+  ['поглаживание', (L) => L.core.react('pet', { explicit: true }), REACTIONS.pet.ms],
+  [
+    'жест: начало и конец',
+    (L) => {
+      const result = L.core.setBusy(true);
+      assert.equal(L.core.setBusy(false).changed, false, 'конец жеста попытку не возвращает и снимка не меняет');
+      return result;
+    },
+    0,
+  ],
+];
+
+for (const [title, act, ms] of MANUAL) {
+  test(`ручное действие после начала резервирования (${title}): попытка отменена сразу и окончательно — действие кончилось до решения, срок не истёк: skip, ни постановки, ни показа, ни дня, ни копии; более новая реакция не тронута`, async () => {
+    const L = scened();
+    L.core.open('corner');
+    L.port.mode.hold.add('enter');
+    const at = L.time.state.now;
+    await attempt(L);
+    assert.deepEqual([L.port.calls.reserve, L.state().scene], [1, { waiting: { type: 'stretch', until: at + SCENE_FRESH_MS }, reserving: true }], 'резервирование ждёт очереди');
+    const seen = L.seen.length;
+    const result = act(L);
+    assert.deepEqual([result.ok, result.changed, L.state().scene], [true, true, { waiting: null, reserving: true }], 'отмена сразу, changed честный');
+    assert.equal(L.seen.slice(seen)[0]?.snapshot.scene.waiting, null, 'обновление с отменой доставлено');
+    L.plan.advance(ms);
+    assert.ok(L.time.state.now - at < SCENE_FRESH_MS, 'срок 10 с ещё не истёк: skip — не из-за срока');
+    // Новое занятие без сценки (шанс не выпал) — более новая реакция; поздний skip её не трогает.
+    L.random.push(0, 0.9);
+    saved(L, 'K2');
+    await L.port.open('enter');
+    await flush();
+    assert.deepEqual([L.port.steps.slice(-3), L.port.calls.show, playing(L), L.days.days.size, L.raw('scene'), L.state().scene], [['read', 'decide null', '→ skip'], 0, 'joy', 0, null, { waiting: null, reserving: false }]);
+  });
+
+  test(`ручное действие до начала резервирования (${title}): попытка снята сразу; после радости и действия — ни резервирования, ни показа`, async () => {
+    const L = scened();
+    L.core.open('corner');
+    L.random.push(0, 0, 0);
+    saved(L, 'K');
+    assert.equal(L.state().scene.waiting?.type, 'stretch');
+    const result = act(L);
+    assert.deepEqual([result.ok, result.changed, L.state().scene.waiting], [true, true, null]);
+    L.plan.advance(REACTIONS.joy.ms + ms);
+    await flush();
+    assert.deepEqual([L.port.calls.reserve, L.state().pose.reaction?.scene ?? false, L.days.days.size, L.raw('scene')], [0, false, 0, null]);
+  });
+
+  test(`ручное действие во время показа (${title}): сценка остановлена, начатая запись не отменена — shown, день и копия; более новая реакция не тронута`, async () => {
+    const L = scened();
+    L.core.open('corner');
+    L.port.mode.hold.add('commit');
+    await attempt(L);
+    assert.equal(playing(L), 'stretch');
+    act(L);
+    const now = playing(L);
+    assert.notEqual(now, 'stretch', 'сценка остановлена');
+    await L.port.open('commit');
+    await flush();
+    assert.deepEqual([L.port.steps.at(-1), L.days.days.get('qa').day, L.json('scene').day, playing(L)], ['→ shown', DAY, DAY, now]);
+  });
+}
+
+test('ручное действие во время показа, затем lost: более новая реакция (кормление, имя) не снимается; день свободен, копии нет', async () => {
+  for (const [title, act] of MANUAL.slice(0, 2)) {
+    const L = scened();
+    L.core.open('corner');
+    L.port.mode.hold.add('commit');
+    L.port.mode.abort = true;
+    await attempt(L);
+    act(L);
+    const now = playing(L);
+    await L.port.open('commit');
+    assert.deepEqual([L.port.steps.at(-1), now !== null && now !== 'stretch', playing(L), L.days.days.size, L.raw('scene')], ['→ lost', true, now, 0, null], title);
+  }
+});
+
+test('готовое имя то же и в паузе повтора: отклика нет, но попытка отменена — changed и обновление честные, skip; без попытки — changed false, обновления нет', async () => {
+  const L = scened({ cat: { ...CAT, name: 'Бублик' } });
+  L.core.open('corner');
+  assert.equal(L.core.setName('Бублик', { pick: true }).reacted, true);
+  L.port.mode.hold.add('enter');
+  await attempt(L);
+  const seen = L.seen.length;
+  const result = L.core.setName('Бублик', { pick: true });
+  assert.deepEqual([result.ok, result.reacted, result.changed, result.save.status, L.state().scene.waiting], [true, false, true, 'none', null]);
+  assert.deepEqual(L.seen.slice(seen).map((update) => [update.reason, update.snapshot.scene.waiting]), [['setName', null]]);
+  await L.port.open('enter');
+  assert.deepEqual([L.port.steps.slice(-2), L.days.days.size, L.raw('scene'), L.json('cat').name], [['decide null', '→ skip'], 0, null, 'Бублик']);
+  const quiet = L.seen.length;
+  assert.deepEqual([L.core.setName('Бублик', { pick: true }).changed, L.seen.length - quiet], [false, 0], 'ничего не изменилось — ни changed, ни обновления');
+});
+
+test('отказ ручного входа (ok: false) — без побочных изменений: попытка цела, обновления нет, показ и день — как без него', async () => {
+  for (const [title, initial, counts, act, code] of [
+    ['уже угостили', { cat: CAT, treat: { v: 1, fedDay: DAY } }, host(1, 1), (L) => L.core.feed(), 'treat-fed'],
+    ['ещё не было занятия', { cat: CAT }, host(1, 0), (L) => L.core.feed(), 'treat-waiting'],
+    ['имя не строка', { cat: CAT }, host(1, 1), (L) => L.core.setName(5, { pick: true }), 'invalid-argument'],
+    ['жест не boolean', { cat: CAT }, host(1, 1), (L) => L.core.setBusy('да'), 'invalid-argument'],
+    ['неизвестный отклик', { cat: CAT }, host(1, 1), (L) => L.core.react('stretch'), 'invalid-argument'],
+  ]) {
+    const L = scened(initial, { counts });
+    L.port.mode.hold.add('enter');
+    await attempt(L);
+    const snapshot = L.state();
+    const seen = L.seen.length;
+    const treat = L.raw('treat');
+    const result = act(L);
+    assert.deepEqual([result.ok, result.error?.code, L.state() === snapshot, L.seen.length - seen, L.raw('treat')], [false, code, true, 0, treat], title);
+    await L.port.open('enter');
+    await flush();
+    assert.deepEqual([L.port.steps.at(-1), playing(L), L.days.days.get('qa')?.day, L.json('scene')?.day], ['→ shown', 'stretch', DAY, DAY], `${title}: показ`);
+  }
+});
+
+test('кормление при ждущей попытке: правила лакомства прежние — отметка дня и запись до реакции, объявление, «ест» → «доволен», счёт хоста не меняется', async () => {
+  const L = scened();
+  L.core.open('corner');
+  L.port.mode.hold.add('enter');
+  await attempt(L);
+  const marks = L.counts.state.marks;
+  const seen = L.seen.length;
+  const result = L.core.feed();
+  assert.deepEqual([result.ok, result.save.status, L.json('treat').fedDay, result.reaction.type, playing(L), L.state().treat, L.counts.state.marks], [true, 'saved', DAY, 'feed', 'feed', 'fed', marks]);
+  assert.ok(L.seen.slice(seen).flatMap((update) => update.effects).some((effect) => effect.type === 'announce' && effect.text.endsWith('получает лакомство. Сегодня уже угостили.')));
+  L.plan.advance(REACTIONS.feed.ms);
+  assert.equal(playing(L), 'fed');
+  assert.deepEqual([L.core.feed().error?.code, L.state().scene.waiting], ['treat-fed', null], 'второго лакомства нет');
+  await L.port.open('enter');
+  assert.equal(L.port.steps.at(-1), '→ skip');
+});
+
+// ---------- О. Отключение в критическом шаге (§ 9.3, § 5.4) ----------
+
+// Ядро с общим журналом порядка и ловушкой: arm(point) — следующий вызов порта point отключает ядро изнутри (сначала
+// пробует команду — reentrant): random (метка вкладки в решении), peek (чтение копии scene через координатор), clock (часы
+// в решении), scheduler (задача конца сценки — начало показа).
+function trapped() {
+  const box = { point: null, core: null, inner: null };
+  const spring = (point) => {
+    if (box.point !== point) return;
+    box.point = null;
+    box.inner = box.core.setName('Взлом');
+    box.core.destroy();
+  };
+  const sequence = series();
+  const random = { ...sequence, port: () => (spring('random'), sequence.port()) };
+  const L = ordered({ random }, { onPlan: (ms) => ms === REACTIONS.stretch.ms && spring('scheduler') });
+  box.core = L.core;
+  const now = L.time.port.now;
+  L.time.port.now = () => (spring('clock'), now());
+  const get = L.store.getItem;
+  L.store.getItem = (key) => (key === L.keys.scene && spring('peek'), get(key));
+  return { ...L, box, arm: (point) => (box.point = point) };
+}
+// Очередь освобождена исходом: новое ядро того же хранилища и пространства решает по записи дня.
+async function successor(L) {
+  L.storage.load();
+  const C = scened({ cat: CAT }, { store: L.days, storage: L.storage, port: reserver(L.days, 'qa') });
+  await attempt(C, 'c');
+  return C;
+}
+
+for (const [title, point] of [
+  ['random метки вкладки', 'random'],
+  ['чтение копии (peek)', 'peek'],
+  ['часы в решении', 'clock'],
+]) {
+  test(`destroy из порта во время решения (${title}): команда порта — reentrant, отключение — в конце фазы решения (до его возврата), decide null — ни постановки, ни показа, ни дня, ни копии; очередь освобождена, новое ядро показывает`, async () => {
+    const L = trapped();
+    L.port.mode.hold.add('enter');
+    await attempt(L);
+    L.arm(point);
+    await L.port.open('enter');
+    await flush();
+    assert.deepEqual(from(L.steps, 'enter'), ['enter', 'read', 'deliver destroyed', 'decide null', '→ skip'], L.steps.join(' | '));
+    assert.deepEqual([L.box.inner?.error?.code, L.state().status, L.port.calls.show, L.days.days.size, L.raw('scene'), L.seen.some((update) => update.snapshot.pose.reaction?.scene)], ['reentrant', 'destroyed', 0, 0, null, false]);
+    const C = await successor(L);
+    assert.deepEqual([C.port.steps.at(-1), playing(C), C.days.days.get('qa').day], ['→ shown', 'stretch', DAY], 'день свободен');
+  });
+}
+
+test('порт внутри решения подписал слушателя или вызвал поглощение чужого изменения: конец фазы не пуст — решение null, skip без записи; доставка — до возврата decide, не между постановкой и показом', async () => {
+  for (const [title, inside, expected] of [
+    ['подписка', (L) => L.core.subscribe(() => L.steps.push('initial из порта')), 'initial из порта'],
+    [
+      'событие storage другой вкладки',
+      (L) => {
+        L.put('cat', { ...CAT, name: 'Сосед' });
+        L.events.fire(L.keys.cat);
+      },
+      'deliver storage',
+    ],
+  ]) {
+    let armed = false;
+    let L = null;
+    const sequence = series();
+    const random = { ...sequence, port: () => (armed && ((armed = false), inside(L)), sequence.port()) };
+    L = ordered({ random });
+    L.port.mode.hold.add('enter');
+    await attempt(L);
+    armed = true;
+    await L.port.open('enter');
+    await flush();
+    assert.deepEqual(from(L.steps, 'enter').slice(0, 5), ['enter', 'read', expected, 'decide null', '→ skip'], `${title}: ${L.steps.join(' | ')}`);
+    assert.deepEqual([L.port.calls.show, L.days.days.size, L.raw('scene'), L.state().status], [0, 0, null, 'running'], title);
+  }
+});
+
+test('destroy обычным вызовом до решения: доставлено сразу, decide null, skip — ничего не записано; очередь освобождена, новое ядро показывает', async () => {
+  const L = trapped();
+  L.port.mode.hold.add('enter');
+  await attempt(L);
+  L.core.destroy();
+  assert.equal(L.steps.at(-1), 'deliver destroyed');
+  await L.port.open('enter');
+  await flush();
+  assert.deepEqual([from(L.steps, 'enter'), L.days.days.size, L.raw('scene')], [['enter', 'read', 'decide null', '→ skip'], 0, null]);
+  const C = await successor(L);
+  assert.equal(C.port.steps.at(-1), '→ shown');
+});
+
+test('destroy из порта планировщика во время начала показа: отключение раньше, чем слушатели увидели начало, — показ не начат: show бросает, запись откатывается (lost), день свободен, копии нет; новое ядро показывает', async () => {
+  const L = trapped();
+  L.port.mode.hold.add('enter');
+  await attempt(L);
+  L.arm('scheduler');
+  await L.port.open('enter');
+  await flush();
+  assert.deepEqual(from(L.steps, 'enter'), ['enter', 'read', 'decide record', 'put', `plan ${REACTIONS.stretch.ms}`, `plan ${PHRASE_MS}`, 'deliver destroyed', 'show threw', '→ lost'], L.steps.join(' | '));
+  assert.deepEqual([L.box.inner?.error?.code, L.state().status, L.state().pose.reaction, L.days.days.size, L.raw('scene'), L.seen.some((update) => update.snapshot.pose.reaction?.scene)], ['reentrant', 'destroyed', null, 0, null, false]);
+  const C = await successor(L);
+  assert.equal(C.port.steps.at(-1), '→ shown', 'день свободен');
+});
+
+test('destroy слушателем после настоящего начала показа: запись не отменяется — shown, день остаётся, копии нет; новое ядро того же пространства — второй сценки нет', async () => {
+  const L = trapped();
+  L.core.subscribe((update) => update.snapshot.pose.reaction?.scene && L.core.destroy(), { initial: false });
+  L.port.mode.hold.add('enter');
+  await attempt(L);
+  await L.port.open('enter');
+  await flush();
+  assert.deepEqual(from(L.steps, 'enter'), ['enter', 'read', 'decide record', 'put', `plan ${REACTIONS.stretch.ms}`, `plan ${PHRASE_MS}`, 'deliver scene', 'deliver destroyed', 'show', 'commit', '→ shown'], L.steps.join(' | '));
+  assert.deepEqual([L.state().status, L.days.days.get('qa').day, L.raw('scene')], ['destroyed', DAY, null]);
+  const C = await successor(L);
+  assert.deepEqual([C.port.steps.at(-1), playing(C)], ['→ skip', null], 'день занят прежним ядром');
+});
+
+test('порт вызвал show не в том же шаге (нарушение § 9.2): отмена или destroy между решением и show — show бросает, показа и копии нет', async () => {
+  for (const [title, between] of [
+    ['отмена вводом', (L) => L.core.setContext({ typing: true })],
+    ['кормление', (L) => L.core.feed()],
+    ['destroy', (L) => L.core.destroy()],
+  ]) {
+    let thrown = '';
+    const port = {
+      steps: [],
+      port: {
+        reserve(decide, show) {
+          const record = decide(undefined);
+          return Promise.resolve().then(() => {
+            between(L);
+            try {
+              show();
+              return record ? 'shown' : 'skip';
+            } catch (error) {
+              thrown = error.message;
+              return 'lost';
+            }
+          });
+        },
+      },
+    };
+    const L = scened({ cat: CAT }, { port });
+    await attempt(L);
+    await flush();
+    assert.match(thrown, /показ сценки не начат/, title);
+    assert.deepEqual([playing(L) === 'stretch', L.raw('scene'), L.seen.some((update) => update.snapshot.pose.reaction?.scene)], [false, null, false], title);
+  }
 });
 
 // ---------- М. Отказы планировщика ----------
