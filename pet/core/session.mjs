@@ -504,11 +504,14 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
 
   // Подтверждённое занятие с реакцией (не в тишине «спрятан» и не «по зову» закрытым): одна попытка на событие — шанс и
   // вариант по random только среди допустимых (пусто — без броска, попытка всё равно использована); без counted и при
-  // празднике (stage — ступень к празднику без учёта вида) — сценки нет. Новое событие заменяет прежнюю попытку.
+  // празднике (stage — ступень к празднику без учёта вида) — сценки нет. Новое событие заменяет прежнюю попытку. Реакции
+  // этого события нет — не идёт и не отложена (фон, отказ планировщика, пропущена) — попытки нет: её конец не наступит;
+  // бросок при этом тот же (порядок random 0.1.4).
   function choose({ key, outcome, stage, day, at }, s) {
     if (!started || !alive) return;
     const type = pickScene({ key, checked, outcome, celebrate: stage, day, record: s.scene, kind: s.kind, available: optionsOf(s), random });
-    attempt = type ? { type, key, day, at, until: at + SCENE_FRESH_MS, kind: s.kind } : null;
+    const waits = d.current?.event === key || d.pending?.event === key;
+    attempt = type && waits ? { type, key, day, at, until: at + SCENE_FRESH_MS, kind: s.kind } : null;
   }
 
   // Уместна ли попытка сейчас: тот же питомец, тот же местный день, не позже срока, питомец на виду и вкладка видна,

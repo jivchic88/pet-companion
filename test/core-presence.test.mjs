@@ -214,6 +214,38 @@ test('вызов → «Уголок»: отметка как при обычно
   assert.deepEqual([corner.fresh, L.json('cat').seenStage, L.state().view], [['mug', 'notebook'], 2, { open: 'corner', source: 'call' }], 'явно показанный «Уголок» после вызова — увидена');
 });
 
+test('занятие при открытом уголке, ступень поднялась без праздника (без знака, скачок счёта) — увидена, fresh, как syncSheet 0.1.4; в «Поиграть», редакторе и закрытом — нет', () => {
+  for (const [title, from, to, counted] of [
+    ['без знака', 4, 9, false],
+    ['скачок счёта 4 → 10', 4, 10, true],
+  ]) {
+    for (const view of ['corner', null, 'play', 'room']) {
+      const counts = host(from, 1);
+      const L = started({ cat: { v: 1, seenStage: 1, greetDay: DAY } }, { counts });
+      if (view) L.core.open(view);
+      counts.set(to, 2);
+      const result = saved(L, `${title}-${view}`, { counted });
+      const corner = view === 'corner';
+      assert.deepEqual([result.celebrate, L.json('cat').seenStage, L.state().progress.unseen, L.effects('celebrate')], [null, corner ? 2 : 1, !corner, []], `${title}, вид ${view ?? 'закрыт'}: отметка`);
+      assert.deepEqual(result.fresh, corner ? ['mug', 'notebook'] : [], `${title}, вид ${view ?? 'закрыт'}: «Новое в уголке»`);
+      // Отмечено один раз: refresh при открытом уголке больше ничего не отмечает и не пишет.
+      const writes = L.store.writes.length;
+      if (corner) assert.deepEqual([L.core.refresh().fresh, L.store.writes.length], [[], writes]);
+    }
+  }
+  // Праздник по-прежнему сам отмечает ступень (fresh пуст), непонятная — не отмечается и не переписывается.
+  const counts = host(8, 1);
+  const L = started({ cat: { v: 1, seenStage: 1, greetDay: DAY } }, { counts });
+  L.core.open('corner');
+  counts.set(9, 2);
+  const party = saved(L, 'party');
+  assert.deepEqual([party.celebrate, party.fresh, L.json('cat').seenStage], [2, [], 2]);
+  const stored = { v: 3, seenStage: 'future-stage', greetDay: DAY, future: { a: 1 } };
+  const odd = started({ cat: stored }, { counts: host(4, 1) });
+  odd.core.open('corner');
+  assert.deepEqual([saved(odd, 'odd', { counted: false }).fresh, odd.json('cat')], [[], stored]);
+});
+
 test('непонятная ступень не отмечается и не переписывается; понятная не понижается; открытие сверяет облик и счёт', () => {
   for (const odd of [8, 'future-stage']) {
     const stored = { v: 3, seenStage: odd, greetDay: DAY, future: { a: 1 } };

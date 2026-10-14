@@ -2732,7 +2732,9 @@ function saved(detail) {
   ui.settings = readSettings();
   showProgress();
   if (!result.ok || !result.reaction) return;
-  // Уголок открыли, пока занятие сохранялось: числа и ступень догоняют, праздник — реакцией.
+  // Уголок открыли, пока занятие сохранялось: числа и ступень догоняют, праздник — реакцией; ступень без праздника ядро
+  // отметило увиденной — её вещи в «Новое в уголке».
+  if (result.fresh.length) ui.fresh = [...new Set([...ui.fresh, ...result.fresh])];
   syncSheet();
 }
 

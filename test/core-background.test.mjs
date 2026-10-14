@@ -112,6 +112,25 @@ test('контроль: идущие реакция и сценка сняты �
   assert.deepEqual([playing(J), J.state().scene.waiting, port.calls.reserve], [null, null, 0], 'прерванная радость не доиграна — сценка не пробует');
 });
 
+test('фон: событие с выпавшей сценкой — бросок как 0.1.4 (шанс и вариант), но попытки нет: снимок без scene.waiting, возврат ничего не резервирует', async () => {
+  const port = reserver();
+  const L = started({ cat: CAT }, { scenes: port.port });
+  L.core.setVisible(false);
+  L.random.push(0, 0, 0);
+  const before = L.random.state.taken;
+  const mark = L.seen.length;
+  assert.equal(saved(L, 'B').reacted, true, 'решение занятия то же');
+  assert.deepEqual([L.random.state.taken - before, L.state().scene.waiting, since(L, mark).scene], [2, null, false], 'бросок — шанс и вариант, попытки нет');
+  L.core.setVisible(true);
+  L.plan.advance(REACTIONS.joy.ms + 20_000);
+  await flush();
+  assert.deepEqual([playing(L), L.state().scene.waiting, port.calls.reserve], [null, null, 0], 'возврат — ни сценки, ни резервирования');
+  // Видимая вкладка — та же попытка ждёт конца радости.
+  L.random.push(0, 0, 0);
+  saved(L, 'V');
+  assert.equal(L.state().scene.waiting?.type, 'stretch');
+});
+
 // ---------- Новые события и входы в фоне ----------
 
 test('фон: saved — числа, праздник с отметкой ступени, учёт key как всегда; реакции, облака и задач нет', () => {

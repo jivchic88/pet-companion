@@ -3,7 +3,7 @@
 // пауз (транзакция остаётся открытой, решение ядра ждёт сценария). «Приходит по зову» с клавиатуры: лапка, Enter — сразу
 // «Поиграть», «Уголок», Esc — к странице с фокусом на лапке; закрытый по зову ничего не играет, вызов не празднует и не
 // отмечает ступень, «Уголок» после вызова — отмечает; «Скрыть» и «Показать» по зову — лапка без игры. Сценка в уголке и
-// отмена редактором; отмена вводом и отключение, пока решение ждёт в открытой транзакции, — ничего не записано; две вкладки
+// отмена редактором; занятие при открытом уголке поднимает ступень без праздника — она сразу увидена; отмена вводом и отключение, пока решение ждёт в открытой транзакции, — ничего не записано; две вкладки
 // одного пространства — одна сценка, разных — две; синтетические более новые и повреждённые записи и повторное
 // подключение; одинаковый сценарий в Chrome и в Node (ядро, веб-координатор, IndexedDB в памяти) — один логический итог.
 // Компьютер 1280×900, телефон 390×844 и боком 844×390: горизонтальной прокрутки, ошибок страницы и внешних запросов нет,
@@ -232,6 +232,31 @@ async function desktop(browser, base, check, open, layout) {
     await page.keyboard.press('Escape');
     const leave = { view: (await sheetView(page)).view, focus: await focusedOn(page, '[data-cat-room]') };
     check(`${label}: «Обустроить уголок» — сценка остановлена; Esc — в уголок, фокус на входе`, room.scenes.length === 0 && room.view === 'room' && leave.view === '' && leave.focus, JSON.stringify({ room, leave }));
+    await page.keyboard.press('Escape');
+    await page.clock.runFor(100);
+    await page.evaluate(() => window.stand.pet.destroy());
+
+    // ---- Уголок открыт, ступень поднялась без праздника (занятие без знака, счёт сайта вырос без update()) — сразу
+    // увидена, «Новое в уголке» один раз, как syncSheet 0.1.4 ----
+    await page.evaluate(() => {
+      window.qaProgress = { marks: 4, today: 1, limit: 3 };
+      localStorage.setItem('pe:cat:v1', JSON.stringify({ v: 1, seenStage: 1, greetDay: '2026-10-11' }));
+      window.stand.mount({ storage: 'pe', progress: () => window.qaProgress });
+    });
+    await page.clock.runFor(100);
+    await page.locator('#cat-dock .cat-dock-btn').click();
+    await page.evaluate(() => {
+      window.qaProgress = { marks: 9, today: 2, limit: 3 };
+      window.stand.pet.notify('saved', { key: 'pe1', counted: false });
+    });
+    await page.clock.runFor(200);
+    const freshNote = () => page.evaluate(() => (document.querySelector('[data-cat-fresh]')?.hidden ? '' : document.querySelector('[data-cat-fresh]')?.textContent ?? ''));
+    const quietStage = { seen: (await stored(page, 'pe:cat:v1')).seenStage, fresh: await freshNote() };
+    await page.keyboard.press('Escape');
+    await page.clock.runFor(100);
+    await page.locator('#cat-dock .cat-dock-btn').click();
+    const reopened = { seen: (await stored(page, 'pe:cat:v1')).seenStage, fresh: await freshNote() };
+    check(`${label}: уголок открыт, ступень поднялась без праздника — сразу увидена, «Новое в уголке» один раз`, quietStage.seen === 2 && quietStage.fresh.startsWith('Новое') && reopened.seen === 2 && reopened.fresh === '', JSON.stringify({ quietStage, reopened }));
     await page.keyboard.press('Escape');
     await page.clock.runFor(100);
     await page.evaluate(() => window.stand.pet.destroy());

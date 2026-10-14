@@ -638,8 +638,10 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   // Подтверждённое занятие: счёт хоста уже включает знак. Спрятан, не на виду, до start или detail === null — только числа.
   // Иначе решение: радость или поддержка, праздник новой ступени (не в «Поиграть» и редакторе) с отметкой увиденной,
-  // продолжение с новой вещью, подсказка про миску. Увиденная ступень — сверенная (act): уже увиденная или непонятная до
-  // команды — без праздника. Реакцию играет сессия: повтор key в экземпляре — без реакции (duplicate); в фоне решение то же
+  // продолжение с новой вещью, подсказка про миску; уголок открыт, а ступень поднялась без праздника (занятие без знака,
+  // счёт сайта вырос без refresh) — увидена, как при refresh (fresh — эти вещи; syncSheet 0.1.4). Увиденная ступень —
+  // сверенная (act): уже увиденная или непонятная до команды — без праздника. Реакцию играет сессия: повтор key в
+  // экземпляре — без реакции (duplicate); в фоне решение то же
   // (числа, праздник с отметкой ступени, учёт key), но реакция не играет и не откладывается. «На виду» и открытый вид —
   // ядра (присутствие, «скрыт», view). После реакции — попытка редкой сценки (одна на событие, session.choose): ждёт конца
   // реакции этого события. options.scene === false — без попытки (legacy-событие без key, Р2: в 0.1.4 у него сценки нет).
@@ -670,7 +672,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       const next = readHost();
       const writes = firstSwitch(next);
       const m = memory();
-      const quiet = { ok: true, reacted: false, duplicate: false, celebrate: null, reaction: null, scene: null };
+      const quiet = { ok: true, reacted: false, duplicate: false, celebrate: null, reaction: null, scene: null, fresh: [] };
       if (detail === null || status !== 'running' || m.cat.hidden || !where.around) {
         apply(step, { next, writes });
         return { ...quiet, changed: !same(was, build()), save: step.save };
@@ -692,6 +694,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         follow = { type: 'unlock', extra: { tryOn, mini, phrases: tryOn ? 'plaid' : 'unlock' } };
         told.push({ type: 'celebrate', stage: celebrate, items, accessories }, { type: 'announce', text: `${name}: открыта ступень «${STAGES[celebrate].title}» — ${stageGift(celebrate, kind, name).toLowerCase()}.` });
       }
+      const fresh = celebrate === null && where.view === 'corner' ? seeStage(next, writes, m) : [];
       // Первое занятие дня открыло лакомство — радость подсказывает про миску.
       const hint = !outcome.hard && treatState(next.day, m.treat.fedDay, next.today) === 'ready' && detail.first === true;
       const reaction = { type: outcome.hard ? 'support' : 'joy', key: `entry:${detail.key}`, extra: { ...(hint ? { phrases: 'joyTreat' } : {}), ...(follow ? { follow } : {}) } };
@@ -700,7 +703,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       const { duplicate } = session.react(reaction.type, { key: reaction.key, extra: { ...reaction.extra, event: detail.key } });
       // Выбор сценки — после реакции (порядок random как 0.1.4: реплика, затем шанс и вариант).
       session.choose({ key: options?.scene === false ? '' : detail.key, outcome, stage, day: next.day, at }, sense());
-      return { ok: true, changed: !same(was, build()), save: step.save, reacted: true, duplicate, celebrate, reaction, scene: { outcome, stage } };
+      return { ok: true, changed: !same(was, build()), save: step.save, reacted: true, duplicate, celebrate, reaction, scene: { outcome, stage }, fresh };
     });
 
   // Кормление: день заново, отметка дня — сверенная (act): уже угостили до команды — treat-fed без записи и реакции. Отметка
