@@ -1,6 +1,9 @@
-// Место и вид питомца рядом со страницей и присутствие: правила без DOM. Предпочтение — смысловое место и вид, у
-// телефона и компьютера свои (ключ place); что показать сейчас, решает petLayout по предпочтению и окну, не меняя
-// сохранённого.
+// Место и вид питомца рядом со страницей и присутствие: правила legacy-отображения без DOM. Предпочтение — смысловое место
+// и вид, у телефона и компьютера свои (ключ place); что показать сейчас, решает petLayout по предпочтению и окну, не меняя
+// сохранённого. Ключ place хранит и пишет ядро (память ключа, команда setPlace через его подключение, PL04.3): здесь —
+// формат значений, проверка правки и раскладка; запись — общей функцией ядра prefRecord.
+
+import { prefRecord } from './core/formats/legacy.mjs';
 
 export const PLACE_VERSION = 1;
 export const DEVICES = ['desktop', 'phone'];
@@ -28,15 +31,6 @@ export const VIEWS = [
 const DEFAULTS = { desktop: { place: '', view: 'auto' }, phone: { place: 'top', view: 'auto' } };
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-// Сохранённый объект или {}.
-const readJson = (text) => {
-  try {
-    const raw = JSON.parse(text ?? 'null');
-    return isObject(raw) ? raw : {};
-  } catch {
-    return {};
-  }
-};
 export const placeIds = (device) => PLACES[device].map((item) => item.id);
 export const placeTitle = (device, id) => PLACES[device].find((item) => item.id === id)?.title ?? '';
 
@@ -66,20 +60,23 @@ export function parsePlace(text) {
   }
 }
 
-// Запись: свежее сохранённое + изменённые поля ({ desktop?: { place?, view? }, phone?: … }). Пишутся только
-// изменённые поля; остальное — как было, включая поля и значения будущих версий.
-export function placeRecord(text, patch = {}) {
-  const keep = readJson(text);
-  const out = { ...keep, v: Number.isInteger(keep.v) && keep.v > PLACE_VERSION ? keep.v : PLACE_VERSION };
+// Правка места и вида, проверенная отображением: известные поля устройств (place, view), непонятное значение — по
+// умолчанию; порядок устройств — DEVICES. Эту правку отображение передаёт ядру (setPlace).
+export function placePatch(patch = {}) {
+  const out = {};
   for (const device of DEVICES) {
-    const was = isObject(keep[device]) ? keep[device] : {};
     const fields = isObject(patch[device]) ? patch[device] : {};
-    const clean = normalizeDevice(device, { ...was, ...fields });
-    const changed = Object.fromEntries(Object.keys(fields).filter((key) => key in clean).map((key) => [key, clean[key]]));
-    if (Object.keys(changed).length || isObject(keep[device])) out[device] = { ...was, ...changed };
+    const clean = normalizeDevice(device, fields);
+    const known = Object.keys(fields).filter((key) => key in clean);
+    if (known.length) out[device] = Object.fromEntries(known.map((key) => [key, clean[key]]));
   }
   return out;
 }
+
+// Запись: свежее сохранённое + изменённые поля ({ desktop?: { place?, view? }, phone?: … }) — проверенная правка общей
+// функцией записи ядра (prefRecord). Пишутся только изменённые поля; остальное — как было, включая поля и значения будущих
+// версий и больший v.
+export const placeRecord = (text, patch = {}) => prefRecord(text, placePatch(patch));
 
 // Медиазапросы окна — те же пороги, что в pet.css (README модуля, «Места»): телефон — до 860 px; боковая панель
 // целиком — от 880 px высоты, портретом — от 840; внизу экрана — целиком от 1180 px ширины, портретом от 1140;

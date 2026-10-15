@@ -1,103 +1,46 @@
-// Миска и мячик на полу сцены «Поиграть» (с 2026-10-10): правила без DOM (пол, пороги, куда докатится мячик, ближе
-// ли миска) и жесты на странице; реакцию, итог и кнопки ведёт pet.mjs. Ничего не хранит.
+// Миска и мячик на полу сцены «Поиграть» (с 2026-10-10) — отображение: замер пола, рисование мест из снимка ядра, анимация
+// и распознавание жеста; реакцию, итог и кнопки ведёт pet.mjs. Ничего не хранит. Правила мест (пол, питомец, ближе ли
+// миска, куда докатится мячик) — ядро (core/toys.mjs, PL04.3): здесь — перевод CSS px в единицы рисунка и обратно,
+// пороги распознавания и кадры.
 //
-// Пол — полоса сцены от линии лап до низа места под питомцем ([data-play-floor]) без краёв сцены; питомец (тело,
-// хвост, область лапы) — запретный прямоугольник: предмет стоит сбоку или перед лапами. Место — в единицах рисунка
-// питомца (viewBox 220×204): после изменения окна — то же относительно питомца. Миска едет за указателем после
-// сдвига на MOVE_PX, с той же точкой захвата; мячик тоже, а отпущенный после сдвига на ROLL_PX влево или вправо
-// докатывается (без анимации — нет). Без сдвига и при отмене — на месте до жеста. Указатель — общий со всей сценой
-// (grab в pet-play.mjs): один жест одновременно.
+// Пол — полоса сцены от линии лап до низа места под питомцем ([data-play-floor]) без краёв сцены: отображение меряет края и
+// низ, переводит в единицы рисунка питомца (viewBox 220×204) и объявляет ядру (setDisplay({ playFloor, playTouch })); после
+// изменения окна места те же относительно питомца. Миска едет за указателем после сдвига на MOVE_PX — с той же точкой
+// захвата, место под указателем выбирает ядро (toy.drag); отпущенная после заметного сдвига — на новом месте (toy.drop),
+// иначе — на месте до жеста (toy.cancel). Мячик так же, а отпущенный после сдвига на ROLL_PX влево или вправо — бросок:
+// докатывается туда, куда скажет ядро (без анимации — остаётся, где отпустили). Указатель — общий со всей сценой (grab в
+// pet-play.mjs): один жест одновременно.
 
-import { grab, pawBottom, release } from './pet-play.mjs';
+import { HOME, SIZE } from './core/toys.mjs';
+import { grab, release } from './pet-play.mjs';
+
+export { ANCHOR, HOME, NEAR, SIZE, TOY_STEP, closer, placeToy, rollDist, rollEnd, rollWay, sideOf, zoneOf } from './core/toys.mjs';
 
 export const MOVE_PX = 6;
 export const ROLL_PX = 16;
 export const TOY_MIN_PX = 44;
-// Видимый предмет в единицах рисунка питомца: ширина и высота (пропорции — viewBox предмета, pet.mjs).
-export const SIZE = { bowl: [48, 23], ball: [22, 24] };
 const EDGE = 8; // поле до края сцены, px
-const FLOOR = 176; // линия пола у лап
-const FOOT = [34, 202, 197]; // питомец на полу: слева, справа, низ (не выше низа области лапы)
-export const ANCHOR = [100, 190]; // где стоит питомец: от этой точки миска ближе или дальше
-export const HOME = { bowl: [-60, 214], ball: [280, 214] };
-export const NEAR = { bowl: [60, 214] };
-const ROLL = [30, 90, 80]; // докатывается: не меньше, не больше; кнопкой — столько (единицы рисунка)
+const PAW_MIN_PX = 22; // наименьший радиус области касания лапы (pet-play.mjs)
 
-// Пол в CSS px по рамкам сцены, питомца и места под ним; pawEdge — низ области лапы. На странице — в координатах сцены
-// (сдвиг окна без изменения размера мест не меняет).
-export function floorZone(stage, pet, floor, pawEdge = 0) {
+// Рамки страницы → пол в единицах рисунка: stage, pet, floor — рамки сцены, питомца и места под ним (координаты сцены).
+// Возвращает { s, pet, floor: [l, t, r, b], touch } (s — CSS px на единицу рисунка; touch — 22 CSS px области касания
+// лапы в единицах рисунка: предметы её не закрывают).
+export function floorUnits(stage, pet, floor) {
   const s = pet.width / 220;
-  return {
-    s,
-    pet: { left: pet.left, top: pet.top },
-    left: stage.left + EDGE,
-    right: stage.right - EDGE,
-    top: pet.top + FLOOR * s,
-    bottom: Math.max(pet.bottom, floor?.bottom ?? 0),
-    foot: { left: pet.left + FOOT[0] * s, right: pet.left + FOOT[1] * s, bottom: Math.max(pet.top + FOOT[2] * s, pawEdge) },
-  };
+  const u = (x, origin) => (x - origin) / s;
+  const bottom = Math.max(pet.bottom, floor?.bottom ?? 0);
+  return { s, pet: { left: pet.left, top: pet.top }, floor: [u(stage.left + EDGE, pet.left), u(stage.top, pet.top), u(stage.right - EDGE, pet.left), u(bottom, pet.top)], touch: PAW_MIN_PX / s };
 }
 
 export const toPx = (z, [u, v]) => [z.pet.left + u * z.s, z.pet.top + v * z.s];
 export const toUnits = (z, [x, y]) => [(x - z.pet.left) / z.s, (y - z.pet.top) / z.s];
-const half = (z, [w, h]) => [(w * z.s) / 2, (h * z.s) / 2];
-const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi));
-
-// Центр предмета размера size, ближайший к (x, y): на полу и не на питомце — перед лапами, слева или справа от него.
-export function placeToy(z, size, x, y) {
-  const [hw, hh] = half(z, size);
-  x = clamp(x, z.left + hw, z.right - hw);
-  y = clamp(y, z.top + hh, z.bottom - hh);
-  const f = z.foot;
-  if (x + hw <= f.left || x - hw >= f.right || y - hh >= f.bottom) return [x, y];
-  const ways = [
-    [x, f.bottom + hh],
-    [f.left - hw, y],
-    [f.right + hw, y],
-  ].filter(([a, b]) => a - hw >= z.left - 0.5 && a + hw <= z.right + 0.5 && b + hh <= z.bottom + 0.5);
-  if (!ways.length) return [x, z.bottom - hh];
-  return ways.reduce((best, p) => (Math.hypot(p[0] - x, p[1] - y) < Math.hypot(best[0] - x, best[1] - y) ? p : best));
-}
-
-// Куда докатится предмет из (x, y) в сторону dir (−1 / 1) на dist px: до края пола или — сбоку от питомца — до него.
-export function rollEnd(z, size, x, y, dir, dist) {
-  const [hw, hh] = half(z, size);
-  const f = z.foot;
-  let lo = z.left + hw;
-  let hi = z.right - hw;
-  if (y - hh < f.bottom - 0.5) {
-    if (x < (f.left + f.right) / 2) hi = Math.min(hi, f.left - hw);
-    else lo = Math.max(lo, f.right + hw);
-  }
-  return clamp(x + dir * dist, lo, Math.max(lo, hi));
-}
-
-// Кнопка «Катнуть мячик»: туда, где свободнее (повторное нажатие катит обратно).
-export function rollWay(z, size, x, y) {
-  const left = x - rollEnd(z, size, x, y, -1, Infinity);
-  const right = rollEnd(z, size, x, y, 1, Infinity) - x;
-  const dir = right >= left ? 1 : -1;
-  return { dir, to: rollEnd(z, size, x, y, dir, ROLL[2] * z.s) };
-}
-
-// Отпустили мячик со сдвигом dx: докатится на столько (px).
-export const rollDist = (z, dx) => clamp(Math.abs(dx), ROLL[0] * z.s, ROLL[1] * z.s);
-
-// Ближе ли к питомцу точка b, чем a (px).
-export function closer(z, a, b) {
-  const [ax, ay] = toPx(z, ANCHOR);
-  return Math.hypot(b[0] - ax, b[1] - ay) < Math.hypot(a[0] - ax, a[1] - ay);
-}
-
-// С какой стороны от питомца точка: 'left' | 'right'.
-export const sideOf = (z, x) => (x < toPx(z, ANCHOR)[0] ? 'left' : 'right');
 
 // ---------- предметы на странице ----------
 
-const st = { hooks: null, box: null, toys: {}, drag: null, ro: null, key: '' };
-
-// Один раз: hooks = { done({ toy, closer, toward }) — миска на новом месте или мячик покатился; motion() →
+// hooks = { play() → снимок play ядра | null, drag(toy, [u, v]), drop(roll?), cancel(), floor(floor, touch), motion() →
 // 'normal' | 'calm' | 'none' }.
+const st = { hooks: null, box: null, toys: {}, drag: null, ro: null, key: '', z: null, relayout: false, roll: '' };
+
 export function initToys(hooks) {
   st.hooks = hooks;
 }
@@ -107,18 +50,13 @@ export function watchToys(box) {
   box.addEventListener('pointerdown', onDown);
 }
 
-// Новая сцена: предметы на своих местах.
-export function resetToys() {
-  for (const t of Object.values(st.toys)) t.pos = null;
-}
-
-// Разметка сцены нарисована (вход, другой питомец или облик): предметы — на прежних местах.
+// Разметка сцены нарисована (вход, другой питомец или облик): предметы — на местах из снимка.
 export function mountToys(view) {
   unmountToys();
   st.box = view;
   for (const el of view.querySelectorAll('[data-play-toy]')) {
     const name = el.dataset.playToy;
-    st.toys[name] = { pos: st.toys[name]?.pos ?? null, el, spin: el.querySelector('.cat-play-spin'), x: 0, y: 0, r: 0, turn: 0, frame: 0, goal: null };
+    st.toys[name] = { el, spin: el.querySelector('.cat-play-spin'), x: 0, y: 0, r: 0, turn: 0, frame: 0, goal: null, shown: null, w: 0, h: 0 };
   }
   layout();
   st.ro = new ResizeObserver(() => {
@@ -132,12 +70,10 @@ export function unmountToys(reason = 'close') {
   if (st.drag) release(reason);
   st.ro?.disconnect();
   st.ro = null;
-  for (const t of Object.values(st.toys)) {
-    stopAnim(t, true);
-    t.el = null;
-    t.spin = null;
-  }
+  for (const t of Object.values(st.toys)) stopAnim(t, true);
+  st.toys = {};
   st.box = null;
+  st.z = null;
 }
 
 function zone() {
@@ -147,28 +83,60 @@ function zone() {
   if (!stage || !rect?.width) return null;
   const rel = (r) => r && { left: r.left - stage.left, top: r.top - stage.top, right: r.right - stage.left, bottom: r.bottom - stage.top, width: r.width };
   const floor = st.box.querySelector('[data-play-floor]')?.getBoundingClientRect();
-  return floorZone(rel(stage), rel(rect), rel(floor), pawBottom(pet.dataset.kind ?? 'cat', rect) - stage.top);
+  return floorUnits(rel(stage), rel(rect), rel(floor));
 }
 
-const keyOf = (z = zone()) => (z ? [z.left, z.right, z.top, z.bottom, z.s].map(Math.round).join() : '');
+const keyOf = (z = zone()) => (z ? [...z.floor, z.s, z.pet.left, z.pet.top].map((value) => Math.round(value * 10)).join() : '');
 
-// Предметы — по рамкам: размер области нажатия (не меньше 44×44) и место на полу.
+// Пол — ядру (места предметов оно ограничит само); предметы — по рамкам: размер области нажатия (не меньше 44×44) и место.
 function layout() {
   const z = zone();
   st.key = keyOf(z);
+  st.z = z;
   if (!z) return;
   for (const [name, t] of Object.entries(st.toys)) {
-    if (!t.el || st.drag?.name === name) continue;
-    stopAnim(t, true);
     const [w, h] = SIZE[name].map((value) => value * z.s);
     t.w = Math.max(w, TOY_MIN_PX);
     t.h = Math.max(h, TOY_MIN_PX);
     Object.assign(t.el.style, { width: `${t.w}px`, height: `${t.h}px` });
     t.el.style.setProperty('--toy-w', `${w}px`);
     t.el.style.setProperty('--toy-h', `${h}px`);
-    put(t, placeToy(z, SIZE[name], ...toPx(z, t.pos ?? HOME[name])));
-    t.r = w * 0.45; // радиус мячика: первая расстановка — без поворота
-    if (t.pos) t.pos = toUnits(z, [t.x, t.y]);
+    t.r = w * 0.45; // радиус мячика: поворот на пройденный путь
+  }
+  st.relayout = true;
+  try {
+    st.hooks.floor(z.floor, z.touch);
+  } finally {
+    st.relayout = false;
+  }
+  draw({ relayout: true });
+}
+
+// Места из снимка: идущий перенос — под указателем сразу; конец переноса без броска (отмена, недостаточный сдвиг) — сразу
+// на место до жеста; сдвиг действием (кнопка, бросок мячика) — плавно; изменение окна — сразу. Перерисовка без изменения
+// места ничего не делает.
+export function draw({ relayout = st.relayout } = {}) {
+  const play = st.hooks?.play();
+  const z = st.z;
+  if (!play || !z) return;
+  for (const [name, t] of Object.entries(st.toys)) {
+    if (!t.el) continue;
+    const dragged = play.drag?.toy === name;
+    const ended = t.dragged && !dragged;
+    t.dragged = dragged;
+    const at = dragged ? play.drag.at : play.toys[name]?.at;
+    if (!at) continue;
+    const goal = toPx(z, at);
+    const same = t.shown && Math.abs(t.shown[0] - at[0]) < 0.01 && Math.abs(t.shown[1] - at[1]) < 0.01;
+    t.shown = at;
+    if (same && !relayout) continue;
+    if (relayout || dragged || !t.placed || (ended && st.roll !== name)) {
+      stopAnim(t, false);
+      put(t, goal);
+      t.placed = true;
+      continue;
+    }
+    glide(t, goal, name === 'ball' ? Math.min(900, 300 + Math.abs(goal[0] - t.x) * 3) : 300);
   }
 }
 
@@ -214,19 +182,16 @@ function stopAnim(t, finish = false) {
   if (t.el) delete t.el.dataset.moving;
 }
 
-const remember = (z, t) => (t.pos = toUnits(z, [t.x, t.y]));
-
 function onDown(event) {
   const el = event.target.closest?.('[data-play-toy]');
-  const t = st.toys[el?.dataset.playToy];
-  const z = t?.el === el ? zone() : null;
+  const name = el?.dataset.playToy;
+  const t = st.toys[name];
+  const z = t?.el === el ? st.z : null;
   if (!z || !grab(event, el, { move: onMove, end: finish })) return;
-  // Мячик катится — останавливается под пальцем.
-  if (t.frame) {
-    stopAnim(t);
-    remember(z, t);
-  }
-  st.drag = { name: el.dataset.playToy, z, x0: event.clientX, y0: event.clientY, from: [t.x, t.y], dx: 0, on: false };
+  // Мячик катится — останавливается под пальцем (ядро: место — где взяли).
+  stopAnim(t);
+  st.drag = { name, x0: event.clientX, y0: event.clientY, from: [t.x, t.y], dx: 0, on: false };
+  st.hooks.drag(name, toUnits(z, [t.x, t.y]));
 }
 
 function onMove(event) {
@@ -239,72 +204,35 @@ function onMove(event) {
     st.toys[d.name].el.dataset.dragging = '';
   }
   d.dx = dx;
-  put(st.toys[d.name], placeToy(d.z, SIZE[d.name], d.from[0] + dx, d.from[1] + dy));
+  st.hooks.drag(d.name, toUnits(st.z, [d.from[0] + dx, d.from[1] + dy]));
 }
 
-// Конец жеста (release в pet-play.mjs; вернуть — был ли сдвиг). Отпустили после сдвига — миска на новом месте,
-// мячик катится, если сдвиг заметный; иначе и при отмене — на месте до жеста.
+// Конец жеста (release в pet-play.mjs; вернуть — был ли сдвиг). Отпустили после заметного сдвига — миска на новом месте,
+// мячик брошен, если сдвиг влево или вправо заметный; иначе и при отмене — на месте до жеста.
 function finish(reason) {
   const d = st.drag;
   const t = st.toys[d.name];
-  const z = d.z;
   st.drag = null;
-  if (t.el) delete t.el.dataset.dragging;
-  if (reason === 'up' && d.on && d.name === 'bowl' && Math.hypot(t.x - d.from[0], t.y - d.from[1]) >= MOVE_PX) {
-    remember(z, t);
-    st.hooks.done({ toy: 'bowl', closer: closer(z, d.from, [t.x, t.y]), toward: sideOf(z, t.x) });
-    return true;
-  }
-  // Мячик: катание — сдвиг влево или вправо; упёрся в край или питомца без заметного движения — не катание.
-  const dir = Math.sign(d.dx);
-  const to = reason !== 'up' || d.name !== 'ball' || Math.abs(d.dx) < ROLL_PX ? d.from[0] : st.hooks.motion() === 'none' ? t.x : rollEnd(z, SIZE.ball, t.x, t.y, dir, rollDist(z, d.dx));
-  if (Math.abs(to - d.from[0]) < ROLL_PX) {
-    if (d.on) put(t, d.from);
-    return d.on;
-  }
-  roll(z, t, to);
-  st.hooks.done({ toy: 'ball', toward: dir < 0 ? 'left' : 'right' });
-  return true;
+  if (t?.el) delete t.el.dataset.dragging;
+  const up = reason === 'up' && d.on;
+  if (up && d.name === 'bowl' && t && Math.hypot(t.x - d.from[0], t.y - d.from[1]) >= MOVE_PX) st.hooks.drop();
+  else if (up && d.name === 'ball' && Math.abs(d.dx) >= ROLL_PX && st.z) {
+    st.roll = 'ball';
+    try {
+      st.hooks.drop(d.dx / st.z.s);
+    } finally {
+      st.roll = '';
+    }
+  } else st.hooks.cancel();
+  return d.on;
 }
 
-function roll(z, t, to) {
-  t.pos = toUnits(z, [to, t.y]);
-  glide(t, [to, t.y], Math.min(900, 300 + Math.abs(to - t.x) * 3));
+// Ядро сняло перенос предмета (вид, питомец, фон): указатель отпущен, предмет — по снимку.
+export function toyLost() {
+  if (st.drag) release('lost');
 }
 
-// Миска на исходном месте (кнопка — «Подвинуть миску», иначе «Вернуть миску»).
-export function bowlHome() {
-  const t = st.toys.bowl;
-  const z = zone();
-  if (!t?.el || !z || !t.pos) return true;
-  const [x, y] = placeToy(z, SIZE.bowl, ...toPx(z, HOME.bowl));
-  return Math.hypot((t.goal ?? [t.x, t.y])[0] - x, (t.goal ?? [t.x, t.y])[1] - y) < MOVE_PX;
-}
+export const toyDragging = () => st.drag?.name ?? '';
 
-// «Подвинуть миску» — к питомцу, «Вернуть миску» — на место; тот же итог, что у жеста.
-export function moveBowl() {
-  const t = st.toys.bowl;
-  const z = zone();
-  if (!t?.el || !z || st.drag) return false;
-  const home = bowlHome();
-  stopAnim(t, true);
-  const from = [t.x, t.y];
-  const goal = placeToy(z, SIZE.bowl, ...toPx(z, home ? NEAR.bowl : HOME.bowl));
-  t.pos = home ? toUnits(z, goal) : null;
-  glide(t, goal, 300);
-  st.hooks.done({ toy: 'bowl', closer: closer(z, from, goal), toward: sideOf(z, goal[0]) });
-  return true;
-}
-
-// «Катнуть мячик» — туда, где свободнее; места нет — ничего (false).
-export function rollBall() {
-  const t = st.toys.ball;
-  const z = zone();
-  if (!t?.el || !z || st.drag) return false;
-  stopAnim(t, true);
-  const { dir, to } = rollWay(z, SIZE.ball, t.x, t.y);
-  if (Math.abs(to - t.x) < ROLL_PX) return false;
-  roll(z, t, to);
-  st.hooks.done({ toy: 'ball', toward: dir < 0 ? 'left' : 'right' });
-  return true;
-}
+// Исходные места в единицах рисунка (для проверок): HOME реэкспортом.
+export const TOY_HOME = HOME;

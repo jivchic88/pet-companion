@@ -179,7 +179,7 @@ test('ошибки аргументов и бизнес-отказы: ok: false,
     [core.setDisplay({ views: ['kitchen'] }), 'invalid-argument'],
     [core.setDisplay({ scenes: { cat: 'stretch' } }), 'invalid-argument'],
     [core.setDisplay({ full: 'да' }), 'invalid-argument'],
-    [core.setDisplay({ playFloor: [0, 0, 1, 1] }), 'invalid-argument'],
+    [core.setDisplay({ playFloor: [0, 0, 1] }), 'invalid-argument'],
   ];
   for (const [result, code] of cases) assert.deepEqual([result.ok, result.error.code], [false, code], JSON.stringify(result));
   assert.equal(core.getState(), state);

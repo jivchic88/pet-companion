@@ -14,14 +14,16 @@
 // оркестровка продолжается, а то, что без своей задачи осталось бы навсегда, не показывается — реакция без задачи конца
 // снята вместе с облаком, облако без задачи — не появляется. Повторного планирования нет.
 //
-// Временная граница до PL04.3 — простые данные, без DOM и колбэков с правилами: занятость жестом (busy; начало жеста —
-// ручное действие, отменяет сценку), прямой запрос отклика игры, предметов и «устроился» (react), отмена сценки сменой
-// места legacy-раскладки (stopScene). Ручные действия (manual: кормление, готовое имя, отклики игры и предметов) отменяют
-// сценку окончательно — правило ядра, не оболочки.
+// С PL04.3 — «Поиграть» (play.mjs: прямые действия, жест поглаживания, предметы, итог под сценой) и итоговая поза каждой
+// поверхности (pose.shown, удержание жестом pose.hold). Жест указателем — смысловые входы ядра (stroke.*, перенос предмета,
+// перенос в редакторе комнаты): пока он идёт, движений покоя и зевка нет, сценка не начинается; его начало — ручное
+// действие. Ручные действия (manual: кормление, готовое имя, отклики игры и предметов, начало жеста) отменяют сценку
+// окончательно — правило ядра, не оболочки. Узкий вход legacy-раскладки — stopScene (смена места, § 14.1.3).
 
 import { ACTIVITY_MS, basePose, blinkDelay, createDirector, effectiveMotion, finish, GREET_MS, MICRO_MS, microDelay, microKinds, OPEN_MICRO_MS, PHRASE_MS, playing, REACTIONS, REACTION_MIN_MS, request, REST_AFTER_MS, setBackground, setQuiet, YAWN_CHANCE } from './director.mjs';
 import { pickPhrase } from './phrases.mjs';
 import { kindOf, profileOf } from './pets.mjs';
+import { createPlay } from './play.mjs';
 import { petAround, presenceSurface } from './presence.mjs';
 import { pickScene, SCENE_FRESH_MS, sceneCommit, sceneFits, sceneOptions, sceneText, sceneWaited } from './scenes.mjs';
 
@@ -33,7 +35,7 @@ export const VIEW_IDS = ['corner', 'play', 'room'];
 const OUTCOMES = ['shown', 'skip', 'fail', 'lost'];
 const CLOSED = Object.freeze({ open: null, source: '' });
 
-export function createSession({ clock, random, scheduler, sense, emit, fault, run, refresh, scenes = null, mirror = () => null, keep = () => {}, stage = () => false, guard = (fn) => fn(), intact = () => true, warn = () => {} }) {
+export function createSession({ clock, random, scheduler, sense, emit, fault, run, refresh, scenes = null, mirror = () => null, keep = () => {}, stage = () => false, guard = (fn) => fn(), intact = () => true, warn = () => {}, gesture = () => false, interrupt = () => {} }) {
   const d = createDirector();
   let started = false;
   let alive = true;
@@ -43,13 +45,14 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   let focus = false;
   let visible = true;
   let reduced = false;
-  let busy = false; // идёт жест указателем (поглаживание, предмет, перенос в редакторе) — временный вход до PL04.3
   // Открытый вид и источник открытия (pet — уголок или кнопка питомца, call — вызов «по зову»); источник — до закрытия.
   let view = CLOSED;
   // Объявление отображения (§ 6.4, setDisplay): full — показ целиком (иначе портрет), moving — идёт перенос, pets —
   // нарисованные питомцы (null — не объявлено: все зарегистрированные), views — виды (не объявлено — ни одного), scenes —
-  // объявленные сценки { petId: [sceneId, …] } (null — не объявлено: ни одной; это разрешение, а не ограничение).
-  let display = { full: true, moving: false, pets: null, views: [], scenes: null };
+  // объявленные сценки { petId: [sceneId, …] } (null — не объявлено: ни одной; это разрешение, а не ограничение);
+  // playFloor — пол «Поиграть» [l, t, r, b] в единицах рисунка (null — не объявлен: предметов нет), playTouch — наименьший
+  // радиус области касания лапы в единицах рисунка (PL04.3).
+  let display = { full: true, moving: false, pets: null, views: [], scenes: null, playFloor: null, playTouch: 0 };
   let attempt = null; // попытка сценки: { type, key, day, at, until, kind } — до решения резервирования, отмены или срока
   // Идущее резервирование: { attempt, step, id, patch, type, cancelled, settled }; step — queued → decided (решение
   // отклонено или ещё идёт) → reserved (решение дало запись) → shown (реакция сценки началась). cancelled — отменено до
@@ -73,6 +76,26 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   const live = (s) => started && alive && !s.hidden && visible;
   const active = (s) => live(s) && around(s);
   const contextNow = () => (focus ? 'focus' : 'calm');
+
+  // «Поиграть» (play.mjs): отклики — этот режиссёр (ручное действие), задачи — этот планировщик, пол — объявление
+  // отображения.
+  const play = createPlay({
+    now,
+    sense: () => {
+      const s = sense();
+      return { kind: s.kind, name: s.name, motion: motionOf(s) };
+    },
+    manual: (type, options) => manual(type, options),
+    activity: () => activity(sense()),
+    current: () => (d.current ? { id: d.current.id, until: d.current.until } : null),
+    later: (name, ms, body) => later(name, ms, body),
+    cancel: (name) => cancel(name),
+    emit: (effect) => emit(effect),
+    cancelScene: () => cancelScene(),
+    floor: () => ({ floor: display.playFloor, touch: display.playTouch }),
+  });
+  // Идёт жест указателем: поглаживание, перенос предмета («Поиграть») или перенос в редакторе комнаты (gesture — ядро).
+  const busy = () => play.gesturing() || gesture();
 
   // ---------- задачи ----------
 
@@ -154,6 +177,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   function stop() {
     cancel('reaction');
     hush();
+    play.settle();
   }
 
   // Итог режиссёра: play — реакция началась (поза, примерка и вещь — её поля, реплика, срок), stop — остановлена.
@@ -174,6 +198,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
       d.current = null;
       hush();
       if (r.event !== undefined) attempt = null;
+      play.settle();
       return false;
     }
     if (r.event !== undefined && attempt?.key === r.event && sceneWaited(attempt, now())) attempt = null;
@@ -181,14 +206,17 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     const group = r.phrases ?? REACTIONS[r.type].phrases;
     if (r.say) say(s, r.say, r.sayShort ?? '');
     else if (group) say(s, pickPhrase(group, { last: lastPhrase, stage: s.stage, kind: s.kind, random }));
+    play.settle();
     return true;
   }
 
   // Конец реакции: продолжение того же события или отложенная; иначе — покой и, если реакция была реакцией занятия с
-  // выбранной сценкой, её показ (если всё ещё уместна).
+  // выбранной сценкой, её показ (если всё ещё уместна). Итог «Поиграть», показанный при ней, гаснет здесь же (play.settle) —
+  // своего таймера конца реакции у игры нет.
   function end(r) {
     const next = finish(d, now());
     if (next.action === 'play') begin(next);
+    else play.settle();
     scheduleRest(sense());
     if (next.action !== 'play' && r.event !== undefined) sceneSoon(r.event);
   }
@@ -247,7 +275,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   // ---------- покой ----------
 
   function micro(s, kind) {
-    if (!active(s) || motionOf(s) === 'none' || quiet() || playing(d, now()) || resting || busy) return;
+    if (!active(s) || motionOf(s) === 'none' || quiet() || playing(d, now()) || resting || busy()) return;
     emit({ type: 'micro', kind, ms: MICRO_MS[kind] ?? 600 });
   }
 
@@ -265,7 +293,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
       later('micro', microDelay(motionOf(s), random), () => {
         const t = sense();
         const kinds = microKinds(t.kind);
-        if (motionOf(t) === 'normal' && !focus && !busy && random() < YAWN_CHANCE) begin(request(d, 'yawn', { now: now(), context: 'calm' }));
+        if (motionOf(t) === 'normal' && !focus && !busy() && random() < YAWN_CHANCE) begin(request(d, 'yawn', { now: now(), context: 'calm' }));
         else micro(t, kinds[Math.floor(random() * kinds.length)]);
         scheduleMicro(sense());
       });
@@ -330,6 +358,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     resting = false;
     lastActivity = now();
     lastPhrase = '';
+    play.settle();
   }
 
   // ---------- входы ----------
@@ -372,6 +401,10 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
       cancelAll();
       hush();
       cancelScene();
+      // Фон: жест поглаживания и перенос предмета (и в редакторе) сняты как отмена, итог под сценой — подсказка (0.1.4:
+      // resetHint).
+      play.interrupt({ clear: true });
+      interrupt();
       return true;
     }
     if (s.hidden) return true;
@@ -385,6 +418,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   // тишина и паузы повторов остаются. «Показать»: отсчёт покоя, задачи покоя и полуночи заново (по зову и не вызван —
   // только полночь); вид не открывается, приветствия нет.
   function hidden(value, s) {
+    if (value) leave(view.open);
     if (value) view = CLOSED;
     if (started) {
       if (value) {
@@ -405,10 +439,17 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   // Открыт вид (проверенный: поддерживается, не спрятан). Из закрытого (source — pet или call; источник — до закрытия):
   // реплика вида по позе до пробуждения, пробуждение, задачи (вызванный по зову — все), движение «заметил гостя» (не при
   // вызове). Смена вида: «Поиграть» и редактор будят. Любое открытие и смена вида отменяют сценку.
+  // Вид «Поиграть» закрыт или сменён: жест и перенос предмета сняты, итог погашен; войдя снова — предметы на местах.
+  function leave(was) {
+    if (was === 'play') play.interrupt({ clear: true });
+  }
+
   function openView(next, source, s) {
     const was = view;
     const before = around(s);
     view = { open: next, source: was.open === null ? source : was.source };
+    if (was.open !== next) leave(was.open);
+    if (next === 'play' && was.open !== 'play') play.enter();
     cancelScene();
     if (!started) return;
     if (was.open === null) {
@@ -434,6 +475,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   // Вид закрыт: сценка отменена; «по зову» — питомец ушёл и ничего не доигрывает, остаётся полночь.
   function closeView(s) {
     const before = around(s);
+    leave(view.open);
     view = CLOSED;
     cancelScene();
     if (!started) return;
@@ -441,13 +483,6 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
       drop();
       scheduleMidnight(s);
     }
-  }
-
-  // Временная граница до PL04.3: начало жеста указателем — ручное действие, сценка отменена окончательно; конец жеста
-  // ничего не возвращает.
-  function setBusy(on) {
-    if (on) cancelScene();
-    busy = on;
   }
 
   function setReduced(on, s) {
@@ -458,12 +493,14 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   }
 
   // Объявление отображения (проверенное, нормализованное ядром): переданное свойство заменяет прежнее целиком, не
-  // переданное сохраняется. Изменение full, объявления scenes и начало переноса (moving) отменяют сценку и попытку.
+  // переданное сохраняется. Изменение full, объявления scenes и начало переноса (moving) отменяют сценку и попытку. Новый
+  // пол «Поиграть» (или радиус касания лапы) — места предметов на ближайшее допустимое.
   function setDisplay(next) {
     const was = display;
     display = { ...display, ...next };
     const cancelled = ('full' in next && next.full !== was.full) || ('scenes' in next && JSON.stringify(next.scenes) !== JSON.stringify(was.scenes)) || (next.moving === true && !was.moving);
     if (cancelled) cancelScene();
+    if (JSON.stringify([display.playFloor, display.playTouch]) !== JSON.stringify([was.playFloor, was.playTouch])) play.refloor();
     return JSON.stringify(display) !== JSON.stringify(was);
   }
 
@@ -477,11 +514,17 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   function reconcile(s) {
     const was = applied;
     const next = shape(s);
-    if (next.hidden) view = CLOSED;
+    if (next.hidden) {
+      leave(view.open);
+      view = CLOSED;
+    }
     if (!started || !alive) return;
     applied = next;
     if (!was) return;
     if (was.hidden !== next.hidden || was.kind !== next.kind) {
+      // Другой питомец: жест и перенос предмета сняты, итог — подсказка (сцена перерисована, 0.1.4); места предметов те же.
+      play.interrupt({ clear: true });
+      interrupt();
       drop();
       scenePhrase = was.hidden === next.hidden && view.open !== null && next.phrases ? pickPhrase('scene', { last: lastPhrase, stage: s.stage, kind: s.kind, random }) : '';
       if (!next.hidden) scheduleIdle(s);
@@ -496,7 +539,12 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
         scheduleMidnight(s);
       } else if (!before && after) scheduleIdle(s);
     }
-    if (was.coat !== next.coat || was.accessory !== next.accessory) cancelScene();
+    if (was.coat !== next.coat || was.accessory !== next.accessory) {
+      cancelScene();
+      // Другой облик или аксессуар — перерисовка: идущий жест и перенос предмета (и в редакторе) сняты, итог остаётся.
+      play.interrupt();
+      interrupt();
+    }
     if (was.motion !== next.motion) restartIdle(s);
     if (was.phrases && !next.phrases) {
       hush();
@@ -541,7 +589,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     return (
       next.kind === s.kind &&
       next.day === clock.day(t) &&
-      !busy &&
+      !busy() &&
       sceneFits(next, { now: t, shown: active(s), quiet: quiet(), playing: playing(d, t), play: view.open === 'play' || view.open === 'room', moving: display.moving, kind: s.kind, full: fullNow(), available: optionsOf(s) })
     );
   }
@@ -658,24 +706,32 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     if (!ran && issue) warn(...issue);
   }
 
+  // Отключение: задачи сняты, поздние результаты ничего не делают; жест и перенос предмета сняты ядром (§ 4.1).
   function destroy() {
     alive = false;
     generation += 1;
     attempt = null;
     cancelAll();
+    play.interrupt({ clear: true });
   }
 
-  // Часть снимка (простые данные). page — итоговая поза страницы (правило paint 0.1.4: поза реакции, кроме сценки и прямого
-  // действия «Поиграть» в тишине, иначе base); still — спокойная или довольная без тишины и дремоты.
+  // Часть снимка (простые данные). Итоговая поза каждой поверхности (§ 5.2, правило paint 0.1.4 — в ядре): page — поза
+  // реакции, кроме сценки и прямого действия «Поиграть» в тишине страницы, иначе base; play — поза реакции (не сценки),
+  // иначе удержание жестом (hold), иначе спокойная или довольная без тишины и дремоты; room — спокойная или довольная, без
+  // реакций и сценок.
   function state(s) {
     const r = d.current;
     const q = quiet();
     const base = basePose({ quiet: q, focus, resting, content: s.content });
+    const still = basePose({ content: s.content });
+    const hold = play.held() ? 'pet' : null;
     const reaction = r
       ? { id: r.id ?? 0, type: r.type, pose: r.pose, until: r.until, explicit: Boolean(r.explicit), scene: Boolean(REACTIONS[r.type]?.scene), toward: r.toward ?? '', mini: r.mini ?? '', tryOn: r.tryOn ?? '' }
       : null;
+    const own = reaction && !reaction.scene ? reaction.pose : '';
     return {
-      pose: { base, still: basePose({ content: s.content }), page: reaction && !reaction.scene && !(reaction.explicit && q) ? reaction.pose : base, resting, reaction },
+      pose: { base, resting, hold, shown: { page: own && !(reaction.explicit && q) ? own : base, play: own || hold || still, room: still }, reaction },
+      play: view.open === 'play' ? play.state(s) : null,
       phrase: phrase ? { ...phrase } : null,
       scenePhrase,
       context: { focus, quiet: QUIET_REASONS.filter((reason) => d.quiet.has(reason)) },
@@ -690,6 +746,8 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
         pets: display.pets ? [...display.pets] : null,
         views: [...display.views],
         scenes: display.scenes ? Object.fromEntries(Object.entries(display.scenes).map(([id, list]) => [id, [...list]])) : null,
+        playFloor: display.playFloor ? [...display.playFloor] : null,
+        playTouch: display.playTouch,
       },
       scene: { waiting: attempt ? { type: attempt.type, until: attempt.until } : null, reserving: inflight !== null },
     };
@@ -710,7 +768,9 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     hidden,
     openView,
     closeView,
-    setBusy,
+    play,
+    busy,
+    motion: (s) => motionOf(s),
     setReduced,
     setDisplay,
     reconcile,

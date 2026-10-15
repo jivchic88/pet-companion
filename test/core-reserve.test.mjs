@@ -391,16 +391,20 @@ test('граница раунда: команда, вызванная порто
 // ---------- Н. Ручное действие — окончательная отмена (§ 9.3) ----------
 
 // Ручные действия настоящими командами и длительность их отклика: кормление (feed → fed), готовое имя (named),
-// поглаживание (прямой отклик игры), жест (начало и конец — временная граница до PL04.3).
+// поглаживание (кнопка «Погладить» уголка — interact), жест поглаживания в «Поиграть» (вид, начало и конец жеста, возврат в
+// уголок — смысловые входы PL04.3 вместо временного setBusy).
 const MANUAL = [
   ['кормление', (L) => L.core.feed(), REACTIONS.feed.ms + REACTIONS.fed.ms],
   ['готовое имя', (L) => L.core.setName('Бублик', { pick: true }), REACTIONS.named.ms],
-  ['поглаживание', (L) => L.core.react('pet', { explicit: true }), REACTIONS.pet.ms],
+  ['поглаживание', (L) => L.core.interact({ type: 'pet' }), REACTIONS.pet.ms],
   [
-    'жест: начало и конец',
+    'жест в «Поиграть»: начало, конец, возврат',
     (L) => {
-      const result = L.core.setBusy(true);
-      assert.equal(L.core.setBusy(false).changed, false, 'конец жеста попытку не возвращает и снимка не меняет');
+      const result = L.core.open('play');
+      const { id } = L.core.stroke.start();
+      const ended = L.core.stroke.end(id);
+      assert.deepEqual([ended.ok, L.state().scene.waiting], [true, null], 'конец жеста попытку не возвращает');
+      assert.equal(L.core.open('corner').ok, true);
       return result;
     },
     0,
@@ -492,8 +496,10 @@ test('отказ ручного входа (ok: false) — без побочны
     ['уже угостили', { cat: CAT, treat: { v: 1, fedDay: DAY } }, host(1, 1), (L) => L.core.feed(), 'treat-fed'],
     ['ещё не было занятия', { cat: CAT }, host(1, 0), (L) => L.core.feed(), 'treat-waiting'],
     ['имя не строка', { cat: CAT }, host(1, 1), (L) => L.core.setName(5, { pick: true }), 'invalid-argument'],
-    ['жест не boolean', { cat: CAT }, host(1, 1), (L) => L.core.setBusy('да'), 'invalid-argument'],
-    ['неизвестный отклик', { cat: CAT }, host(1, 1), (L) => L.core.react('stretch'), 'invalid-argument'],
+    ['id жеста не число', { cat: CAT }, host(1, 1), (L) => L.core.stroke.step('да'), 'invalid-argument'],
+    ['неизвестное действие', { cat: CAT }, host(1, 1), (L) => L.core.interact({ type: 'stretch' }), 'invalid-argument'],
+    ['предмет вне «Поиграть»', { cat: CAT }, host(1, 1), (L) => L.core.interact({ type: 'bowl', to: 'near' }), 'not-open'],
+    ['лапа у кота вне «Поиграть»', { cat: CAT }, host(1, 1), (L) => L.core.interact({ type: 'paw' }), 'unsupported'],
   ]) {
     const L = scened(initial, { counts });
     L.port.mode.hold.add('enter');

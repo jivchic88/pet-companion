@@ -61,7 +61,7 @@ test('отказ задачи конца реакции: ok, честный save
   assert.deepEqual(warned(L), ['internal задача reaction не запланирована: планировщик отказал (1500 мс)'], 'эффект — в обновлении notify');
   assert.deepEqual(warned(L, 'notify').length, 1);
   assert.ok(L.log.list.includes('задача reaction не запланирована: планировщик отказал (1500 мс)'), L.log.list.join(' | '));
-  assert.deepEqual([playing(L), L.state().pose.page, L.state().phrase, lasting(L), L.state().scene.waiting], [null, 'calm', null, [], null], 'реакции, облака и их задач нет; сценки нет');
+  assert.deepEqual([playing(L), L.state().pose.shown.page, L.state().phrase, lasting(L), L.state().scene.waiting], [null, 'calm', null, [], null], 'реакции, облака и их задач нет; сценки нет');
   L.plan.advance(10_000);
   assert.deepEqual([playing(L), L.state().phrase, warned(L).length], [null, null, 1], 'через 10 с — ничего не висит, повторных попыток нет');
   G.rule = () => '';
@@ -132,7 +132,7 @@ test('перепланирование: отмена прежней задачи
   const G = gate();
   const L = started({ cat: CAT }, { scheduler: G.port });
   G.undo = (ms) => ms === REACTIONS.pet.ms;
-  assert.equal(L.core.react('pet', { explicit: true }).played, true);
+  assert.equal(L.core.interact({ type: 'pet' }).outcome, 'pet');
   const result = saved(L, 'K');
   assert.deepEqual([result.ok, result.degraded, playing(L)], [true, true, 'joy'], 'радость сменила поглаживание');
   assert.deepEqual(warned(L, 'notify'), ['internal задача reaction не отменена: отмена отказала (1300 мс)']);

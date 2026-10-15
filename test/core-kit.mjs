@@ -8,7 +8,8 @@ import { createCoordinator } from '../pet/core/storage.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
 
 export const DAY = '2026-10-13';
-export const CORE_KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene'];
+// Ключи ядра в порядке сверки (PL04.3: все восемь — ещё place и room).
+export const CORE_KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene', 'place', 'room'];
 // Объявление legacy-отображения (PL04.2, docs/ARCHITECTURE.md § 11.1): питомцы, виды и сценки 0.1.4.
 export const VIEWS = ['corner', 'play', 'room'];
 export const LEGACY_DISPLAY = { pets: ['cat', 'dog'], views: VIEWS, scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } };

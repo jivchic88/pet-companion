@@ -53,7 +53,7 @@ for (const reasons of SETS) {
       const off = L.core.setContext({ [reason]: false });
       assert.deepEqual([off.ok, off.degraded, playing(L), L.state().phrase, L.plan.live().length], [true, undefined, null, null, 0], `снята ${reason} в фоне`);
     }
-    assert.deepEqual([L.state().context.quiet, L.state().visible, L.state().pose.page], [[], false, 'calm']);
+    assert.deepEqual([L.state().context.quiet, L.state().visible, L.state().pose.shown.page], [[], false, 'calm']);
     L.plan.advance(5000);
     assert.deepEqual(since(L, mark), QUIET, 'в фоне ни реакции, ни облака, ни сигнала сценки, ни движений');
     L.core.setVisible(true);
@@ -159,7 +159,7 @@ test('фон: failed, лакомство, прямые отклики, гото�
   const fed = L.core.feed();
   assert.deepEqual([fed.ok, fed.reaction.type, fed.save.status, L.json('treat').fedDay, L.state().treat], [true, 'feed', 'saved', DAY, 'fed'], 'лакомство дня отмечено и записано');
   assert.equal(L.effects('announce').at(-1).text, 'Марс получает лакомство. Сегодня уже угостили.');
-  assert.deepEqual([L.core.react('pet', { explicit: true }).played, L.core.react('settle').played], [false, false]);
+  assert.deepEqual([L.core.interact({ type: 'pet' }).outcome, L.core.arrive().arrived, playing(L)], [null, true, null], 'поглаживание и «устроился» не играют');
   L.core.open('corner');
   assert.deepEqual([L.core.setName('Сырник', { pick: true }).reacted, L.json('cat').name], [false, 'Сырник']);
   assert.deepEqual([L.core.setPet('dog').reacted, L.state().pet.shown], [false, 'dog']);
@@ -203,7 +203,7 @@ test('контроль: в видимой вкладке снятие после
   L.plan.advance(REACTIONS.joy.ms);
   L.core.open('play');
   L.core.setContext({ timer: true });
-  assert.deepEqual([L.core.react('pet', { explicit: true }).played, playing(L), L.state().phrase], [true, 'pet', null], 'тишина и фон — разные запреты');
+  assert.deepEqual([L.core.interact({ type: 'pet' }).outcome, playing(L), L.state().phrase], ['pet', 'pet', null], 'тишина и фон — разные запреты');
 });
 
 test('контроль Р1: фон, возврат, «Скрыть» и «Показать» сохраняют учтённые события, причины тишины и паузы повторов', () => {

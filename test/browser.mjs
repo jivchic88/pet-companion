@@ -15,7 +15,9 @@
 // отложенное прежней копии молчит; версия 0.1.1 (/old/) — новая копия отказывает; стили сайта до и после CSS модуля и
 // подключения — минимальный сайт и сайт с общими правилами button, input, h2, dialog; сохранность данных (PL02) —
 // test/browser-storage.mjs; реакции и время на ядре (PL04.1, Р1 настоящими кнопками) — test/browser-life.mjs; присутствие,
-// виды и сценки на ядре (PL04.2, IndexedDB с управляемым шлюзом, две вкладки, сравнение с Node) — test/browser-presence.mjs. Часы —
+// виды и сценки на ядре (PL04.2, IndexedDB с управляемым шлюзом, две вкладки, сравнение с Node) — test/browser-presence.mjs;
+// комната и игра на ядре (PL04.3: жест, предметы, редактор, две вкладки, кормление у краёв, палец, сравнение с Node) —
+// test/browser-play.mjs. Часы —
 // page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
 // установленный Google Chrome).
 import { readFile } from 'node:fs/promises';
@@ -27,6 +29,7 @@ import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
 import { coreQa, freshQa } from './browser-core.mjs';
 import { lifeQa } from './browser-life.mjs';
+import { playQa } from './browser-play.mjs';
 import { presenceQa } from './browser-presence.mjs';
 import { storageQa } from './browser-storage.mjs';
 
@@ -68,7 +71,7 @@ window.qaReady = true;
 // Мини-сервер стенда: / — стенд, /readme — пример из README, /pet/<файл>.mjs|css — модуль, /pet2/… — те же файлы по
 // другому адресу (вторая копия модуля), /old/… — версия 0.1.1, /old14/… — версия 0.1.4 (фикстуры), /site/plain и
 // /site/rules — страницы стилей; остальное — 404.
-function serve() {
+export function serve() {
   const server = createServer(async (req, res) => {
     const { pathname } = new URL(req.url, 'http://stand');
     // Пример из README без значка: запрос браузера не считается ошибкой страницы.
@@ -152,7 +155,7 @@ function gate() {
   };
 }
 
-async function open(browser, options, init = null) {
+export async function open(browser, options, init = null) {
   const context = await browser.newContext(options);
   await context.clock.install({ time: START });
   await context.addInitScript(hooks);
@@ -1116,6 +1119,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await freshQa(browser, server.base, check, open);
     await lifeQa(browser, server.base, check, open, layout);
     await presenceQa(browser, server.base, check, open, layout);
+    await playQa(browser, server.base, check, open, layout);
   } finally {
     await server.close();
   }

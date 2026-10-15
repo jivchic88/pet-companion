@@ -1,31 +1,38 @@
-// Ядро питомца — срезы PL03, PL04.1 и PL04.2 (docs/ARCHITECTURE.md § 4–6, § 8, § 9, § 14.1): экземпляр без DOM — своё
-// состояние, команды, снимок и подписка, своё подключение к общему координатору хранения. Внутренний вход: публичного
+// Ядро питомца — срезы PL03, PL04.1, PL04.2 и PL04.3 (docs/ARCHITECTURE.md § 4–6, § 8, § 9, § 14.1): экземпляр без DOM —
+// своё состояние, команды, снимок и подписка, своё подключение к общему координатору хранения. Внутренний вход: публичного
 // pet-companion/core до PL05 нет, им пользуется legacy-фасад pet/pet.mjs и проверки. Импортирует только pet/core/**.
 //
-// Ключи cat, companion, look, treat, presence, scene — целиком здесь: имя, выбор кота или собаки, облик, аксессуар,
-// движение, реплики, «скрыт», увиденная ступень, день приветствия, день лакомства, присутствие, копия дня сценки. Решения:
-// счёт и ступени, первое включение, подтверждённое занятие, кормление, приветствие дня. С PL04.1 ядро само проигрывает
-// реакции (сессия, session.mjs): режиссёр, память событий, тишина, покой, полночь, видимость, реплики, приветствие. С PL04.2
-// — присутствие и «по зову», «Скрыть» / «Показать» / вызов, открытый вид и его источник (open, close), праздник и отметка
-// ступени по виду, объявление отображения (setDisplay) и редкая сценка с резервированием дня (порт scenes, § 9). Комната и
-// игра (PL04.3) — пока у отображения; на границе — временные входы react, setBusy и узкий stopScene (§ 14.1.3).
+// Ключи cat, companion, look, treat, presence, scene, room и place — здесь: имя, выбор кота или собаки, облик, аксессуар,
+// движение, реплики, «скрыт», увиденная ступень, день приветствия, день лакомства, присутствие, копия дня сценки,
+// расстановка комнаты; place — предпочтение места legacy-отображения (ядро его хранит и не толкует). Решения: счёт и
+// ступени, первое включение, подтверждённое занятие, кормление, приветствие дня. С PL04.1 ядро само проигрывает реакции
+// (сессия, session.mjs): режиссёр, память событий, тишина, покой, полночь, видимость, реплики, приветствие. С PL04.2 —
+// присутствие и «по зову», «Скрыть» / «Показать» / вызов, открытый вид и его источник (open, close), праздник и отметка
+// ступени по виду, объявление отображения (setDisplay) и редкая сценка с резервированием дня (порт scenes, § 9). С PL04.3 —
+// «Поиграть» (interact, жест stroke.*, перенос предмета toy.*, лимиты, итог, позиции игрушек; play.mjs) и «Обустроить
+// уголок» (room.*: черновик, перенос, сохранение, чужая расстановка; editor.mjs, геометрия — room.mjs), итоговая поза
+// каждой поверхности, «устроился» (arrive). Узкий вход legacy-раскладки — stopScene (смена места, § 14.1.3).
 
 import { describe, fail, PetError } from './errors.mjs';
 import { daysBetween, isDay } from './day.mjs';
-import { catRecord, companionRecord, isRecord, keepRecord, lookRecord, MOTIONS, normalizeCompanion, normalizeLook, normalizeSettings, normalizeTreat, readRecord, TREAT_VERSION, unknownStage } from './formats/legacy.mjs';
-import { coatsOf, companionName, cleanName, KINDS, nameOffered } from './pets.mjs';
+import * as Editor from './editor.mjs';
+import { catRecord, companionRecord, isRecord, keepRecord, lookRecord, MOTIONS, normalizeCompanion, normalizeLook, normalizeSettings, normalizeTreat, prefRecord, readRecord, TREAT_VERSION, unknownStage } from './formats/legacy.mjs';
+import { coatsOf, companionName, cleanName, KINDS, nameOffered, profileOf } from './pets.mjs';
+import { playText } from './play.mjs';
 import { portProblem, systemClock, systemLog, systemRandom, systemScheduler } from './ports.mjs';
 import { normalizePresence, PRESENCE_MODES, presenceRecord } from './presence.mjs';
+import { arrange, feedShift, HOME as ROOM_HOME, parseRoom, roomWrite } from './room.mjs';
 import * as Round from './round.mjs';
 import { normalizeScene, SCENES, sceneRecord } from './scenes.mjs';
 import { createSession, QUIET_REASONS, VIEW_IDS } from './session.mjs';
 import { ACCESSORIES, doneOutcome, progressInfo, stageGift, STAGES, stageToCelebrate, treatState, unlockedBetween, wornAccessory } from './stages.mjs';
+import { TOYS } from './toys.mjs';
 
 export { PetError } from './errors.mjs';
 
-// Ключи среза и их функции записи (build операции, § 8.3): свежее сохранённое как есть + изменённые поля. place и room —
-// у legacy-отображения до PL04.3 (координатор их загружает, ядро не пишет).
-const KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene'];
+// Ключи ядра и их функции записи (build операции, § 8.3): свежее сохранённое как есть + изменённые поля. Все восемь ключей
+// формата 0.1.4 (PL04.3: ещё room и place).
+const KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene', 'place', 'room'];
 const RECORD = {
   cat: catRecord,
   companion: companionRecord,
@@ -33,16 +40,15 @@ const RECORD = {
   treat: (stored, patch) => keepRecord(stored, TREAT_VERSION, normalizeTreat, patch),
   presence: presenceRecord,
   scene: sceneRecord,
+  place: prefRecord,
+  room: roomWrite,
 };
 
 const OPTIONS = ['storage', 'scenes', 'progress', 'clock', 'random', 'scheduler', 'log'];
-// Прямые отклики отображения до PL04.3 (react): игра, предметы, «устроился». Награды и события хоста сюда не входят —
-// только notify и feed; редкую сценку показывает само ядро (резервирование, § 9). Ручное действие (всё, кроме
-// «устроился»; также кормление, готовое имя и начало жеста) отменяет попытку и идущую сценку окончательно.
-const DIRECT = ['pet', 'calmPet', 'paw', 'calmPaw', 'sniff', 'watch', 'ball', 'settle'];
-const DIRECT_EXTRA = ['toward', 'phrases'];
-// Объявление отображения (setDisplay, § 6.4): playFloor и игра — PL04.3.
-const DISPLAY = ['full', 'moving', 'pets', 'scenes', 'views'];
+// Объявление отображения (setDisplay, § 6.4); playFloor и playTouch — «Поиграть» (PL04.3).
+const DISPLAY = ['full', 'moving', 'pets', 'scenes', 'views', 'playFloor', 'playTouch'];
+const ACTIONS = ['pet', 'paw', 'bowl', 'ball'];
+const point = (value) => Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
 // Неявная запись (первое включение, отметка ступени, праздник, приветствие) повреждённое значение не заменяет (§ 8.2).
 const KEEP = Symbol('повреждённое значение неявная запись не заменяет');
 
@@ -125,18 +131,20 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   // ---------- память ключей и показ ----------
 
-  // base — подтверждённое (по умолчанию) или свежее значение хранилища, поверх которого ложатся свои правки.
-  function memoryText(key, base = keys[key].confirmed) {
+  // base — подтверждённое (по умолчанию) или свежее значение хранилища, поверх которого ложатся свои правки; unsaved: false
+  // — без несохранённых полей (подтверждённое и уже поставленное в запись).
+  function memoryText(key, base = keys[key].confirmed, { unsaved = true } = {}) {
     const own = keys[key];
     let stored = base;
-    for (const fields of [own.unsaved, ...own.ops.map((op) => op.fields)]) if (Object.keys(fields).length) stored = JSON.stringify(RECORD[key](stored, toPatch(fields)));
+    for (const fields of [unsaved ? own.unsaved : {}, ...own.ops.map((op) => op.fields)]) if (Object.keys(fields).length) stored = JSON.stringify(RECORD[key](stored, toPatch(fields)));
     return stored;
   }
 
   // Память → показ: подтверждённое, поверх несохранённые поля, поверх патчи неразрешённых операций — той же функцией
   // записи, что в build (память совпадает с тем, что будет записано).
   function memory() {
-    const raw = Object.fromEntries(KEYS.map((key) => [key, readRecord(memoryText(key)).raw]));
+    const texts = Object.fromEntries(KEYS.map((key) => [key, memoryText(key)]));
+    const raw = Object.fromEntries(KEYS.map((key) => [key, readRecord(texts[key]).raw]));
     return {
       raw,
       cat: normalizeSettings(raw.cat),
@@ -145,9 +153,21 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       treat: normalizeTreat(raw.treat),
       presence: normalizePresence(raw.presence),
       scene: normalizeScene(raw.scene),
+      room: parseRoom(texts.room),
       unknown: unknownStage(raw.cat),
     };
   }
+
+  // Ступень, по которой расставлена комната и показан уголок (как в снимке progress.stage).
+  const stageOf = (m) => progressInfo(host ? host.marks : 0, m.cat.seenStage).stage;
+  // Расстановка комнаты показанного питомца: по памяти ключа room (с несохранёнными правками) или — committed — по
+  // подтверждённому и уже поставленному в запись (что писать при «Сохранить», что показывать «Не сохранено»).
+  function roomPos(kind, stage, { committed = false, m = null } = {}) {
+    const saved = committed ? parseRoom(memoryText('room', keys.room.confirmed, { unsaved: false })) : (m ?? memory()).room;
+    return arrange(kind, stage, saved[kind]).pos;
+  }
+  // Предметы питомца с несохранёнными точками (их пишет следующее «Сохранить»).
+  const roomUnsaved = (kind) => Object.keys(keys.room.unsaved).filter((path) => path.startsWith(`${kind}.`)).map((path) => path.slice(kind.length + 1)).filter((id) => Object.hasOwn(ROOM_HOME, id));
 
   // Увиденная ступень для решений: непонятная этой версии — как увиденная выше всех (ничего не отмечается и не празднуется).
   const seenOf = (m) => (m.unknown ? STAGES.length : m.cat.seenStage);
@@ -204,7 +224,16 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     // Ядро живо и не отключается (destroy, отложенный до конца идущей фазы, — уже отключается).
     intact: () => status !== 'destroyed' && !dying,
     warn: (message, error) => (status !== 'destroyed' && Round.working() ? warnings.push([message, error]) : warnQuiet(message, error)),
+    // Идёт перенос в редакторе комнаты — тоже жест указателем (без движений покоя и сценки).
+    gesture: () => Boolean(draft?.drag),
+    // Жест снят ядром (другой питомец, облик или аксессуар, «Скрыть», фон): перенос в редакторе отменён, черновик цел.
+    interrupt: () => {
+      if (draft) draft.drag = null;
+    },
   });
+  // Черновик редактора комнаты (editor.mjs) — пока открыт вид room; roomForeign — в фазе поглощено чужое изменение room.
+  let draft = null;
+  let roomForeign = false;
 
   // Сбои оркестровки, отмеченные сессией (она их не бросает и уже сняла то, что без задачи зависло бы): эффект warning
   // internal и журнал после фиксации; отключённое ядро — только журнал. Возвращает, были ли сбои.
@@ -261,6 +290,10 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       pose: life.pose,
       phrase: life.phrase,
       scenePhrase: life.scenePhrase,
+      play: life.play,
+      room: roomState(m, kind, info.stage),
+      // Предпочтение места legacy-отображения (ключ place как есть, с правками этого экземпляра): ядро его не толкует.
+      place: isRecord(m.raw.place) ? m.raw.place : {},
       progress:
         host === null
           ? null
@@ -282,6 +315,13 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       treat: host === null ? null : treatState(host.day, m.treat.fedDay, host.today),
       save: Object.fromEntries(KEYS.map((key) => [key, saveOf(key)])),
     };
+  }
+
+  // Комната в снимке (§ 5.2): сохраняемая расстановка показанного питомца на его ступени (память ключа room), сдвиг позы
+  // «ест» к миске и черновик редактора (пока открыт).
+  function roomState(m, kind, stage) {
+    const pos = roomPos(kind, stage, { m });
+    return { pos, feedShift: feedShift({ kind, stage, pos }), draft: draft ? Editor.draftState(draft, saveOf('room').status === 'pending') : null };
   }
 
   let closed = freeze(build());
@@ -355,6 +395,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         for (const path of Object.keys(own.unsaved)) if (!same(at(was, path), at(raw, path))) delete own.unsaved[path];
         own.confirmed = next;
         tidy(name);
+        if (name === 'room') roomForeign = true;
       }
       mark('storage');
     } catch (error) {
@@ -390,7 +431,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       }
     }
     for (const entry of entries) if (entry.op.result === 'pending') entry.op.late = true;
-    return { save: report(entries), refused };
+    return { entries, refused };
   }
 
   function report(entries) {
@@ -420,7 +461,13 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       } catch (error) {
         faults.push(['следствия изменения настроек не применены', error]);
       }
+      try {
+        editorSync();
+      } catch (error) {
+        faults.push(['черновик комнаты не согласован', error]);
+      }
     }
+    roomForeign = false;
     noteFaults();
     flushWarnings();
     if (status === 'destroyed') {
@@ -449,6 +496,30 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     effects = [];
     Round.push({ core: self, update: freeze({ snapshot: closed, effects: list, reason: reason ?? 'update' }) });
     reason = null;
+  }
+
+  // Конец фазы работы: черновик редактора согласован с видом, питомцем, ступенью и расстановкой (§ 6.4). Вид не room —
+  // черновика нет. Другой питомец (своя команда или другая вкладка) — черновик без сохранения, вид — уголок (ступень
+  // отметит следующее обновление счёта при открытом уголке; поглощение ничего не пишет). Новая ступень — перенос отменён,
+  // черновик пересчитан на ней, записи нет. Сохраняемая расстановка сменилась: чужая (поглощение другой вкладки или ядра) —
+  // отметка other и одно объявление, черновик не затирается; исход своей записи — тихо.
+  function editorSync() {
+    if (!draft) return;
+    if (session.view().open !== 'room') {
+      draft = null;
+      return;
+    }
+    const m = memory();
+    const kind = m.companion.kind;
+    if (draft.kind !== kind) {
+      draft = null;
+      session.openView('corner', 'pet', sense(m));
+      return;
+    }
+    const stage = stageOf(m);
+    const baseline = roomPos(kind, stage, { committed: true });
+    if (stage !== draft.stage) Editor.restage(draft, stage, roomPos(kind, stage, { m }), baseline);
+    else for (const text of Editor.rebase(draft, baseline, roomForeign)) effects.push({ type: 'announce', text });
   }
 
   function call(record, update) {
@@ -568,15 +639,17 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   }
 
   // Шаг 4 — счёт хоста и день, статус, затем шаг 5 — операции; предупреждения о непоставленных записях — после постановки
-  // всех ключей.
+  // всех ключей. Несколько применений в одном шаге (запись комнаты, затем выход в уголок с отметкой ступени) — один итог
+  // по всем ключам шага.
   function apply(step, { next = host, writes = [], running = false }) {
     host = next;
     if (running) status = 'running';
     step.applied = true;
-    const { save, refused } = queue(writes);
-    step.save = save;
+    const { entries, refused } = queue(writes);
+    step.entries = [...(step.entries ?? []), ...entries];
+    step.save = report(step.entries);
     for (const [key, error] of refused) log.warn(`запись ${key} не поставлена`, error);
-    return save;
+    return step.save;
   }
 
   const unchanged = () => ({ ok: true, changed: false, save: report([]) });
@@ -768,9 +841,31 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       const writes = was === null ? firstSwitch(next) : [];
       const fresh = target === 'corner' ? seeStage(next, writes, m) : [];
       apply(step, { next, writes });
+      // Редактор: черновик — из сохраняемой расстановки (выбрано место отдыха); уход из редактора отбрасывает черновик и
+      // перенос без объявления.
+      draft = null;
       session.openView(target, source, sense());
+      if (target === 'room') draft = openEditor();
       return { ok: true, changed: true, save: step.save, fresh };
     });
+
+  function openEditor() {
+    const m = memory();
+    const kind = m.companion.kind;
+    const stage = stageOf(m);
+    return Editor.openDraft({ kind, stage, saved: roomPos(kind, stage, { m }), baseline: roomPos(kind, stage, { committed: true }), unsaved: roomUnsaved(kind) });
+  }
+
+  // Выход из редактора в уголок (room.save, room.cancel): как open('corner') из редактора — уголок виден, новая ступень
+  // увидена (неявная запись того же шага; fresh — её вещи); черновик и перенос отброшены.
+  function toCorner(step) {
+    const writes = [];
+    const fresh = seeStage(host, writes, memory());
+    if (writes.length) apply(step, { writes });
+    draft = null;
+    session.openView('corner', 'pet', sense());
+    return fresh;
+  }
 
   // Закрыть вид: «Поиграть» и редактор закрываются без сохранения, сценка отменена; «по зову» — питомец уходит и ничего
   // не доигрывает (остаётся полночь). Фокус, прокрутка и restore — у отображения.
@@ -780,6 +875,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       (step) => {
         if (session.view().open === null) return unchanged();
         step.applied = true;
+        draft = null;
         session.closeView(sense());
         return { ok: true, changed: true, save: report([]) };
       },
@@ -953,7 +1049,8 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // {}, без ключа или пустой список — ни одной). Переданное свойство заменяет прежнее целиком, не переданное сохраняется;
   // всё проверяется до применения (неверное — invalid-argument, объявление прежнее). Незарегистрированный питомец или
   // сценка, которой у питомца нет, пропускаются — одно предупреждение журнала на ссылку. Изменение full, scenes и начало
-  // переноса отменяют сценку и попытку. playFloor и игра — PL04.3.
+  // переноса отменяют сценку и попытку. playFloor — пол «Поиграть» [l, t, r, b] в единицах рисунка, playTouch — наименьший
+  // радиус области касания лапы (PL04.3): новый пол ограничивает места предметов.
   const setDisplay = (value) =>
     act(
       'setDisplay',
@@ -971,7 +1068,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   // Проверка объявления целиком до применения: { patch, unknown } или { error }.
   function displayOf(value) {
-    const shape = 'Отображение — { full?, moving?: boolean, pets?: string[], views?: (corner | play | room)[], scenes?: { petId: string[] } }.';
+    const shape = 'Отображение — { full?, moving?: boolean, pets?: string[], views?: (corner | play | room)[], scenes?: { petId: string[] }, playFloor?: [l, t, r, b], playTouch?: число ≥ 0 }.';
     if (!isRecord(value) || Object.keys(value).some((key) => !DISPLAY.includes(key))) return { error: shape };
     const strings = (list) => Array.isArray(list) && list.every((item) => typeof item === 'string');
     const patch = {};
@@ -1002,48 +1099,323 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         patch.scenes[id] = [...new Set(list.filter((scene) => SCENES[id].includes(scene)))];
       }
     }
+    // Пол «Поиграть» — четыре конечных числа в единицах рисунка, l < r и t < b; радиус касания лапы — конечное число ≥ 0.
+    if ('playFloor' in value) {
+      const floor = value.playFloor;
+      if (!(Array.isArray(floor) && floor.length === 4 && floor.every(Number.isFinite) && floor[0] < floor[2] && floor[1] < floor[3])) return { error: 'playFloor — [l, t, r, b]: четыре конечных числа единиц рисунка, l < r, t < b.' };
+      patch.playFloor = [...floor];
+    }
+    if ('playTouch' in value) {
+      if (!(Number.isFinite(value.playTouch) && value.playTouch >= 0)) return { error: 'playTouch — конечное число единиц рисунка ≥ 0.' };
+      patch.playTouch = value.playTouch;
+    }
     return { patch, unknown: [...new Set(unknown)] };
   }
 
-  // Временная граница до PL04.3 (stroke.*, room.drag): идёт жест указателем. Начало жеста — ручное действие: сценка
-  // отменена окончательно (ждущая попытка, идущее резервирование — skip, идущая сценка остановлена); конец жеста попытку
-  // не возвращает. changed — снимок изменился (отменена ждущая попытка или идущая сценка).
-  const setBusy = (value) =>
-    act(
-      'setBusy',
+  // ---------- «Поиграть»: прямые действия, жест, предметы (§ 6.4, § 6.8; play.mjs) ----------
+
+  // Проверки входа с питомцем: спрятан — hidden, не на виду — away (вызывающий проверяет вид).
+  function nearby() {
+    const m = memory();
+    if (m.cat.hidden) return fail('hidden', 'Питомец спрятан.');
+    if (!session.around(sense(m))) return fail('away', 'Питомец не на виду (приходит по зову).');
+    return null;
+  }
+
+  // Взаимодействие: { type: 'pet' } — одно поглаживание без жеста; { type: 'paw' } — лапа (вне «Поиграть» — только у
+  // питомца с командой «Дай лапу», иначе unsupported); { type: 'bowl', to: 'near' | 'home' | [u, v] } и { type: 'ball', to:
+  // 'roll' | число } — предметы, только в открытой «Поиграть» (not-open) и по объявленному полу (unsupported). В «Поиграть»
+  // — прямое действие: откликается и в тишине страницы, не обходит не менее важную реакцию, не копится; каждый сыгранный
+  // отклик — итог под сценой и объявление. Вне «Поиграть» (кнопки уголка) — обычный запрос без итога, как 0.1.4. Лимит —
+  // ядро (play.mjs); знаков и наград нет, миска не кормит. Ручное действие — сценка отменена окончательно; бизнес-отказ
+  // (ok: false) ничего не меняет и сценку не трогает. Результат: outcome — pet, paw, enough, quiet, sniff, look, ball, moved
+  // (предмет сдвинулся, питомец занят), dropped (предмет не сдвинулся) или null (отклик не сыгран), text — его текст.
+  const interact = (action) =>
+    act('interact', (step) => {
+      const shape = 'Действие — { type: pet | paw }, { type: bowl, to: near | home | [u, v] } или { type: ball, to: roll | число ≠ 0 }.';
+      if (!isRecord(action) || !ACTIONS.includes(action.type)) return fail('invalid-argument', shape);
+      const toy = TOYS.includes(action.type);
+      if (Object.keys(action).some((key) => key !== 'type' && !(toy && key === 'to'))) return fail('invalid-argument', shape);
+      if (action.type === 'bowl' && !(action.to === 'near' || action.to === 'home' || point(action.to))) return fail('invalid-argument', shape);
+      if (action.type === 'ball' && !(action.to === 'roll' || (Number.isFinite(action.to) && action.to !== 0))) return fail('invalid-argument', shape);
+      const refused = nearby();
+      if (refused) return refused;
+      const view = session.view().open;
+      const s = sense();
+      if (action.type === 'paw' && view !== 'play' && !profileOf(s.kind).paw) return fail('unsupported', 'У питомца нет команды «Дай лапу» вне «Поиграть».');
+      if (toy && view !== 'play') return fail('not-open', 'Предметы — только в открытой «Поиграть».');
+      if (toy && !session.play.floored()) return fail('unsupported', 'Пол «Поиграть» не объявлен отображением (setDisplay({ playFloor })).');
+      const was = build();
+      step.applied = true;
+      const outcome = toy ? session.play[action.type](action.to) : session.play.touch(action.type, view === 'play');
+      const text = outcome && outcome !== 'dropped' ? playText(outcome, action.type, s.kind, s.name) : '';
+      return { ok: true, changed: !same(was, build()), save: report([]), outcome: outcome ?? null, text };
+    });
+
+  // Жест поглаживания (§ 6.4, сценарии § 6.8). Отображение распознаёт попадание и пороги и вызывает start → step на каждый
+  // пройденный порог → end (отпустили) или cancel (прерван); ядро — лимит и приоритет, удержание позы, объявления без
+  // повторов, итог и его сброс. Ядро само снимает жест: фон, другой питомец или облик, «Скрыть», закрытие или смена вида,
+  // destroy (play.stroke → null; поздние end/cancel безвредны, step — no-gesture).
+  const gestureId = (id) => (Number.isSafeInteger(id) && id > 0 ? null : fail('invalid-argument', 'id жеста — целое положительное число.'));
+  const stroke = Object.freeze({
+    start: () =>
+      act('stroke.start', (step) => {
+        const refused = nearby();
+        if (refused) return refused;
+        if (session.view().open !== 'play') return fail('not-open', 'Жест поглаживания — только в открытой «Поиграть».');
+        step.applied = true;
+        return { ok: true, changed: true, save: report([]), id: session.play.strokeStart() };
+      }),
+    step: (id) =>
+      act(
+        'stroke.step',
+        (step) => {
+          const bad = gestureId(id);
+          if (bad) return bad;
+          if (!session.play.stroking(id)) return fail('no-gesture', 'Жест с этим id не идёт (завершён, отменён или устарел).');
+          const was = build();
+          step.applied = true;
+          const result = session.play.strokeStep(id);
+          return { ok: true, changed: !same(was, build()), save: report([]), outcome: result.outcome, announced: result.announced };
+        },
+        { sync: false },
+      ),
+    end: (id) => strokeStop('stroke.end', id),
+    cancel: (id) => strokeStop('stroke.cancel', id),
+  });
+
+  // Конец (отпустили) и отмена (прерван) жеста — в формате 1 одинаковы: удержание снято, новых откликов и объявлений нет;
+  // реакция доигрывает, затем покой и подсказка. Чужой или устаревший id — ok, без изменений.
+  function strokeStop(name, id) {
+    return act(
+      name,
       (step) => {
-        if (!bool(value)) return fail('invalid-argument', 'busy — boolean.');
+        const bad = gestureId(id);
+        if (bad) return bad;
         const was = build();
         step.applied = true;
-        session.setBusy(value);
+        if (!session.play.strokeStop(id)) return { ok: true, changed: false, save: report([]) };
         return { ok: true, changed: !same(was, build()), save: report([]) };
       },
       { sync: false },
     );
+  }
 
-  // Прямой отклик до PL04.3: игра и предметы (explicit — откликается и в тишине страницы, не обходит не менее важную
-  // реакцию и не копится) и «устроился». Ручное действие (всё, кроме «устроился») — через ручной вход сессии: сценка
-  // отменена окончательно, и когда отклик не сыгран. Лимит поглаживания — пока у отображения.
-  const react = (type, options = {}) =>
+  // Перенос предмета указателем — узкий внутренний вход границы жеста (как room.drag): drag(toy, [u, v]) — где предмет был
+  // бы под указателем (единицы рисунка; первый вызов — где он нарисован сейчас: катившийся мячик останавливается там);
+  // drop({ roll }) — отпустили после заметного сдвига (порог — у отображения; roll — бросок мячика в единицах, знак —
+  // направление); cancel() — отмена (предмет на месте до жеста). Место и докат — ядро.
+  const inPlay = () => {
+    if (session.view().open !== 'play') return fail('not-open', 'Предметы — только в открытой «Поиграть».');
+    if (!session.play.floored()) return fail('unsupported', 'Пол «Поиграть» не объявлен отображением (setDisplay({ playFloor })).');
+    return null;
+  };
+  const toyAct = (name, body) =>
     act(
-      'react',
+      `toy.${name}`,
       (step) => {
-        if (!DIRECT.includes(type)) return fail('invalid-argument', `Прямой отклик — ${DIRECT.join(', ')}.`);
-        const extra = options?.extra ?? {};
-        if (!isRecord(options) || (options.explicit !== undefined && !bool(options.explicit)) || !isRecord(extra) || Object.entries(extra).some(([key, value]) => !DIRECT_EXTRA.includes(key) || typeof value !== 'string')) {
-          return fail('invalid-argument', 'Отклик — { explicit?: boolean, extra?: { toward?, phrases?: string } }.');
-        }
+        const was = build();
+        const result = body(step);
+        return result.ok === false ? result : { ok: true, changed: !same(was, build()), save: report([]), ...result };
+      },
+      { sync: false },
+    );
+  const toy = Object.freeze({
+    drag: (id, at) =>
+      toyAct('drag', (step) => {
+        if (!TOYS.includes(id) || !point(at)) return fail('invalid-argument', 'Перенос предмета — drag(bowl | ball, [u, v]).');
+        const refused = nearby() ?? inPlay();
+        if (refused) return refused;
+        step.applied = true;
+        session.play.dragTo(id, at);
+        return {};
+      }),
+    drop: (options) =>
+      toyAct('drop', (step) => {
+        if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'roll') && (options.roll === undefined || Number.isFinite(options.roll)))) return fail('invalid-argument', 'Отпустили — { roll?: число }.');
+        if (!session.play.dragging()) return { changed: false, outcome: null, text: '' };
+        step.applied = true;
+        const s = sense();
+        const item = session.play.dragging();
+        const outcome = session.play.drop(options ?? {});
+        return { outcome, text: outcome && outcome !== 'dropped' ? playText(outcome, item, s.kind, s.name) : '' };
+      }),
+    cancel: () =>
+      toyAct('cancel', (step) => {
+        step.applied = true;
+        return session.play.dragCancel() ? {} : { changed: false };
+      }),
+  });
+
+  // ---------- «Обустроить уголок» (§ 6.4, сценарий § 6.8; editor.mjs) ----------
+
+  // Только в открытом редакторе (not-open); предмет — доступный показанному питомцу на этой ступени (unknown-id); точка —
+  // [x, y] единиц сцены 400×250.
+  const roomAct = (name, body, { sync = false } = {}) =>
+    act(
+      `room.${name}`,
+      (step) => {
+        if (session.view().open !== 'room' || !draft) return fail('not-open', 'Редактор комнаты не открыт.');
+        const was = build();
+        const result = body(step);
+        return result.ok === false ? result : { ok: true, changed: !same(was, build()), save: step.save ?? report([]), ...result };
+      },
+      { sync },
+    );
+  const itemOf = (id) => (typeof id !== 'string' ? fail('invalid-argument', 'Предмет — строка ID.') : id in draft.pos ? null : fail('unknown-id', `Предмета «${id}» нет в этой комнате.`));
+  const told = (list) => {
+    for (const text of list) effects.push({ type: 'announce', text });
+  };
+  const room = Object.freeze({
+    // Выбрать предмет для шага кнопками; во время переноса — ничего.
+    select: (id) =>
+      roomAct('select', (step) => {
+        const bad = itemOf(id);
+        if (bad) return bad;
+        step.applied = true;
+        Editor.select(draft, id);
+        return {};
+      }),
+    // Одним шагом в черновик — то же, что drag + drop (программное размещение).
+    move: (id, at) =>
+      roomAct('move', (step) => {
+        const bad = itemOf(id) ?? (point(at) ? null : fail('invalid-argument', 'Точка — [x, y] единиц сцены.'));
+        if (bad) return bad;
+        step.applied = true;
+        told(Editor.move(draft, id, at));
+        return {};
+      }),
+    // Шаг 10 единиц выбранным, у преграды — сколько можно; некуда — changed: false и объявление упора; во время переноса —
+    // ничего.
+    nudge: (dir) =>
+      roomAct('nudge', (step) => {
+        if (!Editor.ROOM_DIRS.includes(dir)) return fail('invalid-argument', 'Направление — left, right, up или down.');
+        step.applied = true;
+        const result = Editor.step(draft, dir);
+        told(result.told);
+        return result.moved ? {} : { changed: false };
+      }),
+    // Обычная расстановка в черновик (перенос сначала отменён); постоянная — после save.
+    reset: () =>
+      roomAct('reset', (step) => {
+        step.applied = true;
+        told(Editor.reset(draft));
+        return {};
+      }),
+    // Перенос: первый вызов начинает его и выбирает предмет (ручное действие), следующие двигают; другой предмет сначала
+    // отменяет прежний перенос. Черновик не меняется до drop.
+    drag: (id, at) =>
+      roomAct('drag', (step) => {
+        const bad = itemOf(id) ?? (point(at) ? null : fail('invalid-argument', 'Точка — [x, y] единиц сцены.'));
+        if (bad) return bad;
+        step.applied = true;
+        if (!draft.drag) session.cancelScene();
+        told(Editor.drag(draft, id, at));
+        return {};
+      }),
+    drop: () =>
+      roomAct('drop', (step) => {
+        step.applied = true;
+        const result = Editor.drop(draft);
+        if (!result) return { changed: false };
+        told(result);
+        return {};
+      }),
+    // Отмена только текущего переноса: черновик с прежними правками остаётся, редактор открыт, без объявления.
+    dragCancel: () =>
+      roomAct('dragCancel', (step) => {
+        step.applied = true;
+        return Editor.dragCancel(draft) ? {} : { changed: false };
+      }),
+    // «Сохранить»: идущий перенос отменяется, а не дописывается; пишутся только передвинутые здесь предметы показанного
+    // питомца, отличные от подтверждённого (сверено перед решением). Без изменений — выход без записи. Синхронно: успех —
+    // выход; отказ — редактор открыт, черновик цел, failed, поля несохранённые (память ключа, § 8.4). Асинхронно — выход
+    // сразу, расстановка действует в памяти (pending), итог — поздним объявлением. Скрытых повторов нет.
+    save: () =>
+      roomAct(
+        'save',
+        (step) => {
+          step.applied = true;
+          const { kind, stage } = draft;
+          const moved = Editor.prepare(draft, roomPos(kind, stage, { committed: true }));
+          if (!Object.keys(moved).length) {
+            const fresh = toCorner(step);
+            told([Editor.ROOM_TEXT.same]);
+            return { closed: true, text: Editor.ROOM_TEXT.same, fresh };
+          }
+          const late = (ok, after) => {
+            if (after) effects.push({ type: 'announce', text: ok ? Editor.ROOM_TEXT.saved : Editor.ROOM_TEXT.late });
+          };
+          const fields = Object.fromEntries(Object.entries(moved).map(([id, p]) => [`${kind}.${id}`, [...p]]));
+          apply(step, { writes: [{ key: 'room', fields, onSettle: late }] });
+          const result = step.save.results.room;
+          if (result === 'failed') {
+            draft.failed = true;
+            told([`${Editor.ROOM_TEXT.failed}.`]);
+            return { closed: false, text: `${Editor.ROOM_TEXT.failed}.`, fresh: [] };
+          }
+          const text = result === 'saved' ? Editor.ROOM_TEXT.saved : '';
+          const fresh = toCorner(step);
+          if (text) told([text]);
+          return { closed: true, text, fresh };
+        },
+        { sync: true },
+      ),
+    // Отменить весь редактор: перенос и черновик отброшены, вид — уголок. Объявление честное: несохранённая прежде
+    // расстановка (отказ записи) действует до перезагрузки.
+    cancel: () =>
+      roomAct(
+        'cancel',
+        (step) => {
+          step.applied = true;
+          const text = roomUnsaved(draft.kind).length ? Editor.ROOM_TEXT.kept : Editor.ROOM_TEXT.cancelled;
+          const fresh = toCorner(step);
+          told([text]);
+          return { text, fresh };
+        },
+        { sync: true },
+      ),
+  });
+
+  // ---------- место legacy-отображения и «устроился» ----------
+
+  // Место и вид legacy-отображения (ключ place): правка — простые данные { раздел: { поле: строка } }, проверенные
+  // отображением (места, вид, PLACE_MEDIA и раскладка — у него); запись — операцией ключа ядра через его подключение,
+  // память ключа (несохранённое, поглощение другой вкладки) — ядро. Совпало с памятью — без записи.
+  const setPlace = (patch) =>
+    act('setPlace', (step) => {
+      const shape = 'Место — { раздел: { поле: строка } }.';
+      if (!isRecord(patch) || !Object.keys(patch).length || Object.values(patch).some((fields) => !isRecord(fields) || !Object.keys(fields).length || Object.values(fields).some((value) => typeof value !== 'string'))) return fail('invalid-argument', shape);
+      const raw = memory().raw.place;
+      const fields = {};
+      for (const [section, own] of Object.entries(patch)) for (const [field, value] of Object.entries(own)) if (at(raw, `${section}.${field}`) !== value) fields[`${section}.${field}`] = value;
+      if (!Object.keys(fields).length) return unchanged();
+      apply(step, { writes: [{ key: 'place', fields }] });
+      return { ok: true, changed: true, save: step.save };
+    });
+
+  // Питомец устроился на новом месте или виде по действию владельца (раскладка — legacy-отображение): без анимации — ничего;
+  // иначе эффект arrive (анимацию появления делает отображение) и декоративный отклик «устроился» (в тишине и поверх другой
+  // реакции не играет, пауза повтора — режиссёр).
+  const arrive = () =>
+    act(
+      'arrive',
+      (step) => {
+        const s = sense();
+        if (status !== 'running' || s.hidden || session.motion(s) === 'none') return { ok: true, changed: false, save: report([]), arrived: false };
         const was = build();
         step.applied = true;
-        const how = { explicit: options.explicit === true, extra: { ...extra } };
-        const result = type === 'settle' ? session.react(type, how) : session.manual(type, how);
-        return { ok: true, changed: result.played || result.queued || !same(was, build()), save: report([]), played: result.played, id: result.id };
+        effects.push({ type: 'arrive' });
+        session.react('settle');
+        return { ok: true, changed: !same(was, build()), save: report([]), arrived: true };
       },
       { sync: false },
     );
 
-  // Узкий временный вход: смена места legacy-раскладки (места и их раскладка — у legacy-отображения и в ядро не
-  // переходят; смену вида целиком/портрет ядро узнаёт само по setDisplay({ full })) — сценка и попытка отменяются.
+  // Узкий вход legacy-раскладки (остаётся и после PL04.3, § 11.1, § 14.1.3): смена места страницы без смены вида — сценка и
+  // попытка отменяются. Места и их раскладка (PLACE_MEDIA, окно) — у legacy-отображения и в ядро не переходят, смену вида
+  // целиком/портрет ядро узнаёт само по setDisplay({ full }); контейнер PL07 мест не имеет. Это не общая отмена: виды,
+  // жесты, питомец, облик и присутствие отменяют сценку своими командами.
   const stopScene = () =>
     act(
       'stopScene',
@@ -1084,6 +1456,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   function teardown() {
     if (status === 'destroyed') return;
     status = 'destroyed';
+    draft = null;
     session.destroy();
     try {
       client.close();
@@ -1128,8 +1501,12 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     setReducedMotion,
     activity,
     setDisplay,
-    setBusy,
-    react,
+    interact,
+    stroke,
+    toy,
+    room,
+    setPlace,
+    arrive,
     stopScene,
   });
 }

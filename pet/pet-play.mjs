@@ -1,9 +1,12 @@
-// Сцена «Поиграть»: поглаживание и касание лапы пальцем, мышью и пером (Pointer Events) — правила жеста без DOM и сам
-// жест; разметку, реакцию и фокус ведёт pet.mjs. Ничего не хранит. Жест начинается на голове, теле или лапе
-// (data-play-hit) основным указателем; поглаживание — сдвиг не меньше STROKE_PX от начала или прошлого отклика; касание
-// лапы — короткое (TAP_MS, PAW_SLOP_PX), на отпускание. Ушёл с питомца, отпущен, отменён, потерял захват, скрыта вкладка,
-// изменилось окно — жест кончается; нажатие после него ничего не нажимает (pet-move.mjs).
+// Сцена «Поиграть»: поглаживание и касание лапы пальцем, мышью и пером (Pointer Events) — распознавание жеста на странице;
+// разметку, итог и фокус ведёт pet.mjs, смысл — ядро. Ничего не хранит. Жест начинается на голове, теле или лапе
+// (data-play-hit) основным указателем: ядру — stroke.start; поглаживание — сдвиг не меньше STROKE_PX от начала или
+// прошлого отклика (ядру — stroke.step на каждый порог); касание лапы — короткое (TAP_MS, PAW_SLOP_PX), на отпускание
+// (ядру — interact({ type: 'paw' })). Отпустили — stroke.end; ушёл с питомца, отменён, потерял захват, скрыта вкладка,
+// изменилось окно, сдвиг с лапы — stroke.cancel; ядро сняло жест само (play.stroke пуст) — указатель отпускается. Лимит,
+// удержание позы, итог и объявления — ядро (core/play.mjs, PL04.3). Нажатие после жеста ничего не нажимает (pet-move.mjs).
 
+import { HIT, PAW, PET_BOX } from './core/figure.mjs';
 import { swallowClick } from './pet-move.mjs';
 
 export const STROKE_PX = 24;
@@ -12,25 +15,9 @@ export const PAW_SLOP_PX = 10;
 export const TAP_MS = 500;
 export const PAW_MIN_PX = 22; // наименьший радиус области лапы (44×44)
 
-// Рисунок — viewBox 0 0 220 204 (общий у кота и собаки, земля — y = 188): голова с ушами и тело с лапами, эллипсами.
-// Хвост и пустые углы рамки — не питомец.
-export const PET_BOX = { width: 220, height: 204 };
-export const HIT = {
-  cat: [
-    { part: 'head', cx: 100, cy: 66, rx: 58, ry: 52 },
-    { part: 'body', cx: 100, cy: 150, rx: 64, ry: 46 },
-  ],
-  dog: [
-    { part: 'head', cx: 100, cy: 72, rx: 64, ry: 52 },
-    { part: 'body', cx: 100, cy: 150, rx: 64, ry: 46 },
-  ],
-};
-
-// Левая (на экране) передняя лапа — круг; up — поднятая лапа собаки в позе «Дай лапу».
-export const PAW = {
-  cat: { cx: 90, cy: 176, r: 15 },
-  dog: { cx: 90, cy: 176, r: 15, up: { cx: 72, cy: 137, r: 15 } },
-};
+// Рисунок — viewBox 0 0 220 204 (общий у кота и собаки, земля — y = 188): голова с ушами и тело с лапами, эллипсами; лапа —
+// круг. Данные рисунка — ядро (core/figure.mjs), здесь — перевод в рамку на экране.
+export { HIT, PAW, PET_BOX };
 
 const hitsOf = (kind) => HIT[kind] ?? HIT.cat;
 const pawOf = (kind, pose) => (kind === 'dog' && pose === 'paw' ? PAW.dog.up : (PAW[kind] ?? PAW.cat));
@@ -111,7 +98,6 @@ export function grab(event, el, on) {
   // Страницу пальцем не прокручивает touch-action области.
   event.preventDefault();
   Object.assign(one, { id: event.pointerId, el, on });
-  st.hooks?.busy?.(true);
   try {
     el.setPointerCapture(event.pointerId);
   } catch {
@@ -125,6 +111,9 @@ export function grab(event, el, on) {
 }
 
 const mine = (event) => one.id !== null && event.pointerId === one.id;
+// Потеря захвата — только своя: запоздалое событие прежнего захвата (тот же указатель снова захвачен той же областью)
+// новый жест не снимает.
+const lost = (event) => mine(event) && !(one.el?.hasPointerCapture?.(event.pointerId) ?? false);
 
 function onMove(event) {
   if (!mine(event)) return;
@@ -136,7 +125,7 @@ function onMove(event) {
 const onUp = (event) => mine(event) && release('up', event);
 const onCancel = (event) => mine(event) && release('pointercancel', event);
 // Захват потерян самой областью нажатия, пока указатель нажат (после pointerup жест уже закончен).
-const onLost = (event) => mine(event) && release('lost', event);
+const onLost = (event) => lost(event) && release('lost', event);
 
 // Конец жеста: слушатели и захват — всегда. Отпустили после сдвига — нажатие поглощается; прерван, а указатель ещё
 // нажат — сначала ждём его отпускания; pointercancel — браузер сам нажатия не пришлёт.
@@ -153,20 +142,19 @@ export function release(reason = 'cancel', event = null) {
     // захвата уже нет
   }
   Object.assign(one, { id: null, el: null, on: null });
-  st.hooks?.busy?.(false);
   const moved = on.end(reason, event);
   if (reason === 'up') {
     if (moved) swallowClick();
   } else if (reason !== 'pointercancel') swallowClick(id);
 }
 
-const st = { hooks: null, g: null, pet: null, kind: 'cat', rect: null, x: 0, y: 0, frame: 0 };
+const st = { hooks: null, g: null, pet: null, kind: 'cat', rect: null, x: 0, y: 0, frame: 0, starting: false };
 
 export const stroking = () => Boolean(st.g);
 
-// При подключении: hooks = { stroke({ first }) → отклик, paw() — касание лапы, end() — жест кончился, motion(), busy(on) —
-// жест указателем начат или кончился (поглаживание, предмет, перенос в редакторе: покой без движений) }; signal
-// снимает слушатели при отключении. Скрытая вкладка, изменение окна, уход со страницы — конец любого жеста сцены.
+// При подключении: hooks = { start() → id жеста ядра или null, step(id), end(id), cancel(id), paw() — касание лапы,
+// motion() }; signal снимает слушатели при отключении. Скрытая вкладка, изменение окна, уход со страницы — конец любого
+// жеста сцены.
 export function initPlay(hooks, signal) {
   st.hooks = hooks;
   document.addEventListener('visibilitychange', () => document.hidden && release('hidden'), { signal });
@@ -179,9 +167,14 @@ export function watchStroke(box) {
   box.addEventListener('pointerdown', onDown);
 }
 
-// Жест прерван снаружи (закрытие сцены, Esc, смена или скрытие питомца, смена облика).
+// Жест прерван снаружи (закрытие сцены, Esc, смена или скрытие питомца, смена облика) или ядро уже сняло его.
 export function cancelStroke(reason = 'cancel') {
   if (st.g) release(reason);
+}
+
+// Ядро сняло жест само (play.stroke пуст или другой): указатель отпускается; поздний stroke.cancel(id) ядру безвреден.
+export function strokeLost(id) {
+  if (st.g && !st.starting && st.g.id !== id) release('lost');
 }
 
 const poseOf = (pet) => pet?.querySelector('.cat-art')?.dataset.pose ?? '';
@@ -194,9 +187,17 @@ function onDown(event) {
   const kind = pet?.dataset.kind ?? 'cat';
   const part = partAt(kind, rect, event.clientX, event.clientY, poseOf(pet));
   if (!part || !grab(event, hit, { move: strokeOn, end: strokeEnd })) return;
-  st.g = { ...strokeStart(event.clientX, event.clientY), paw: part === 'paw', t0: event.timeStamp };
+  st.g = { ...strokeStart(event.clientX, event.clientY), paw: part === 'paw', t0: event.timeStamp, id: null };
   Object.assign(st, { pet, kind, rect, x: event.clientX, y: event.clientY });
   pet.dataset.stroking = '';
+  // Начало жеста — ядру (ручное действие: сценка отменена; отклика и удержания ещё нет). Пока ядро его начинает, снимок
+  // без этого жеста указатель не отпускает.
+  st.starting = true;
+  try {
+    st.g.id = st.hooks.start?.() ?? null;
+  } finally {
+    st.starting = false;
+  }
 }
 
 function strokeOn(event) {
@@ -217,7 +218,7 @@ function strokeOn(event) {
   st.x = x;
   st.y = y;
   if (g.far >= TAP_PX) touchLater();
-  if (stroke) st.hooks.stroke({ first: g.strokes === 1 });
+  if (stroke && g.id !== null) st.hooks.step(g.id);
 }
 
 // Подсветка касания — мягкое пятно под указателем, раз в кадр (не на каждое движение); без анимации её нет.
@@ -234,8 +235,8 @@ function touchLater() {
   });
 }
 
-// Конец поглаживания: подсветка снята. Касание лапы — на отпускание: коротко, на месте и на лапе (рамка и поза —
-// текущие).
+// Конец жеста: подсветка снята; ядру — stroke.end (отпустили) или stroke.cancel (прерван). Касание лапы — на отпускание:
+// коротко, на месте и на лапе (рамка и поза — текущие), после конца жеста.
 function strokeEnd(reason, event) {
   const { g, pet, kind } = st;
   const tap =
@@ -250,7 +251,7 @@ function strokeEnd(reason, event) {
   const touch = pet.closest('[data-play-stage]')?.querySelector('[data-play-touch]');
   if (touch) delete touch.dataset.on;
   Object.assign(st, { g: null, pet: null, rect: null });
-  st.hooks.end?.();
+  if (g.id !== null) (reason === 'up' ? st.hooks.end : st.hooks.cancel)?.(g.id);
   if (tap) st.hooks.paw?.();
   return g.far >= TAP_PX || g.paw;
 }

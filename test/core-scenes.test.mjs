@@ -205,10 +205,10 @@ const CANCELS = [
   ['таймер сайта', (L) => L.core.setContext({ timer: true })],
   ['фон', (L) => L.core.setVisible(false)],
   ['«Скрыть»', (L) => L.core.hide()],
-  ['ручное действие', (L) => L.core.react('pet')],
+  ['ручное действие (поглаживание кнопкой уголка)', (L) => L.core.interact({ type: 'pet' })],
   ['кормление', (L) => L.core.feed()],
   ['готовое имя', (L) => L.core.setName('Бублик', { pick: true })],
-  ['начало жеста', (L) => L.core.setBusy(true)],
+  ['начало жеста (в «Поиграть»)', (L) => L.core.open('play'), (L) => L.core.stroke.start()],
   ['открыт уголок', (L) => L.core.open('corner')],
   ['«Поиграть»', (L) => L.core.open('play')],
   ['другой питомец', (L) => L.core.setPet('dog')],
@@ -239,7 +239,7 @@ for (const [title, ...steps] of CANCELS) {
       steps[1](L);
     } else for (const step of steps) step(L);
     assert.equal(L.state().scene.waiting, null);
-    for (const off of [() => L.core.setContext({ typing: false, timer: false }), () => L.core.setVisible(true), () => L.core.show(), () => L.core.close(), () => L.core.setDisplay({ moving: false }), () => L.core.setBusy(false)]) off();
+    for (const off of [() => L.core.setContext({ typing: false, timer: false }), () => L.core.setVisible(true), () => L.core.show(), () => L.core.close(), () => L.core.setDisplay({ moving: false }), () => L.core.stroke.end(1)]) off();
     L.plan.advance(5000);
     await flush();
     assert.deepEqual([L.port.calls.reserve, L.state().pose.reaction?.scene ?? false], [0, false], 'ни резервирования, ни показа');

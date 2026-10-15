@@ -32,10 +32,11 @@ const DAY_MS = 86_400_000;
 
 test('задачи: повторное планирование того же имени отменяет прежнее; отменённая, сработав поздно, ничего не делает', () => {
   const L = started();
-  L.core.react('pet', { explicit: true });
+  L.core.open('play');
+  L.core.interact({ type: 'pet' });
   const first = L.state().phrase;
   L.plan.advance(2000);
-  L.core.react('paw', { explicit: true });
+  L.core.interact({ type: 'paw' });
   const second = L.state().phrase;
   assert.notEqual(second.text, '');
   const stale = L.plan.all.filter((item) => !item.live && item.ms === 3200);
@@ -59,7 +60,7 @@ test('до start ни задач, ни случайности, ни реакци
   L.core.setVisible(false);
   L.core.setVisible(true);
   L.core.setReducedMotion(true);
-  assert.deepEqual([L.core.react('pet', { explicit: true }).played, saved(L, 'k').reacted, L.core.notify('failed', null).reacted], [false, false, false]);
+  assert.deepEqual([L.core.interact({ type: 'pet' }).outcome, saved(L, 'k').reacted, L.core.notify('failed', null).reacted], [null, false, false]);
   assert.deepEqual([L.plan.calls, L.random.state.taken, playing(L), L.state().view, L.state().scene.waiting], [0, 0, null, { open: 'corner', source: 'pet' }, null], 'вид до start запомнен, задач нет');
   assert.equal(L.state().context.focus, true, 'контекст до start запомнен');
   assert.equal(L.core.start().ok, true);
@@ -158,7 +159,7 @@ test('ошибки портов: scheduler, random, clock.nextDay бросают
     log,
   });
   core.start();
-  core.react('pet', { explicit: true });
+  core.interact({ type: 'pet' });
   assert.ok(inside.length > 5 && inside.filter((line) => !line.startsWith('log')).every((code) => code === 'reentrant'), inside.join(','));
   assert.ok(inside.some((line) => line.startsWith('log') && line.endsWith('reentrant')), 'команда из журнала — тоже reentrant');
   assert.deepEqual([core.getState().name.display, core.getState().context.quiet], ['Марс', []], 'ничего не изменено');
@@ -177,7 +178,7 @@ test('покой normal: моргание 12–28 с, движение 45–90 �
   assert.equal(L.plan.nextIn(), 28_000, 'следующее моргание — 28 с (random 1)');
   L.random.push(0.17, 0); // зевок (0,17 < 0,18), следующее движение — через 45 с
   L.plan.advance(33_000);
-  assert.deepEqual([playing(L), L.state().pose.page], ['yawn', 'yawn']);
+  assert.deepEqual([playing(L), L.state().pose.shown.page], ['yawn', 'yawn']);
   L.plan.advance(REACTIONS.yawn.ms);
   L.random.push(0.17); // зевок снова выпал, но пауза повтора 6 мин — ничего (как 0.1.4: и движения нет)
   L.plan.advance(45_000 - REACTIONS.yawn.ms);
@@ -225,7 +226,7 @@ test('дремота через 3 мин без действий; activity — �
   L.plan.advance(180_000 - 400 - 1);
   assert.equal(L.state().pose.resting, false);
   L.plan.advance(1);
-  assert.deepEqual([L.state().pose.resting, L.state().pose.base, L.state().pose.page], [true, 'rest', 'rest'], 'дремота от первого действия, не от второго');
+  assert.deepEqual([L.state().pose.resting, L.state().pose.base, L.state().pose.shown.page], [true, 'rest', 'rest'], 'дремота от первого действия, не от второго');
   assert.equal(L.core.activity().changed, true, 'пробуждение');
   assert.deepEqual([L.state().pose.resting, L.state().pose.base], [false, 'calm']);
   L.core.setContext({ typing: true });
@@ -242,7 +243,9 @@ test('дремота через 3 мин без действий; activity — �
 });
 
 test('запреты движений покоя: тишина, реакция, жест, фон, «скрыт»; экран занятия — без зевка, движения есть', () => {
-  const L = life({ cat: CAT }, { counts: host(1, 1) });
+  // «Поиграть» открыта до запуска (без задачи «заметил гостя»): жест поглаживания — смысловой вход ядра (stroke.*).
+  const L = life({ cat: CAT }, { counts: host(1, 1), display: { views: ['corner', 'play', 'room'] } });
+  L.core.open('play');
   L.random.push(0, 0.5);
   L.core.start();
   L.core.setContext({ timer: true });
@@ -251,16 +254,16 @@ test('запреты движений покоя: тишина, реакция, 
   assert.deepEqual(micros(L), [], 'тишина — без моргания');
   L.core.setContext({ timer: false });
   L.plan.advance(11_500);
-  L.core.react('settle'); // до 24 700 мс — моргание в 24 000 мс попадает на реакцию
+  L.core.arrive(); // «устроился» до 24 700 мс — моргание в 24 000 мс попадает на реакцию
   L.random.push(0);
   L.plan.advance(500);
   assert.equal(micros(L).length, 0, 'идёт реакция — без моргания');
   L.plan.advance(REACTIONS.settle.ms);
-  L.core.setBusy(true);
+  const gesture = L.core.stroke.start().id;
   const taken = L.random.state.taken;
   L.plan.advance(L.plan.live().find((item) => item.ms >= 45_000 && item.ms <= 90_000).at - L.time.state.now);
   assert.deepEqual([micros(L).length, playing(L), L.random.state.taken - taken >= 2], [0, null, true], 'жест — ни движения, ни зевка (шанс не тянется)');
-  L.core.setBusy(false);
+  L.core.stroke.end(gesture);
   // Экран занятия: шанс зевка не тянется, движение есть (моргание в 26,4 с — 0,5; движение в 45 с — вид 0 → ear).
   const F = life({ cat: CAT }, { counts: host(1, 1) });
   F.random.push(0.9, 0);
@@ -285,7 +288,7 @@ test('поза покоя: внимание на экране занятия и 
   L.core.setContext({ focus: false });
   L.core.feed();
   L.plan.advance(REACTIONS.feed.ms + REACTIONS.fed.ms);
-  assert.deepEqual([L.state().pose.base, L.state().pose.page], ['content', 'content']);
+  assert.deepEqual([L.state().pose.base, L.state().pose.shown.page], ['content', 'content']);
   L.plan.advance(180_000);
   assert.equal(L.state().pose.base, 'rest');
   L.core.setContext({ dialog: true });

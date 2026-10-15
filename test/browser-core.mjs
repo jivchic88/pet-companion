@@ -107,12 +107,12 @@ export async function coreQa(browser, base, check, open) {
     const repeat = await pose();
     check(`${label}: notify('saved', {}) — как 0.1.4: первое — радость, повтор без key — без реакции`, first === 'joy' && repeat !== 'joy', `${first} → ${repeat}`);
 
-    // Все записи ключей ядра — через веб-адаптер координатора; ключей оболочки — из неё.
+    // Все записи ключей — через веб-адаптер координатора (с PL04.3 и place, room: оболочка ключей не пишет).
     const sets = await page.evaluate(() => window.qaSets.map(({ key, stack }) => ({ key, adapter: stack.includes('/pet/web/storage.mjs'), shell: stack.includes('/pet/pet.mjs') })));
     const coreSets = sets.filter((item) => CORE_KEYS.some((name) => item.key === `core1:${name}:v1`));
-    const shellSets = sets.filter((item) => item.key.startsWith('core1:') && !coreSets.includes(item));
+    const otherSets = sets.filter((item) => item.key.startsWith('core1:') && !coreSets.includes(item));
     check(`${label}: каждая запись cat, companion, look, treat — через веб-адаптер координатора (${coreSets.length})`, coreSets.length >= 8 && coreSets.every((item) => item.adapter), JSON.stringify(coreSets.filter((item) => !item.adapter)));
-    check(`${label}: ключи оболочки до PL04 (place, presence, room, scene) — мимо координатора`, shellSets.every((item) => !item.adapter && item.shell), JSON.stringify(shellSets));
+    check(`${label}: остальные ключи (place, presence, room, scene) — тоже только через веб-адаптер, не из оболочки`, otherSets.every((item) => item.adapter), JSON.stringify(otherSets));
 
     // Отключение: подключение ядра оболочки закрыто — второе ядро продолжает получать изменения другой вкладки.
     await page.evaluate(() => window.stand.pet.destroy());

@@ -220,3 +220,19 @@ export const parseLook = parser(normalizeLook);
 // Запись: свежее сохранённое + изменённые облики ({ cat?, dog? }); облик другого животного, в том числе непонятный этой
 // версии, и облики неизвестных животных остаются как были.
 export const lookRecord = (text, patch = {}) => keepRecord(text, LOOK_VERSION, normalizeLook, patch);
+
+// ---------- предпочтение отображения (ключ place) ----------
+// Место и вид legacy-отображения у телефона и компьютера (place:v1): формат, места, вид и правила раскладки — у отображения
+// (pet-place.mjs, PLACE_MEDIA); ядро ключ хранит (память ключа, сверка, поглощение, запись через своё подключение) и не
+// толкует. Запись: свежее сохранённое как есть + изменённые поля разделов ({ desktop?: { place?, view? }, phone?: … } —
+// строки, проверенные отображением); остальное — как было, включая поля и значения будущих версий и больший v.
+export const PLACE_VERSION = 1;
+export function prefRecord(text, patch = {}) {
+  const keep = readRecord(text).raw ?? {};
+  const out = { ...keep, v: keepVersion(keep.v, PLACE_VERSION) };
+  for (const [section, fields] of Object.entries(isRecord(patch) ? patch : {})) {
+    if (!isRecord(fields) || !Object.keys(fields).length) continue;
+    out[section] = { ...(isRecord(keep[section]) ? keep[section] : {}), ...fields };
+  }
+  return out;
+}

@@ -131,10 +131,10 @@ test('кнопка вызова: лапка без мордашки, точек 
   const layout = ui.slice(ui.indexOf('function applyLayout('), ui.indexOf('const hostBox'));
   assert.match(layout, /if \(lost\) fallbackFocus\(\)\?\.focus\(\{ preventScroll: true \}\);\s*else keepFocus\(focused\);/, 'и для лапки, а не только при смене места питомца');
   // Запись присутствия — команда ядра (setPresence, координатор хранения); оболочка ключ presence не читает и не пишет.
-  // setItem оболочки — только в writeKey (place, room).
+  // С PL04.3 оболочка не пишет ни одного ключа (place и room — тоже ядро): setItem — только веб-адаптер координатора.
   assert.match(ui, /ui\.core\.setPresence\(mode\)/);
-  assert.equal(ui.includes('K.presence') || ui.includes('K.scene'), false);
-  assert.equal([...ui.matchAll(/setItem\(/g)].length, 1);
+  assert.equal(ui.includes('K.presence') || ui.includes('K.scene') || ui.includes('K.place') || ui.includes('K.room'), false);
+  assert.equal([...ui.matchAll(/setItem\(|getItem\(|localStorage/g)].length, 0);
 });
 
 test('кнопка вызова в стилях: не меньше 44×44, без анимации, при печати нет; видна одна по компоновке', async () => {
