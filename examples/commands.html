@@ -1,0 +1,87 @@
+<!doctype html>
+<!-- Пример: сайт управляет питомцем своими кнопками — публичные команды pet.* и pet.core (README, «Команды и состояние»),
+     без нажатий на кнопки питомца. Пакет из npm без сборщика: страница в корне проекта рядом с node_modules/, карта
+     импортов связывает имя пакета с его входом. В пакет не входит; test:package проверяет его с установленным архивом. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Мой сайт — команды питомца</title>
+    <link rel="stylesheet" href="./node_modules/pet-companion/pet/pet-base.css" />
+    <link rel="stylesheet" href="./node_modules/pet-companion/pet/pet.css" />
+    <link rel="stylesheet" href="./node_modules/pet-companion/pet/dog.css" />
+    <script type="importmap">
+      { "imports": { "pet-companion": "./node_modules/pet-companion/pet/pet.mjs" } }
+    </script>
+  </head>
+  <body>
+    <header id="head" style="position: relative"><span id="title">Мой сайт</span></header>
+    <main>
+      <p id="status" role="status"></p>
+      <div id="controls">
+        <button id="lesson" type="button">Урок пройден</button>
+        <button id="name" type="button">Назвать «Пиксель»</button>
+        <button id="dog" type="button">Собака</button>
+        <button id="coat" type="button">Другой облик</button>
+        <button id="feed" type="button">Покормить</button>
+        <button id="corner" type="button">Открыть уголок</button>
+        <button id="room" type="button">Миску левее</button>
+        <button id="hide" type="button">Скрыть</button>
+        <button id="show" type="button">Показать</button>
+        <button id="off" type="button">Отключить</button>
+        <button id="on" type="button">Подключить</button>
+      </div>
+    </main>
+    <script type="module">
+      import { localDay, mountPet } from 'pet-companion';
+
+      const marks = [];
+      const today = () => marks.filter((day) => day === localDay()).length;
+      const head = document.getElementById('head');
+      const status = document.getElementById('status');
+      let pet = null;
+
+      // Подключение и состояние: подписка на ядро (pet.subscribe — то же, что pet.core.subscribe).
+      function connect() {
+        pet = mountPet({
+          storage: 'mysite',
+          places: { logo: (el) => head.append(el), top: (el) => head.prepend(el), float: (el) => document.body.append(el) },
+          progress: () => ({ marks: marks.length, today: today(), limit: 3 }),
+        });
+        if (!pet.mounted) return;
+        pet.subscribe(({ snapshot }) => {
+          status.textContent = `${snapshot.name.display} · ${snapshot.pet.shown} · лакомство: ${snapshot.treat ?? '—'} · ${snapshot.status}`;
+        });
+      }
+      connect();
+
+      // Команды сайта: результат — { ok, changed, save } или { ok: false, error: { code, message } }.
+      const report = (result) => (result.ok ? result : (console.info('Питомец ответил:', result.error.code), result));
+      const actions = {
+        lesson: () => {
+          marks.push(localDay());
+          return report(pet.core.notify('saved', { key: `lesson-${marks.length}`, counted: true, first: today() === 1 }));
+        },
+        name: () => report(pet.setName('Пиксель')),
+        dog: () => report(pet.setPet('dog')),
+        coat: () => report(pet.setAppearance({ coat: pet.getState().pet.shown === 'dog' ? 'spotted' : 'ginger' })),
+        feed: () => report(pet.feed()),
+        corner: () => report(pet.core.open('corner')),
+        close: () => report(pet.core.close()),
+        room: () => {
+          pet.core.open('room');
+          pet.room.select('bowl');
+          pet.room.nudge('left');
+          return report(pet.room.save());
+        },
+        hide: () => report(pet.hide()),
+        show: () => report(pet.show()),
+        off: () => pet.core?.destroy(),
+        on: () => connect(),
+      };
+      for (const [id, action] of Object.entries(actions)) document.getElementById(id)?.addEventListener('click', action);
+      // Для проверки: те же действия и текущий экземпляр.
+      window.demo = { actions, pet: () => pet };
+    </script>
+  </body>
+</html>

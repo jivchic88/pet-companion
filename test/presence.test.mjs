@@ -105,10 +105,14 @@ test('кнопка вызова: лапка без мордашки, точек 
   // Источник — параметр открытия (кнопка вызова или питомец), до закрытия; не по тексту, режиму или имени. С PL04.2 вид и
   // источник — ядро: open('play', { source: 'call' }) до разметки; отметку просмотра уголка и её отсутствие при вызове,
   // праздник по виду и «на виду» решает ядро (исполнение — test/core-presence.test.mjs).
-  const open = ui.slice(ui.indexOf('function openSheet('), ui.indexOf('// Закрытие — один раз'));
+  // PL05: кнопка — только команда ядра (тот же путь, что прямая pet.core.open); разметку вида рисует подписка (openMarkup)
+  // по снимку, команд не вызывает (исполнение — test/browser-commands.mjs).
+  const open = ui.slice(ui.indexOf('function openSheet('), ui.indexOf('// Закрытие отображением'));
   assert.match(open, /function openSheet\(opener, source = 'pet'\)/);
-  assert.match(open, /const opened = ui\.core\.open\(call \? 'play' : 'corner', \{ source \}\);/);
-  assert.ok(open.indexOf('ui.core.open(') < open.indexOf('enterPlay();') && open.indexOf('enterPlay();') < open.indexOf('ui.sheet.showModal();'), 'вид «Поиграть» — ядру, затем разметка до showModal (без вспышки уголка)');
+  assert.match(open, /ui\.core\.open\(source === 'call' \? 'play' : 'corner', \{ source \}\);/);
+  const markup = open.slice(open.indexOf('function openMarkup('));
+  assert.ok(markup.length > 0 && markup.indexOf('playMarkup();') > 0 && markup.indexOf('playMarkup();') < markup.indexOf('ui.sheet.showModal();'), 'вид «Поиграть» — ядру, затем разметка до showModal (без вспышки уголка)');
+  assert.doesNotMatch(markup, /ui\.core\./, 'разметка по снимку команд ядра не вызывает');
   assert.doesNotMatch(open, /'greet'|'joy'|'unlock'|markSeen|setSight/, 'без приветствия, радости, праздника и своей отметки');
   const close = ui.slice(ui.indexOf('function closeSheet('), ui.indexOf('// ---------- сцена «Поиграть»'));
   assert.match(close, /ui\.core\.close\(\);/);

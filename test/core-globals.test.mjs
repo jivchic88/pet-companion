@@ -8,7 +8,8 @@
 // действия, жест поглаживания с удержанием, перенос предмета и бросок мячика, сброс итога задачей), «Обустроить уголок»
 // (выбор, шаг, перенос, отмена переноса, обычная расстановка, сохранение и отмена), чужая расстановка и место из другой
 // вкладки, место legacy-раскладки (setPlace), «устроился» (arrive), асинхронное сохранение комнаты — тоже без браузерных
-// глобалов. Отдельный процесс node --test.
+// глобалов. PL05: публичный вход pet/core.mjs — импорт, хранилище на Map (синхронно и асинхронно), команды, жест, перенос
+// предмета, комната, подписка и отключение — тоже. Отдельный процесс node --test.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -175,4 +176,53 @@ test('глобалы-ловушки: импорт ядра и веб-адапт�
   assert.ok(quiet.calls.random > 0 && quiet.calls.scheduler > 0, `работа PL04.1 пользуется random и scheduler: ${JSON.stringify(quiet.calls)}`);
   assert.deepEqual(log.list, []);
   assert.ok(seen.includes('Барсик') && seen.includes('Пиксель'), seen.join(','));
+});
+
+test('глобалы-ловушки (PL05): публичный вход pet-companion/core — импорт, createStorage на Map (синхронно и асинхронно), команды, подписка, отключение — без браузерных глобалов', async () => {
+  touched.length = 0;
+  const { createPetCore, createStorage, localDay, VERSION } = await import('../pet/core.mjs');
+  assert.deepEqual(touched, [], 'импорт входа ядра');
+  const map = new Map();
+  const storage = createStorage({ namespace: 'globals-public', backend: { get: (name) => map.get(name) ?? null, set: (name, text) => void map.set(name, text) } });
+  assert.equal(storage.load(), 'ready');
+  let now = Date.parse('2026-10-15T10:00:00Z');
+  const clock = { now: () => now, day: () => '2026-10-15', nextDay: (at) => at + 86_400_000 };
+  const scheduler = { later: () => () => {} };
+  const pet = createPetCore({ storage, progress: () => ({ marks: 3, today: 1 }), clock, scheduler, random: () => 0.5 });
+  const seen = [];
+  pet.subscribe((update) => seen.push(update.reason));
+  pet.start();
+  pet.setName('Пиксель');
+  pet.notify('saved', { key: 'g1', counted: true });
+  pet.feed();
+  pet.setDisplay({ views: ['corner', 'play', 'room'], playFloor: [-40, -10, 300, 230] });
+  pet.open('play');
+  const id = pet.stroke.start().id;
+  pet.stroke.step(id);
+  pet.stroke.end(id);
+  pet.toy.drag('ball', [120, 214]);
+  pet.toy.drop({ roll: 20 });
+  pet.open('room');
+  pet.room.move('bowl', [120, 230]);
+  pet.room.save();
+  pet.close();
+  pet.destroy();
+  const slow = [];
+  const remote = createStorage({ namespace: 'globals-async', backend: { async: true, get: () => new Promise((resolve) => slow.push(() => resolve(null))), set: () => new Promise((resolve) => slow.push(resolve)) } });
+  const loading = remote.load();
+  while (slow.length) {
+    slow.shift()();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(await loading, 'ready');
+  const late = createPetCore({ storage: remote, clock, scheduler, random: () => 0.5 });
+  const named = late.setName('Кекс');
+  late.destroy();
+  while (slow.length) {
+    slow.shift()();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(await named.save.done, 'saved');
+  assert.deepEqual([touched, typeof localDay(new Date(now)), VERSION.length > 0, seen[0], seen.at(-1)], [[], 'string', true, 'initial', 'destroyed']);
+  now += 1;
 });

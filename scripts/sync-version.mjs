@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Номер версии — из package.json (его меняет npm version; этот скрипт — его шаг "version", до коммита и тега). Здесь —
-// та же версия в VERSION (pet/pet.mjs) и в строке «Версия **x.y.z**» README; раздел «## Не выпущено» CHANGELOG получает
-// номер и дату. Без записи в CHANGELOG выпуск останавливается. Повторный запуск ничего не меняет.
+// та же версия в VERSION (pet/core/version.mjs — одна константа для входов pet-companion и pet-companion/core) и в строке
+// «Версия **x.y.z**» README; раздел «## Не выпущено» CHANGELOG получает номер и дату. Без записи в CHANGELOG выпуск
+// останавливается. Повторный запуск ничего не меняет.
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,6 @@ if (/^## Не выпущено[ \t]*$/m.test(changelog)) {
 } else if (/^## (\d+\.\d+\.\d+)/m.exec(changelog)?.[1] !== version) {
   fail(`в CHANGELOG.md нет раздела «## Не выпущено» и последняя запись — не ${version}: опишите изменения до выпуска`);
 }
-await replace('pet/pet.mjs', /^export const VERSION = '[^']*';$/m, `export const VERSION = '${version}';`, 'export const VERSION');
+await replace('pet/core/version.mjs', /^export const VERSION = '[^']*';$/m, `export const VERSION = '${version}';`, 'export const VERSION');
 await replace('README.md', /Версия \*\*[^*]+\*\*/, `Версия **${version}**`, '«Версия **…**»');
-console.log(`Версия ${version}: pet/pet.mjs, README.md, CHANGELOG.md согласованы`);
+console.log(`Версия ${version}: pet/core/version.mjs, README.md, CHANGELOG.md согласованы`);

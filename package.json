@@ -30,6 +30,10 @@
       "types": "./pet/pet.d.mts",
       "default": "./pet/pet.mjs"
     },
+    "./core": {
+      "types": "./pet/core.d.mts",
+      "default": "./pet/core.mjs"
+    },
     "./pet.css": {
       "types": "./pet/css.d.mts",
       "default": "./pet/pet.css"
@@ -56,7 +60,7 @@
     "test": "node --test test/*.test.mjs",
     "test:browser": "node test/browser.mjs",
     "test:package": "node test/package.mjs",
-    "version": "node scripts/sync-version.mjs && git add pet/pet.mjs README.md CHANGELOG.md",
+    "version": "node scripts/sync-version.mjs && git add pet/core/version.mjs README.md CHANGELOG.md",
     "prepublishOnly": "npm test"
   },
   "devDependencies": {

@@ -8,6 +8,8 @@
 // фиксацию в том же вызове write; асинхронный — обещаниями, фиксация — отдельным раундом (в серии — тестовый механизм с
 // ручным подтверждением; SQLite — этап PL09).
 
+import { PetError } from './errors.mjs';
+import { isRecord, STORAGE_NAMES, storageKeys } from './formats/legacy.mjs';
 import { nextOrder, run } from './round.mjs';
 
 const registry = new WeakMap();
@@ -18,6 +20,76 @@ export function shared(store, namespace, make) {
   if (!spaces) registry.set(store, (spaces = new Map()));
   if (!spaces.has(namespace)) spaces.set(namespace, make());
   return spaces.get(namespace);
+}
+
+// ---------- публичный координатор (вход pet-companion/core, PL05) ----------
+// createStorage — общий координатор над хранилищем ключ-значение интегратора (Node, своё приложение, страница без
+// mountPet): та же реализация, что у веба (очередь ключа, кэш, барьер load, подключения ядер, раунд), только платформенная
+// часть — его backend. Наружу — непрозрачный объект { status, load() }: подключения создаёт само ядро (createPetCore),
+// интегратор их не видит (docs/ARCHITECTURE.md § 8.1, § 14.1.5). Внутренний координатор — по объекту (coordinatorOf).
+const coordinators = new WeakMap();
+export const coordinatorOf = (value) => ((value && typeof value === 'object') || typeof value === 'function' ? (coordinators.get(value) ?? null) : null);
+
+const STORAGE_OPTIONS = ['backend', 'namespace'];
+const thenable = (value) => Boolean(value) && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function';
+// Значение хранилища — строка или «нет значения» (null, undefined); иное — отказ чтения, а не String(value).
+function stored(value, what) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value;
+  throw new Error(`${what} вернул не строку`);
+}
+
+// backend — { async?: boolean, get(name), set(name, text) }; name — полное имя ключа «<namespace>:<ключ>:v1» (те же имена и
+// форматы v1, что у веба). Синхронный (async не задан или false): get и set выполняются в том же вызове; обещание от них —
+// отказ операции (для обещаний нужен async: true), без необработанных отклонений. Асинхронный: get и set — обещания;
+// отказ (исключение или отклонённое обещание) — отказ операции этого ключа. Тот же backend и namespace — тот же
+// координатор. Ошибка настроек — PetError invalid-options до создания.
+export function createStorage(options) {
+  if (!isRecord(options)) throw new PetError('invalid-options', 'Настройки хранилища — объект { backend, namespace? }.');
+  for (const key of Object.keys(options)) if (!STORAGE_OPTIONS.includes(key)) throw new PetError('invalid-options', `Неизвестная настройка хранилища: ${key}.`);
+  const { backend, namespace = 'pet' } = options;
+  if (typeof namespace !== 'string' || !namespace) throw new PetError('invalid-options', 'namespace — непустая строка.');
+  if (!backend || (typeof backend !== 'object' && typeof backend !== 'function') || typeof backend.get !== 'function' || typeof backend.set !== 'function') throw new PetError('invalid-options', 'backend — объект с get(name) и set(name, text).');
+  if (backend.async !== undefined && typeof backend.async !== 'boolean') throw new PetError('invalid-options', 'backend.async — boolean.');
+  return shared(backend, namespace, () => {
+    const names = storageKeys(namespace);
+    const async = backend.async === true;
+    const platform = async
+      ? {
+          async: true,
+          get: async (key) => stored(await backend.get(names[key]), 'backend.get'),
+          set: async (key, value) => {
+            await backend.set(names[key], value);
+          },
+        }
+      : {
+          async: false,
+          get: (key) => {
+            const value = backend.get(names[key]);
+            if (thenable(value)) {
+              value.then(undefined, () => {});
+              throw new Error('backend.get вернул обещание — для асинхронного хранилища нужен async: true');
+            }
+            return stored(value, 'backend.get');
+          },
+          set: (key, value) => {
+            const done = backend.set(names[key], value);
+            if (thenable(done)) {
+              done.then(undefined, () => {});
+              throw new Error('backend.set вернул обещание — для асинхронного хранилища нужен async: true');
+            }
+          },
+        };
+    const coordinator = createCoordinator({ keys: STORAGE_NAMES, backend: platform });
+    const facade = Object.freeze({
+      get status() {
+        return coordinator.status;
+      },
+      load: () => coordinator.load(),
+    });
+    coordinators.set(facade, coordinator);
+    return facade;
+  });
 }
 
 const text = (value) => (value === null || value === undefined ? null : String(value));

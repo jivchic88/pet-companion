@@ -17,7 +17,8 @@
 // test/browser-storage.mjs; реакции и время на ядре (PL04.1, Р1 настоящими кнопками) — test/browser-life.mjs; присутствие,
 // виды и сценки на ядре (PL04.2, IndexedDB с управляемым шлюзом, две вкладки, сравнение с Node) — test/browser-presence.mjs;
 // комната и игра на ядре (PL04.3: жест, предметы, редактор, две вкладки, кормление у краёв, палец, сравнение с Node) —
-// test/browser-play.mjs. Часы —
+// test/browser-play.mjs; команды и события (PL05: прямые pet.* и pet.core → настоящий интерфейс, pet.core.destroy, повторное
+// подключение и прежний фасад) — test/browser-commands.mjs. Часы —
 // page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
 // установленный Google Chrome).
 import { readFile } from 'node:fs/promises';
@@ -27,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
+import { commandsQa } from './browser-commands.mjs';
 import { coreQa, freshQa } from './browser-core.mjs';
 import { lifeQa } from './browser-life.mjs';
 import { playQa } from './browser-play.mjs';
@@ -1120,6 +1122,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await lifeQa(browser, server.base, check, open, layout);
     await presenceQa(browser, server.base, check, open, layout);
     await playQa(browser, server.base, check, open, layout);
+    await commandsQa(browser, server.base, check, open, layout);
   } finally {
     await server.close();
   }

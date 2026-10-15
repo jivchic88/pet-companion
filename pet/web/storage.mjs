@@ -5,10 +5,10 @@
 // видимого pending нет. Событие storage другой вкладки — повторное чтение и сверка (newValue не используется), key ===
 // null — все ключи пространства. Слушатель storage — только пока есть открытые подключения.
 
-import { storageKeys } from '../core/formats/legacy.mjs';
+import { STORAGE_NAMES, storageKeys } from '../core/formats/legacy.mjs';
 import { createCoordinator, shared } from '../core/storage.mjs';
 
-export const WEB_KEYS = ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'];
+export const WEB_KEYS = STORAGE_NAMES;
 
 // Идентичность localStorage этой страницы в реестре координаторов.
 const PAGE = {};

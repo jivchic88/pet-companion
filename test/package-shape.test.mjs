@@ -1,6 +1,7 @@
-// Форма пакета без сборки и сети: одна версия (package.json = VERSION = README = CHANGELOG); публичные входы — только
-// mountPet, localDay, VERSION и три стиля; модуль замкнут (импорты — только относительные пути внутри pet/, в том числе
-// вложенные core/ и web/, без сети и динамических импортов); граф ядра pet/core/** — только pet/core/**; CSS без внешних
+// Форма пакета без сборки и сети: одна версия (package.json = VERSION ядра = README = CHANGELOG); публичные входы — только
+// mountPet, localDay, VERSION, вход ядра pet-companion/core (PL05: createPetCore, createStorage, PetError, localDay,
+// VERSION) и три стиля; модуль замкнут (импорты — только относительные пути внутри pet/, в том числе вложенные core/ и
+// web/, без сети и динамических импортов); граф ядра (pet/core.mjs и pet/core/**) — только pet/core/**; CSS без внешних
 // файлов, переменные темы с рабочими значениями; package.json без зависимостей и скриптов установки, exports и files
 // согласованы; пример README = example.html; ссылки руководства — только на файлы пакета; типы описывают те же экспорты,
 // у стилей — своя декларация без значений; лицензия заполнена; в файлах пакета нет следов приложения-источника.
@@ -8,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import * as Core from '../pet/core.mjs';
 import * as Pet from '../pet/pet.mjs';
 import * as R from '../pet/pet-rules.mjs';
 
@@ -36,12 +38,17 @@ test('версия одна: package.json = VERSION = README = CHANGELOG', async
   const heads = [...changelog.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
   const released = heads[0] === 'Не выпущено' ? heads[1] : heads[0];
   assert.match(released, new RegExp(`^${pkg.version.replace(/\./g, '\\.')} — \\d{4}-\\d{2}-\\d{2}$`), 'запись текущей версии в CHANGELOG');
-  for (const file of await runtime('.mjs')) if (file !== 'pet.mjs') assert.doesNotMatch(await read(`pet/${file}`), /VERSION = '\d/, `${file}: второй версии нет`);
+  // Одна константа — core/version.mjs (PL05: её отдают оба входа, pet-companion и pet-companion/core); второй нет.
+  assert.match(await read('pet/core/version.mjs'), new RegExp(`^export const VERSION = '${pkg.version.replace(/\./g, '\\.')}';$`, 'm'));
+  assert.equal(Core.VERSION, pkg.version);
+  for (const file of await runtime('.mjs')) if (file !== 'core/version.mjs') assert.doesNotMatch(await read(`pet/${file}`), /VERSION = '\d/, `${file}: второй версии нет`);
 });
 
-test('публичные входы: mountPet, localDay, VERSION; localDay — та же граница дня, что у модуля', () => {
+test('публичные входы: mountPet, localDay, VERSION; ядро (PL05) — createPetCore, createStorage, PetError, localDay, VERSION; localDay — одна граница дня', () => {
   assert.deepEqual(Object.keys(Pet).sort(), ['VERSION', 'localDay', 'mountPet']);
+  assert.deepEqual(Object.keys(Core).sort(), ['PetError', 'VERSION', 'createPetCore', 'createStorage', 'localDay']);
   assert.equal(Pet.localDay, R.localDay);
+  assert.equal(Core.localDay, Pet.localDay);
   assert.equal(Pet.localDay(new Date(2026, 9, 10, 23, 59, 59)), '2026-10-10');
   assert.equal(Pet.localDay(new Date(2026, 9, 11, 0, 0, 1)), '2026-10-11');
   assert.match(Pet.localDay(), /^\d{4}-\d{2}-\d{2}$/);
@@ -60,10 +67,10 @@ test('модуль замкнут: импорты — только относи�
   }
 });
 
-test('граф ядра: pet/core/** импортирует только pet/core/** — ни оболочки, ни рисунков, ни стилей, ни веб-адаптеров', async () => {
+test('граф ядра: вход pet/core.mjs и pet/core/** импортируют только pet/core/** — ни оболочки, ни рисунков, ни стилей, ни веб-адаптеров', async () => {
   const files = (await runtime('.mjs')).filter((file) => file.startsWith('core/'));
-  // Рекурсивно от входов ядра (экземпляр и координатор хранения — его берут адаптеры): всё достижимое — внутри core/;
-  // каждый файл core/ достижим (нет мёртвых модулей).
+  // Рекурсивно от входов ядра (публичный вход pet-companion/core; экземпляр и координатор хранения — их берут
+  // legacy-оболочка и веб-адаптеры): всё достижимое — внутри core/; каждый файл core/ достижим (нет мёртвых модулей).
   const seen = new Set();
   const walk = async (file) => {
     if (seen.has(file)) return;
@@ -73,12 +80,13 @@ test('граф ядра: pet/core/** импортирует только pet/cor
       await walk(resolved);
     }
   };
+  await walk('core.mjs');
   await walk('core/index.mjs');
   await walk('core/storage.mjs');
-  assert.deepEqual([...seen].sort(), files);
+  assert.deepEqual([...seen].filter((file) => file !== 'core.mjs').sort(), files);
   // Ядро без обращений к браузеру (исполнение проверяет test/core-globals.test.mjs с глобалами-ловушками). Сеть — вызов
   // fetch(…) или обращение .fetch / ["fetch"]; само слово fetch — имя сценки собаки «приносит мячик» (данные 0.1.4).
-  for (const file of files) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto)\b|\bfetch\s*\(|\.fetch\b|\[\s*['"]fetch['"]\s*\]/, file);
+  for (const file of ['core.mjs', ...files]) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto)\b|\bfetch\s*\(|\.fetch\b|\[\s*['"]fetch['"]\s*\]/, file);
   // PL04.1: время, случайность и задачи — только порты экземпляра; системные Date, Math.random и таймеры — в реализациях
   // портов по умолчанию (core/ports.mjs и местный день core/day.mjs), не в правилах и сессии.
   for (const file of files.filter((name) => !['core/ports.mjs', 'core/day.mjs'].includes(name))) {
@@ -102,8 +110,11 @@ test('package.json: без зависимостей и скриптов уста
   for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies']) assert.equal(pkg[field], undefined, field);
   for (const script of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack', 'preuninstall', 'uninstall', 'postuninstall']) assert.equal(pkg.scripts?.[script], undefined, script);
   assert.equal(pkg.type, 'module');
-  assert.deepEqual(Object.keys(pkg.exports), ['.', './pet.css', './dog.css', './pet-base.css', './package.json']);
+  // PL05: вход ядра ./core — только он; внутренние pet/core/**, pet/web/** и будущие входы (pets, behaviors, web, react,
+  // native, manifest) закрыты.
+  assert.deepEqual(Object.keys(pkg.exports), ['.', './core', './pet.css', './dog.css', './pet-base.css', './package.json']);
   assert.deepEqual(pkg.exports['.'], { types: './pet/pet.d.mts', default: './pet/pet.mjs' });
+  assert.deepEqual(pkg.exports['./core'], { types: './pet/core.d.mts', default: './pet/core.mjs' });
   assert.equal(pkg.main, './pet/pet.mjs');
   assert.equal(pkg.types, './pet/pet.d.mts');
   // Стиль: TypeScript берёт декларацию (условие types — первым), сборщик и Node — сам файл .css.
@@ -119,7 +130,7 @@ test('руководство: пример = example.html; импорты — и
   const example = /```html\n([\s\S]*?)\n```/.exec(readme)?.[1];
   assert.equal(await read('example.html'), `${example}\n`);
   assert.match(example, /^<!doctype html>[\s\S]*<meta name="viewport"[\s\S]*href="\.\/pet\/pet\.css"[\s\S]*from '\.\/pet\/pet\.mjs'[\s\S]*storage: '[\w-]+'[\s\S]*notify\('saved'/);
-  for (const [, spec] of readme.matchAll(/from '([^'.][^']*)'/g)) assert.equal(spec, pkg.name, `импорт ${spec}`);
+  for (const [, spec] of readme.matchAll(/from '([^'.][^']*)'/g)) assert.ok([pkg.name, `${pkg.name}/core`].includes(spec), `импорт ${spec}`);
   for (const [, spec] of readme.matchAll(/import '([^'.][^']*)'/g)) assert.ok([`${pkg.name}/pet.css`, `${pkg.name}/dog.css`, `${pkg.name}/pet-base.css`].includes(spec), spec);
   assert.ok(readme.includes(`npm install ${pkg.name}`), 'установка по имени пакета');
   for (const doc of ['README.md', 'CHANGELOG.md']) {
@@ -127,10 +138,12 @@ test('руководство: пример = example.html; импорты — и
   }
 });
 
-test('типы: pet.d.mts объявляет те же экспорты, что pet.mjs; css.d.mts — стиль без значений', async () => {
-  const types = await read('pet/pet.d.mts');
-  const declared = [...types.matchAll(/^export declare (?:const|function) (\w+)/gm)].map((match) => match[1]).sort();
-  assert.deepEqual(declared, Object.keys(Pet).sort());
+test('типы: pet.d.mts и core.d.mts объявляют те же экспорты значений, что pet.mjs и core.mjs; css.d.mts — стиль без значений', async () => {
+  const values = (text) => [...text.matchAll(/^export declare (?:const|function|class) (\w+)/gm)].map((match) => match[1]).filter((name, i, all) => all.indexOf(name) === i).sort();
+  assert.deepEqual(values(await read('pet/pet.d.mts')), Object.keys(Pet).sort());
+  assert.deepEqual(values(await read('pet/core.d.mts')), Object.keys(Core).sort());
+  // Декларация ядра не тянет DOM (ядро — и для Node без lib dom).
+  assert.doesNotMatch(strip(await read('pet/core.d.mts')), /\bHTML\w*Element\b|\bDocument\b|\bWindow\b|\bEvent\b/);
   // Ни default, ни имён классов (это не CSS Modules), ни declare module '*.css' для всего проекта сайта.
   assert.equal(strip(await read('pet/css.d.mts')).trim(), 'export {};');
 });

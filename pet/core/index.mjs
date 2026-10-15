@@ -1,6 +1,8 @@
-// Ядро питомца — срезы PL03, PL04.1, PL04.2 и PL04.3 (docs/ARCHITECTURE.md § 4–6, § 8, § 9, § 14.1): экземпляр без DOM —
-// своё состояние, команды, снимок и подписка, своё подключение к общему координатору хранения. Внутренний вход: публичного
-// pet-companion/core до PL05 нет, им пользуется legacy-фасад pet/pet.mjs и проверки. Импортирует только pet/core/**.
+// Ядро питомца — срезы PL03, PL04.1, PL04.2, PL04.3 и PL05 (docs/ARCHITECTURE.md § 4–6, § 8, § 9, § 14.1): экземпляр без DOM —
+// своё состояние, команды, снимок и подписка, своё подключение к общему координатору хранения. Внутренний экземпляр: им
+// пользуются legacy-фасад pet/pet.mjs (вместе со входами отображения setPlace, arrive, stopScene и признаками scene, pick)
+// и проверки; публичный вход pet-companion/core (pet/core.mjs) и pet.core — тот же экземпляр под фасадом facade.mjs.
+// Импортирует только pet/core/**.
 //
 // Ключи cat, companion, look, treat, presence, scene, room и place — здесь: имя, выбор кота или собаки, облик, аксессуар,
 // движение, реплики, «скрыт», увиденная ступень, день приветствия, день лакомства, присутствие, копия дня сценки,
@@ -17,7 +19,7 @@ import { describe, fail, PetError } from './errors.mjs';
 import { daysBetween, isDay } from './day.mjs';
 import * as Editor from './editor.mjs';
 import { catRecord, companionRecord, isRecord, keepRecord, lookRecord, MOTIONS, normalizeCompanion, normalizeLook, normalizeSettings, normalizeTreat, prefRecord, readRecord, TREAT_VERSION, unknownStage } from './formats/legacy.mjs';
-import { coatsOf, companionName, cleanName, KINDS, nameOffered, profileOf } from './pets.mjs';
+import { coatsOf, companionName, cleanName, KINDS, nameOffered, namePresets, profileOf } from './pets.mjs';
 import { playText } from './play.mjs';
 import { portProblem, systemClock, systemLog, systemRandom, systemScheduler } from './ports.mjs';
 import { normalizePresence, PRESENCE_MODES, presenceRecord } from './presence.mjs';
@@ -26,6 +28,7 @@ import * as Round from './round.mjs';
 import { normalizeScene, SCENES, sceneRecord } from './scenes.mjs';
 import { createSession, QUIET_REASONS, VIEW_IDS } from './session.mjs';
 import { ACCESSORIES, doneOutcome, progressInfo, stageGift, STAGES, stageToCelebrate, treatState, unlockedBetween, wornAccessory } from './stages.mjs';
+import { coordinatorOf } from './storage.mjs';
 import { TOYS } from './toys.mjs';
 
 export { PetError } from './errors.mjs';
@@ -86,12 +89,22 @@ function freeze(value) {
 const count = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 const summary = (list) => (list.includes('pending') ? 'pending' : list.every((item) => item === 'saved') ? 'saved' : list.includes('saved') ? 'partial' : 'failed');
 
+// Регистрация определений (pets, behaviors, docs/ARCHITECTURE.md § 7) — следующий этап (PL06): настройки не принимаются,
+// а не игнорируются молча.
+const LATER = ['pets', 'behaviors'];
+
 // Создание: синхронная проверка настроек → своё подключение к загруженному координатору → чтение подтверждённого. Без
-// записи, таймеров, вызова портов и слушателей. Ошибка проверки — PetError до подключения.
+// записи, таймеров, вызова портов и слушателей. Ошибка проверки — PetError до подключения. Внутренний экземпляр: им
+// пользуются legacy-отображение (pet/pet.mjs) и проверки; публичный — вход pet/core.mjs (тот же экземпляр под фасадом
+// facade.mjs: только публичные методы, поля результатов и снимка). storage — координатор: публичный (createStorage) или
+// внутренний (веб-координатор, тестовый).
 export function createPetCore(options) {
   if (!isRecord(options)) throw new PetError('invalid-options', 'Настройки ядра — объект.');
-  for (const key of Object.keys(options)) if (!OPTIONS.includes(key)) throw new PetError('invalid-options', `Неизвестная настройка: ${key}.`);
-  const { storage } = options;
+  for (const key of Object.keys(options)) {
+    if (LATER.includes(key)) throw new PetError('invalid-options', `${key}: регистрация определений ещё не поддерживается — питомцы встроены (кот и собака), модель поведения одна.`);
+    if (!OPTIONS.includes(key)) throw new PetError('invalid-options', `Неизвестная настройка: ${key}.`);
+  }
+  const storage = coordinatorOf(options.storage) ?? options.storage;
   if (!storage || typeof storage.connect !== 'function' || typeof storage.load !== 'function') throw new PetError('invalid-options', 'storage — координатор хранения (status, load, connect).');
   if (options.progress !== undefined && typeof options.progress !== 'function') throw new PetError('invalid-options', 'progress — функция.');
   if (options.scenes !== undefined && options.scenes !== null && !(typeof options.scenes === 'object' && typeof options.scenes.reserve === 'function')) throw new PetError('invalid-options', 'scenes — резервирование сценки (reserve(decide, show)) или null.');
@@ -681,16 +694,24 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   // Уголок виден (открыт не вызовом, возврат из «Поиграть» или редактора, новые знаки при открытом уголке) — новая
   // ступень отмечается увиденной: неявная запись cat.seenStage (повреждённое не заменяет), без праздника; непонятная этой
-  // версии ступень не отмечается. writes — правки команды (первое включение уже в них). Возвращает вещи, которые стали
-  // увиденными (для «Новое в уголке»).
+  // версии ступень не отмечается. writes — правки команды (первое включение уже в них). Возвращает отметку { stage, items,
+  // accessories } — вещи и аксессуары, ставшие увиденными (для «Новое в уголке»), или null; эффект seen — saw() после
+  // применения (PL05: прямая команда показывает «Новое» тем же путём, что кнопка).
   function seeStage(next, writes, m) {
-    if (m.unknown || !next) return [];
+    if (m.unknown || !next) return null;
     const first = writes.find((write) => write.key === 'cat' && 'seenStage' in write.fields);
     const seen = first ? first.fields.seenStage : m.cat.seenStage;
     const stage = progressInfo(next.marks, seen).stage;
-    if (stage <= seen) return [];
+    if (stage <= seen) return null;
     writes.push({ key: 'cat', fields: { seenStage: stage }, implicit: true });
-    return unlockedBetween(seen, stage, m.companion.kind).items;
+    const { items, accessories } = unlockedBetween(seen, stage, m.companion.kind);
+    return { stage, items, accessories };
+  }
+  // Отметка уже применена: эффект seen; результат команды — вещи (fresh).
+  function saw(mark) {
+    if (!mark) return [];
+    effects.push({ type: 'seen', stage: mark.stage, items: [...mark.items], accessories: [...mark.accessories] });
+    return mark.items;
   }
 
   // Питомец на виду (присутствие, «скрыт», открытый вид) и открытый вид — решение ядра (§ 6.4).
@@ -722,8 +743,9 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       const was = build();
       const next = readHost();
       const writes = firstSwitch(next);
-      const fresh = session.view().open === 'corner' ? seeStage(next, writes, memory()) : [];
+      const mark = session.view().open === 'corner' ? seeStage(next, writes, memory()) : null;
       apply(step, { next, writes });
+      const fresh = saw(mark);
       return { ok: true, changed: !same(was, build()), save: step.save, fresh };
     });
 
@@ -735,13 +757,17 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // экземпляре — без реакции (duplicate); в фоне решение то же
   // (числа, праздник с отметкой ступени, учёт key), но реакция не играет и не откладывается. «На виду» и открытый вид —
   // ядра (присутствие, «скрыт», view). После реакции — попытка редкой сценки (одна на событие, session.choose): ждёт конца
-  // реакции этого события. options.scene === false — без попытки (legacy-событие без key, Р2: в 0.1.4 у него сценки нет).
+  // реакции этого события. options.scene === false — без попытки (legacy-событие без key, Р2: в 0.1.4 у него сценки нет) —
+  // внутренняя граница legacy-фасада: только с ней key может быть пустым ('undefined', '' — String(detail.key) фасада).
+  // Публичное событие (PL05, фасад facade.mjs вызывает без options): detail — null или { key: непустая строка, counted?,
+  // hard?, first?: boolean } без других полей; failed — без подробностей. Любой ввод в строку не превращается.
   const notify = (type, detail, options) =>
     act('notify', (step) => {
       if (type !== 'saved' && type !== 'failed') return fail('invalid-argument', 'Событие — saved или failed.');
       if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'scene') && (options.scene === undefined || typeof options.scene === 'boolean'))) {
         return fail('invalid-argument', 'Настройки события — { scene?: boolean }.');
       }
+      if (type === 'failed' && detail !== undefined && detail !== null) return fail('invalid-argument', "notify('failed') — без подробностей.");
       const at = clock.now();
       const where = sight();
       if (type === 'failed') {
@@ -756,8 +782,10 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         return { ok: true, changed: false, save: report([]), reacted, reaction: null };
       }
       const flags = ['counted', 'hard', 'first'];
-      if (detail !== null && !(isRecord(detail) && typeof detail.key === 'string' && flags.every((flag) => detail[flag] === undefined || typeof detail[flag] === 'boolean'))) {
-        return fail('invalid-argument', 'detail — { key: строка, counted?, hard?, first?: boolean } или null.');
+      const legacy = options?.scene === false;
+      const known = (key) => key === 'key' || flags.includes(key);
+      if (detail !== null && !(isRecord(detail) && Object.keys(detail).every(known) && typeof detail.key === 'string' && (legacy || detail.key.length > 0) && flags.every((flag) => detail[flag] === undefined || typeof detail[flag] === 'boolean'))) {
+        return fail('invalid-argument', 'detail — { key: непустая строка, counted?, hard?, first?: boolean } или null.');
       }
       const was = build();
       const next = readHost();
@@ -785,12 +813,13 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         follow = { type: 'unlock', extra: { tryOn, mini, phrases: tryOn ? 'plaid' : 'unlock' } };
         told.push({ type: 'celebrate', stage: celebrate, items, accessories }, { type: 'announce', text: `${name}: открыта ступень «${STAGES[celebrate].title}» — ${stageGift(celebrate, kind, name).toLowerCase()}.` });
       }
-      const fresh = celebrate === null && where.view === 'corner' ? seeStage(next, writes, m) : [];
+      const mark = celebrate === null && where.view === 'corner' ? seeStage(next, writes, m) : null;
       // Первое занятие дня открыло лакомство — радость подсказывает про миску.
       const hint = !outcome.hard && treatState(next.day, m.treat.fedDay, next.today) === 'ready' && detail.first === true;
       const reaction = { type: outcome.hard ? 'support' : 'joy', key: `entry:${detail.key}`, extra: { ...(hint ? { phrases: 'joyTreat' } : {}), ...(follow ? { follow } : {}) } };
       apply(step, { next, writes });
       effects.push(...told);
+      const fresh = saw(mark);
       const { duplicate } = session.react(reaction.type, { key: reaction.key, extra: { ...reaction.extra, event: detail.key } });
       // Выбор сценки — после реакции (порядок random как 0.1.4: реплика, затем шанс и вариант).
       session.choose({ key: options?.scene === false ? '' : detail.key, outcome, stage, day: next.day, at }, sense());
@@ -847,8 +876,9 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       if (was === target) return { ...unchanged(), fresh: [] };
       const next = was === null ? readHost() : host;
       const writes = was === null ? firstSwitch(next) : [];
-      const fresh = target === 'corner' ? seeStage(next, writes, m) : [];
+      const mark = target === 'corner' ? seeStage(next, writes, m) : null;
       apply(step, { next, writes });
+      const fresh = saw(mark);
       // Редактор: черновик — из сохраняемой расстановки (выбрано место отдыха); уход из редактора отбрасывает черновик и
       // перенос без объявления.
       draft = null;
@@ -868,11 +898,11 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // увидена (неявная запись того же шага; fresh — её вещи); черновик и перенос отброшены.
   function toCorner(step) {
     const writes = [];
-    const fresh = seeStage(host, writes, memory());
+    const mark = seeStage(host, writes, memory());
     if (writes.length) apply(step, { writes });
     draft = null;
     session.openView('corner', 'pet', sense());
-    return fresh;
+    return saw(mark);
   }
 
   // Закрыть вид: «Поиграть» и редактор закрываются без сохранения, сценка отменена; «по зову» — питомец уходит и ничего
@@ -905,30 +935,39 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   const ownerOf = (m) => (m.companion.kind === 'dog' ? { key: 'companion', prefix: 'dog.', settings: m.companion.dog } : { key: 'cat', prefix: '', settings: m.cat });
 
-  // Имя. options.pick — выбор готового имени (кнопка подборки, предложение, «Оставить …»): ручное действие — сценка
-  // отменена окончательно (ждущая попытка и идущее резервирование — skip, и когда отклик не сыгран: пауза повтора), затем
-  // отклик named (пауза повтора 4 с), и когда имя не изменилось. Свободный ввод своего имени (без pick) — тихо, как 0.1.4
-  // (сценку отменяет ввод в поле, setContext). changed — имя или снимок изменились (отмена ждущей попытки, отклик).
-  // Временный внутренний вход до PL05.
+  // Имя (очистка cleanName; '' — «ещё не выбирали»). Выбор готового имени показанного питомца (подборка, предложение,
+  // «Оставить …»): ручное действие — сценка отменена окончательно (ждущая попытка и идущее резервирование — skip, и когда
+  // отклик не сыгран: пауза повтора), затем отклик named (пауза повтора 4 с) и объявление «Имя: …» (эффект announce), и
+  // когда имя не изменилось. Свободный ввод своего имени — тихо, как 0.1.4 (сценку отменяет ввод в поле, setContext).
+  // options.pick — внутренняя граница, не публичный параметр: 'preset' — публичное правило (фасад, кнопки отображения):
+  // готовое ли имя, решает ядро по списку показанного питомца; false (и без options) — свободный ввод в поле; true —
+  // выбор готового без проверки списка (проверки ядра). changed — имя или снимок изменились (отмена попытки, отклик).
+  const PICKS = [undefined, true, false, 'preset'];
   const setName = (value, options) =>
     act('setName', (step) => {
       if (typeof value !== 'string') return fail('invalid-argument', 'Имя — строка.');
-      if (options !== undefined && !(isRecord(options) && (options.pick === undefined || typeof options.pick === 'boolean'))) return fail('invalid-argument', 'Настройки имени — { pick?: boolean }.');
+      if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'pick') && PICKS.includes(options.pick))) return fail('invalid-argument', "Настройки имени — { pick?: boolean | 'preset' }.");
       const was = build();
       const name = cleanName(value);
-      const target = ownerOf(memory());
+      const m = memory();
+      const kind = m.companion.kind;
+      const target = ownerOf(m);
       const renamed = target.settings.name !== name;
+      const picked = options?.pick === true || (options?.pick === 'preset' && name !== '' && namePresets(kind).includes(name));
       if (renamed) apply(step, { writes: [{ key: target.key, fields: { [`${target.prefix}name`]: name } }] });
       let reacted = false;
-      if (options?.pick === true) {
+      // Отклик и объявление — только пока питомец на виду (как событие занятия): спрятанный или «по зову» и не вызванный
+      // (прямая команда хоста) получает имя тихо.
+      if (picked && session.around(sense())) {
         step.applied = true;
         reacted = session.manual('named').played;
+        effects.push({ type: 'announce', text: `Имя: ${companionName({ kind, name })}.` });
       }
       return renamed ? { ok: true, changed: true, save: step.save, reacted } : { ...unchanged(), changed: !same(was, build()), reacted };
     });
 
   // Другой питомец: прежний ничего не доигрывает (реакции, отложенная, облако, задачи — сессия), память событий, тишина и
-  // паузы повторов остаются; не спрятан — приветствие meet (пауза повтора 6 с).
+  // паузы повторов остаются; на виду (не спрятан; «по зову» — вызван) — приветствие meet (пауза повтора 6 с).
   const setPet = (id) =>
     act('setPet', (step) => {
       if (typeof id !== 'string') return fail('invalid-argument', 'Питомец — строка ID.');
@@ -938,7 +977,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       if (memory().companion.kind === id) return unchanged();
       apply(step, { writes: [{ key: 'companion', fields: { kind: id } }] });
       session.reconcile(sense());
-      const reacted = !memory().cat.hidden && session.react('meet').played;
+      const reacted = session.around(sense()) && session.react('meet').played;
       return { ok: true, changed: true, save: step.save, reacted };
     });
 
@@ -996,7 +1035,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       return { ok: true, changed: true, save: step.save };
     });
 
-  // ---------- входы отображения и жизненного цикла (§ 6.4; внутренние до PL05) ----------
+  // ---------- входы отображения и жизненного цикла (§ 6.4; публичные с PL05) ----------
 
   const bool = (value) => typeof value === 'boolean';
   const CONTEXT = ['focus', ...QUIET_REASONS];
@@ -1443,11 +1482,17 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
 
   const getState = () => closed;
 
-  function subscribe(listener, { initial = true } = {}) {
+  // Неверный слушатель или настройки — журнал и пустая отписка (подписки нет), без исключения.
+  function subscribe(listener, options) {
     if (typeof listener !== 'function') {
       warnQuiet('subscribe: слушатель — функция');
       return () => {};
     }
+    if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'initial') && (options.initial === undefined || typeof options.initial === 'boolean'))) {
+      warnQuiet('subscribe: настройки — { initial?: boolean }');
+      return () => {};
+    }
+    const initial = options?.initial ?? true;
     if (status === 'destroyed') {
       if (initial) Round.soon(() => call({ fn: listener }, { snapshot: closed, effects: [], reason: 'destroyed' }));
       return () => {};

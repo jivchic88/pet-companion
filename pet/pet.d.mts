@@ -1,6 +1,9 @@
-// Типы публичного интерфейса pet/pet.mjs (README, «Интерфейс»). Только описания: поведение — в pet.mjs.
+// Типы публичного интерфейса pet/pet.mjs (README, «Интерфейс»). Только описания: поведение — в pet.mjs. Команды, снимок и
+// подписка ядра — pet/core.d.mts (вход pet-companion/core).
 
-/** Версия модуля — та же, что у пакета (package.json). */
+import type { PetCommands, PetCore, PetSnapshot } from './core.mjs';
+
+/** Версия модуля — та же, что у пакета (package.json) и у входа `pet-companion/core`. */
 export declare const VERSION: string;
 
 /**
@@ -122,12 +125,24 @@ export interface PetSaved {
   first?: boolean;
 }
 
-export interface Pet {
+/**
+ * Экземпляр подключения. Legacy-методы `update`, `notify`, `open`, `close`, `destroy` — прежние сигнатуры, `undefined`.
+ * Остальные методы — команды ядра этого подключения (те же, что у `pet.core`; результат — `PetResult`); при отказе
+ * подключения — `{ ok: false, error: { code: 'destroyed' } }`, `getState()` — `null`, `subscribe` — без вызовов.
+ */
+export interface Pet extends Omit<PetCommands, 'getState'> {
   readonly version: string;
   /** Подключён ли этот экземпляр: `false` после отказа, `destroy()` или замены новым подключением. */
   readonly mounted: boolean;
   /** Открыт ли диалог питомца. */
   readonly opened: boolean;
+  /**
+   * Ядро этого подключения (`pet-companion/core`): `null` при отказе подключения; после отключения — тот же отключённый
+   * экземпляр (`status: 'destroyed'`). `pet.core.destroy()` отключает всё, как `pet.destroy()`.
+   */
+  readonly core: PetCore | null;
+  /** Снимок ядра; `null` при отказе подключения. */
+  getState(): PetSnapshot | null;
   /** Без аргумента — перечитать `progress()` и `step()`; с объектом — состояние страницы. */
   update(state?: PetPageState): void;
   /** `detail = null` — сохранённое действие не занятие: только перечитать числа. */

@@ -45,7 +45,9 @@ export async function coreQa(browser, base, check, open) {
     await page.evaluate(() => window.stand.mount({ storage: 'core1' }));
     await page.clock.runFor(3000);
     const pet = await page.evaluate(() => Object.keys(window.stand.pet).sort().join(','));
-    check(`${label}: у экземпляра прежние свойства — без pet.core и новых методов до PL05`, pet === 'close,destroy,mounted,notify,open,opened,update,version', pet);
+    // PL05: прежние свойства и legacy-методы на месте; добавлены pet.core и команды ядра (без входов отображения setVisible,
+    // setReducedMotion, activity, setDisplay и без start — их ведёт legacy-отображение).
+    check(`${label}: у экземпляра прежние свойства и методы плюс pet.core и команды ядра PL05 — ровно этот набор`, pet === 'close,core,destroy,feed,getState,hide,interact,mounted,notify,open,opened,refresh,room,setAppearance,setContext,setName,setPet,setPreferences,setPresence,show,stroke,subscribe,toy,update,version', pet);
     const status = await observe(page, 'core1');
     check(`${label}: второе ядро получает тот же координатор пространства — уже загруженный фасадом`, status === 'ready', status);
 

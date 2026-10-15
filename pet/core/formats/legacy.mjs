@@ -6,9 +6,12 @@ import { ACCESSORIES, STAGES } from '../stages.mjs';
 import { DAY_ONLY } from '../day.mjs';
 import { cleanName, coatOf, kindOf } from '../pets.mjs';
 
+// Восемь ключей пространства имён (все загружает координатор хранения); place — предпочтение legacy-отображения.
+export const STORAGE_NAMES = ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'];
+
 // Ключи в пространстве имён ns (options.storage сайта); v1 — версия формата данных, а не модуля.
 export const storageKeys = (ns = 'pet') => ({
-  ...Object.fromEntries(['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'].map((key) => [key, `${ns}:${key}:v1`])),
+  ...Object.fromEntries(STORAGE_NAMES.map((key) => [key, `${ns}:${key}:v1`])),
   db: `${ns}:scene`,
 });
 

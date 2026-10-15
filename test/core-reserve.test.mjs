@@ -487,8 +487,12 @@ test('готовое имя то же и в паузе повтора: откл�
   assert.deepEqual(L.seen.slice(seen).map((update) => [update.reason, update.snapshot.scene.waiting]), [['setName', null]]);
   await L.port.open('enter');
   assert.deepEqual([L.port.steps.slice(-2), L.days.days.size, L.raw('scene'), L.json('cat').name], [['decide null', '→ skip'], 0, null, 'Бублик']);
+  // PL05: объявление «Имя: …» — эффект ядра (до PL05 его делала кнопка отображения при каждом выборе, как 0.1.4): снимок
+  // прежний, changed — false, обновление — только с объявлением.
   const quiet = L.seen.length;
-  assert.deepEqual([L.core.setName('Бублик', { pick: true }).changed, L.seen.length - quiet], [false, 0], 'ничего не изменилось — ни changed, ни обновления');
+  const before = L.state();
+  assert.deepEqual([L.core.setName('Бублик', { pick: true }).changed, L.seen.length - quiet, L.state() === before], [false, 1, true], 'снимок не изменился — changed false');
+  assert.deepEqual(L.seen.at(-1).effects, [{ type: 'announce', text: 'Имя: Бублик.' }], 'обновление — только объявление имени');
 });
 
 test('отказ ручного входа (ok: false) — без побочных изменений: попытка цела, обновления нет, показ и день — как без него', async () => {

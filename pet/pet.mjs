@@ -8,11 +8,14 @@
 // черновик, перенос, сохранение, чужая расстановка), итоговая поза каждой поверхности и «устроился». Хранение — общий
 // координатор (web/storage.mjs), день сценки — веб-адаптер IndexedDB (web/scenes.mjs). Оболочка распознаёт события
 // страницы и указатель, объявляет ядру свои возможности (setDisplay), передаёт смысловые входы и показывает его снимок и
-// эффекты. Рисунки — cat-art.mjs, dog-art.mjs; места и раскладка — pet-place.mjs; перенос между местами — pet-move.mjs;
+// эффекты. С PL05 — pet.core (публичный экземпляр ядра, core/facade.mjs) и команды ядра на pet; кнопки и прямые команды
+// показываются одним путём — подпиской onCore по снимку (reflect, syncView); pet.core.destroy() снимает весь экземпляр.
+// Рисунки — cat-art.mjs, dog-art.mjs; места и раскладка — pet-place.mjs; перенос между местами — pet-move.mjs;
 // жест сцены — pet-play.mjs; миска и мячик на странице — pet-toys.mjs; комната на странице — pet-room.mjs. Хранит только
 // предпочтения в браузере; данных сайта не меняет; ошибки здесь сайту не мешают.
 
 import { bowlArt, bowlMiniSvg, bowlToySvg, catSvg, miniItemSvg, sceneCatBox, sceneSvg, yarnArt } from './cat-art.mjs';
+import { exposed } from './core/facade.mjs';
 import { createPetCore } from './core/index.mjs';
 import { ballArt, ballMiniSvg, ballToySvg, dogSvg, ropeArt } from './dog-art.mjs';
 import * as R from './pet-rules.mjs';
@@ -25,10 +28,11 @@ import { cancelStroke, hitsHtml, initPlay, release, strokeLost, watchStroke } fr
 import { draw as drawToys, initToys, mountToys, toyDragging, toyLost, unmountToys, watchToys } from './pet-toys.mjs';
 import { createWebScenes } from './web/scenes.mjs';
 import { createWebStorage } from './web/storage.mjs';
+import { VERSION } from './core/version.mjs';
 
-// Версия модуля — та же, что в package.json (npm version обновляет её здесь: scripts/sync-version.mjs; README и CHANGELOG
-// сверяет npm run check). Версии форматов данных — v1 в ключах (storageKeys).
-export const VERSION = '0.1.4';
+// Версия модуля — та же, что в package.json и у входа pet-companion/core: одна константа ядра (core/version.mjs; npm version
+// обновляет её там — scripts/sync-version.mjs). Версии форматов данных — v1 в ключах (storageKeys).
+export { VERSION };
 
 // Местная дата «ГГГГ-ММ-ДД» — граница дня лакомства и сценок; по ней сайт считает progress().today (README, «Интерфейс»).
 export const localDay = R.localDay;
@@ -70,7 +74,12 @@ const initial = () => ({
   mounted: false,
   abort: null, // снимает все слушатели при отключении
   core: null, // ядро этого подключения (createPetCore): все восемь ключей, решения, реакции, виды, игра и комната
-  mirror: null, // снимок ядра, по которому оболочка уже показана (изменение другой вкладки — разница с ним, onCore)
+  mirror: null, // снимок ядра, по которому оболочка уже показана (любое обновление — разница с ним, onCore → reflect)
+  booting: false, // идёт подключение: обновления ядра до первой отрисовки мест — только эффекты, без reflect
+  lost: null, // ядро отключили напрямую (pet.core.destroy()) — снять весь экземпляр, как pet.destroy()
+  intent: null, // кнопка, которой открывают диалог (openSheet до команды ядра open; без неё — видимый вход питомца)
+  closing: null, // { restore } закрытия, начатого отображением (closeSheet до команды ядра close; без него — с возвратом)
+  declared: null, // последнее объявление раскладки ядру ({ full, moving }, setDisplay)
   starting: false, // идёт core.start(): предупреждение ядра — причина отказа подключения (startError), а не журнал
   startError: null,
   storage: 'ok', // 'failed' — при подключении хранилище не прочиталось: до отключения ничего не читается и не пишется
@@ -174,12 +183,6 @@ function infoOf(state) {
   const p = state.progress;
   if (!p) return R.progressInfo(0);
   return { marks: p.marks, stage: p.stage, computed: p.computed, current: R.STAGES[p.stage], next: R.STAGES[p.stage + 1] ?? null, toNext: p.toNext };
-}
-
-// Команда ядра изменила настройки: показ оболочки — по снимку, подсказка о сохранении — по статусу ключей.
-function settingsChanged() {
-  ui.settings = readSettings();
-  syncStoreNote();
 }
 
 // Хранилище не прочиталось при подключении — изменения действуют только на этой странице (подсказки мест и облика).
@@ -402,9 +405,12 @@ function showMini() {
 const LEGACY_DISPLAY = { pets: ['cat', 'dog'], views: ['corner', 'play', 'room'], scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } };
 
 // Раскладка мест: целиком ли питомец на странице и идёт ли перенос (уголок целиком — смысл открытого вида, его учитывает
-// ядро).
+// ядро). Объявляется, только когда факт раскладки сменился: перерисовка по снимку команду не повторяет.
 function syncDisplay() {
-  ui.core.setDisplay({ full: ui.layout?.view === 'full', moving: moving() });
+  const next = { full: ui.layout?.view === 'full', moving: moving() };
+  if (ui.declared?.full === next.full && ui.declared?.moving === next.moving) return;
+  ui.declared = next;
+  ui.core.setDisplay(next);
 }
 
 // ---------- прогресс: знаки от сайта ----------
@@ -413,10 +419,10 @@ function syncDisplay() {
 const progress = () => ({ marks: 0, today: 0, ...O.progress?.() });
 
 // Знаки сайта, ступень и лакомство дня — заново в ядре (первое включение — молча, неявной записью ядра; открыт уголок —
-// новая ступень увидена, её вещи — для «Новое в уголке»), затем показ.
+// новая ступень увидена, её вещи — эффект seen для «Новое в уголке»), затем показ. Перечитывают действия отображения и
+// сайта (подключение, update(), «Показать», отказ кормления); перерисовка по снимку (reflect) счёт не перечитывает.
 function refreshInfo() {
-  const result = ui.core.refresh();
-  if (result.ok && result.fresh.length) ui.fresh = [...new Set([...ui.fresh, ...result.fresh])];
+  ui.core.refresh();
   showProgress();
 }
 
@@ -572,7 +578,9 @@ function renderReturn() {
   else button.setAttribute('aria-label', (button.title = returnLabel()));
 }
 
-function renderAll() {
+// Места заново по снимку (присутствие, раскладка, имя, облик). reread — ещё и перечитать счёт сайта (подключение); иначе
+// только показ снимка: перерисовка из подписки команд ядра не вызывает, кроме объявления сменившейся раскладки.
+function renderAll({ reread = false } = {}) {
   ui.presence = snap().presence.mode;
   ui.layout = layoutNow();
   markLayout();
@@ -584,7 +592,8 @@ function renderAll() {
   renderBar();
   renderReturn();
   ui.shownHidden = ui.settings.hidden;
-  refreshInfo();
+  if (reread) refreshInfo();
+  else showProgress();
   paint();
 }
 
@@ -640,7 +649,8 @@ function applyLayout({ explicit = false } = {}) {
     if (ui.float && ui.float.dataset.view !== hostView('float')) renderFloat();
     if (ui.bar && ui.bar.dataset.view !== hostView('bar')) renderBar();
     renderFace();
-    refreshInfo();
+    // Точка «новое» и подписи новых кнопок мест — по снимку.
+    showProgress();
     // Идущая реакция продолжается и на перерисованном месте: реплика и маленькая вещь.
     showSaying();
     showMini();
@@ -1023,16 +1033,14 @@ function syncPickers() {
   if (note && note.textContent !== coatNote()) note.textContent = coatNote();
 }
 
-// Выбрали облик: команда ядра (запись — его операция ключа look), показывается везде; фокус остаётся на выбранном
-// переключателе; объявление — по итогу записи.
+// Выбрали облик: команда ядра (запись — его операция ключа look); показ везде — по снимку (onCore → reflect, тот же путь,
+// что у прямой команды pet.setAppearance); фокус остаётся на выбранном переключателе; объявление — по итогу записи.
 function chooseCoat(value) {
   const kind = ui.kind;
   if (value === coat()) return;
   const result = ui.core.setAppearance({ coat: value });
   if (!result.ok) return;
-  ui.look = lookOf(snap());
   ui.core.activity();
-  applyCoat();
   announce(`Облик: ${R.coatTitle(kind, value).toLowerCase()}.${result.save.status === 'failed' ? ' Не сохранился в этом браузере — действует до перезагрузки.' : ''}`);
 }
 
@@ -1180,8 +1188,9 @@ function syncPresenceBox() {
   syncPlaceBox();
 }
 
-// Сменилось (здесь или в другой вкладке): места — тихо; открытый диалог, источник и черновик — как были, закрытый по
-// зову — без рисунка. Сценку, задачи покоя («на виду» — заново, ушёл — ничего не доигрывает) и запись решает ядро.
+// Сменилось (кнопкой, прямой командой или в другой вкладке — onCore → reflect): места — тихо; открытый диалог, источник и
+// черновик — как были, закрытый по зову — без рисунка. Сценку, задачи покоя («на виду» — заново, ушёл — ничего не
+// доигрывает) и запись решает ядро.
 function applyPresence() {
   cancelMove('presence');
   const focused = focusedControl();
@@ -1199,7 +1208,6 @@ function choosePresence(mode) {
   const result = ui.core.setPresence(mode);
   if (!result.ok) return;
   ui.core.activity();
-  applyPresence();
   announce(`${P.PRESENCES.find((item) => item.id === mode).title}.${result.save.status === 'failed' ? ' Не сохранилось в этом браузере — действует до перезагрузки.' : ''}`);
 }
 
@@ -1372,17 +1380,12 @@ function syncTreat({ focus = false } = {}) {
 }
 
 // «Покормить»: решение, запись и реакция «ест» → «доволен» — ядро (день заново, отметка до реакции — второго лакомства
-// нет; объявление — его эффект по итогу записи). Отказ (сегодня ещё нет занятия, уже угостили — другая вкладка,
-// полночь) — карточка по свежему счёту.
+// нет; объявление — его эффект по итогу записи). Карточка и поза — по снимку (onCore, как у прямой команды pet.feed);
+// фокус — на новом действии карточки. Отказ (сегодня ещё нет занятия, уже угостили — другая вкладка, полночь) — карточка
+// по свежему счёту сайта.
 function feed() {
   const result = ui.core.feed();
-  if (!result.ok) {
-    refreshInfo();
-    syncTreat({ focus: true });
-    paint();
-    return;
-  }
-  showProgress();
+  if (!result.ok) refreshInfo();
   syncTreat({ focus: true });
   paint();
 }
@@ -1402,14 +1405,13 @@ function syncNamePick({ chips = false, offer = false } = {}) {
   if (inside && box.hidden) (list.querySelector('[aria-pressed="true"]') ?? field)?.focus({ preventScroll: true });
 }
 
-// Готовое имя (или «Оставить …»): команда ядра (запись сразу); предложение исчезает, подборка — на странице выбранного,
-// фокус — на его кнопке. Короткий отклик, знаков нет.
+// Готовое имя (или «Оставить …»): тот же путь ядра, что публичный pet.setName (правило 'preset': отклик named с паузой
+// повтора 4 с и объявление «Имя: …» — ядро, и когда имя то же); имя везде — по снимку (onCore). Здесь — предложение
+// исчезает, подборка — на странице выбранного, фокус — на его кнопке. Знаков нет.
 function pickName(value) {
   const chosen = R.cleanName(value);
   if (!chosen) return;
-  // Выбор готового имени — отклик named в ядре (пауза повтора 4 с), и когда имя то же.
-  ui.core.setName(chosen, { pick: true });
-  settingsChanged();
+  ui.core.setName(chosen, { pick: 'preset' });
   const page = R.namePageOf(ui.kind, chosen);
   const turn = page !== ui.namePage;
   ui.namePage = page;
@@ -1418,7 +1420,6 @@ function pickName(value) {
   showName();
   const chip = [...(ui.sheet?.querySelectorAll('[data-cat-names] [data-cat-name-pick]') ?? [])].find((item) => item.dataset.catNamePick === chosen);
   if (chip && document.activeElement !== chip) chip.focus({ preventScroll: true });
-  announce(`Имя: ${name()}.`);
 }
 
 // «Другие имена»: следующая страница подборки по кругу; фокус остаётся на этой кнопке.
@@ -1457,47 +1458,75 @@ function syncKindNames() {
   }
 }
 
-// Открытие — команда ядра open до разметки. source (до закрытия): pet — уголок (облик и счёт перечитаны, новая ступень
-// увидена — ядро; её вещи подсвечены в сцене и «Новое в уголке»); call — сразу «Поиграть», вид до showModal, без отметки
-// ступени, приветствия и движения «заметил гостя». Реплика вида по позе до пробуждения, пробуждение, задачи покоя (по зову
-// — все, пока вызван) и отмена сценки — ядро; здесь — разметка, фокус, прокрутка, aria-expanded.
+// Открытие кнопкой — команда ядра open (кнопка-источник — для возврата фокуса); разметку рисует подписка (openMarkup), как
+// при прямой команде pet.core.open. source (до закрытия): pet — уголок; call — сразу «Поиграть».
 function openSheet(opener, source = 'pet') {
   if (!ui.sheet || ui.sheet.open || ui.settings.hidden) return;
+  // Диалог уже закрыл браузер (Esc), а его событие close ещё не пришло: сначала то же закрытие вида ядром, затем открытие.
+  if (ui.sheetOpen) closeSheet({ restore: false });
   cancelMove('sheet');
-  const call = source === 'call';
-  const opened = ui.core.open(call ? 'play' : 'corner', { source });
-  if (!opened.ok) return;
-  ui.opener = opener;
-  // Облик и счёт — по снимку ядра (изменение другой вкладки ядро уже поглотило; подсказка о сохранении верна).
+  ui.intent = { opener };
+  try {
+    ui.core.open(source === 'call' ? 'play' : 'corner', { source });
+  } finally {
+    ui.intent = null;
+  }
+}
+
+// Вид открыт ядром (кнопкой или прямой командой open): облик и счёт перечитаны ядром, новая ступень уголка увидена (её
+// вещи — эффект seen: подсветка в сцене и «Новое в уголке»); «Поиграть» и редактор из закрытого — вид до showModal, уголок
+// под ними скрыт (его новое ядро отметит при возврате), без приветствия и движения «заметил гостя» при вызове. Реплика вида
+// по позе до пробуждения, пробуждение, задачи покоя и отмена сценки — ядро; здесь — разметка, фокус, прокрутка (диалог
+// модальный: страница под ним не прокручивается — html.cat-open), aria-expanded. Кнопка возврата фокуса — открывшая
+// (ui.intent) или видимый вход питомца (прямая команда).
+function openMarkup(state) {
+  const want = state.view.open;
+  cancelMove('sheet');
+  ui.opener = ui.intent?.opener ?? openers().find(shown) ?? null;
+  // Облик — по снимку ядра (изменение другой вкладки ядро уже поглотило; подсказка о сохранении верна).
   const was = coat();
-  ui.look = lookOf(snap());
+  ui.look = lookOf(state);
   if (coat() !== was) applyCoat();
   showProgress();
   ui.sheetOpen = true;
+  const fresh = want === 'corner' ? ui.fresh : unseenItems();
   ui.fresh = [];
-  // Вызов: уголок скрыт — его новое (ещё не увиденное) ядро отметит при возврате в уголок.
-  renderSheet(call ? unseenItems() : opened.fresh);
+  renderSheet(fresh);
   ui.sheetY = window.scrollY;
   document.documentElement.classList.add('cat-open');
   for (const button of openers()) button.setAttribute('aria-expanded', 'true');
-  if (call) {
-    enterPlay();
+  if (want === 'play') {
+    playMarkup();
     ui.playY = 0;
+  } else if (want === 'room') {
+    roomMarkup();
+    ui.roomY = 0;
   }
   ui.sheet.showModal();
   // Прокрутку закрытого уголка браузер помнит — новое открытие сверху, со сценой.
   ui.sheet.querySelector('[data-cat-body]').scrollTop = 0;
-  ui.sheet.querySelector(call ? '[data-cat-play-close]' : '[data-cat-close]').focus();
+  ui.sheet.querySelector(want === 'play' ? '[data-cat-play-close]' : want === 'room' ? '[data-room-pick="rest"]' : '[data-cat-close]')?.focus();
 }
 
-// Закрытие — один раз: событие close после закрытия кодом (переход, скрытие) уже ничего не делает и не возвращает
-// фокус и прокрутку. Esc закрывает сам диалог — тогда close приходит первым и возвращает их.
+// Закрытие отображением (кнопка, Esc, затемнение, переход, перенос, legacy pet.close) — команда ядра close, разметку
+// снимает подписка (closeMarkup) с этим restore; прямая команда pet.core.close — с возвратом фокуса и прокрутки. Закрытие —
+// один раз: событие close после закрытия кодом уже ничего не делает. Ядро уже закрыло вид само — разметка вслед.
 function closeSheet({ restore = true } = {}) {
   if (!ui.sheet || !ui.sheetOpen) return;
-  // Ядро: вид закрыт, сценка отменена; по зову питомец ушёл — ничего не доигрывает и не ждёт вызова.
-  ui.core.close();
-  leavePlay({ restore: false });
-  leaveRoom({ restore: false });
+  ui.closing = { restore };
+  try {
+    ui.core.close();
+  } finally {
+    ui.closing = null;
+  }
+  if (ui.sheetOpen) closeMarkup({ restore });
+}
+
+// Вид закрыт ядром: «Поиграть» и редактор сняты, диалог закрыт; по зову питомец ушёл — рисунка нет. restore — фокус на
+// открывшую кнопку (или питомца на новом месте) и прежняя прокрутка страницы.
+function closeMarkup({ restore = true } = {}) {
+  unplayMarkup({ restore: false });
+  unroomMarkup({ restore: false });
   ui.sheetOpen = false;
   ui.fresh = [];
   if (ui.sheet.open) ui.sheet.close();
@@ -1513,6 +1542,26 @@ function closeSheet({ restore = true } = {}) {
   // Место могло смениться, пока уголок был открыт, — тогда фокус на питомце на новом месте.
   const target = ui.opener?.isConnected && shown(ui.opener) ? ui.opener : fallbackFocus();
   target?.focus({ preventScroll: true });
+}
+
+// Открытый вид ядра → разметка диалога (каждое обновление; переданный слушателю снимок мог устареть — берётся
+// getState()). Закрыт — диалог закрыт; открыт из закрытого — диалог с нужным видом; смена вида — снять прежний («Поиграть»,
+// редактор; возврат в уголок — фокус на его кнопку и прежняя прокрутка уголка), разметить новый. Команд не вызывает.
+function syncView(state) {
+  if (!ui.sheet) return;
+  const want = state.view.open;
+  if (want === null) {
+    if (ui.sheetOpen) closeMarkup({ restore: ui.closing?.restore ?? true });
+    return;
+  }
+  if (!ui.sheetOpen) {
+    openMarkup(state);
+    return;
+  }
+  if (want !== 'play' && ui.play) unplayMarkup({ restore: want === 'corner' });
+  if (want !== 'room' && ui.room) unroomMarkup({ restore: want === 'corner' });
+  if (want === 'play' && !ui.play) playMarkup();
+  if (want === 'room' && !ui.room) roomMarkup();
 }
 
 // ---------- сцена «Поиграть» ----------
@@ -1570,14 +1619,19 @@ function renderPlay() {
   if (focus) (view.querySelector(`[${focus}]`) ?? view.querySelector('[data-cat-play-pet]')).focus({ preventScroll: true });
 }
 
-// Вызов входит сюда до showModal.
+// «Поиграть» кнопкой уголка — команда ядра open('play'): «Поиграть» будит, сценка отменена, предметы на исходных местах;
+// разметку рисует подписка (playMarkup), как при прямой команде.
 function enterPlay() {
   if (!ui.sheetOpen || ui.play || ui.settings.hidden) return;
-  // Вид — ядру: «Поиграть» будит, сценка отменена, предметы на исходных местах (при вызове вид уже открыт — без изменений).
-  if (!ui.core.open('play').ok) return;
+  ui.core.open('play');
+}
+
+// Вид «Поиграть» открыт ядром (вызов входит сюда до showModal). Сначала вид сцены, затем разметка: пол меряется по
+// настоящим рамкам сразу (pet-toys.mjs).
+function playMarkup() {
+  if (ui.play) return;
   ui.playY = ui.sheet.querySelector('[data-cat-body]').scrollTop;
   ui.play = true;
-  // Сначала вид сцены, затем разметка: пол меряется по настоящим рамкам сразу (pet-toys.mjs).
   ui.sheet.dataset.view = 'play';
   renderPlay();
   ui.sheet.setAttribute('aria-labelledby', 'cat-play-title');
@@ -1585,10 +1639,17 @@ function enterPlay() {
   paint();
 }
 
-// Назад в уголок: жест и подсказка снимаются, сцена очищается (рисунка и обработчиков не остаётся). restore — вид ядра
-// «уголок» (новая ступень увидена — ядро; в том числе после вызова по зову), фокус на «Поиграть» и прежняя прокрутка
-// уголка; без него — уголок закрывают целиком (вид закрыло ядро в closeSheet).
-function leavePlay({ restore = true } = {}) {
+// Назад в уголок кнопкой («Уголок» после вызова, «Закрыть» и Esc из уголка) — команда ядра open('corner'): уголок снова
+// виден, новая ступень увидена (в том числе после вызова по зову); разметку снимает подписка (unplayMarkup).
+function leavePlay() {
+  if (!ui.play) return;
+  ui.core.open('corner');
+}
+
+// «Поиграть» больше не открыта: жест и подсказка снимаются, сцена очищается (рисунка и обработчиков не остаётся).
+// restore — возврат в уголок: точка «новое» по снимку, фокус на «Поиграть» и прежняя прокрутка уголка; без него — диалог
+// закрывают целиком или открывают другой вид.
+function unplayMarkup({ restore = true } = {}) {
   if (!ui.play) return;
   cancelStroke('close');
   unmountToys('close');
@@ -1597,16 +1658,11 @@ function leavePlay({ restore = true } = {}) {
   delete ui.sheet.dataset.view;
   ui.sheet.setAttribute('aria-labelledby', 'cat-sheet-title');
   ui.sheet.querySelector('[data-cat-play-view]').innerHTML = '';
-  if (restore) backToCorner();
+  if (restore) showProgress();
   paint();
   if (!restore) return;
   ui.sheet.querySelector('[data-cat-body]').scrollTop = ui.playY;
   ui.sheet.querySelector('[data-cat-play]')?.focus({ preventScroll: true });
-}
-
-// Возврат из «Поиграть» или редактора: уголок снова виден — ядру (open('corner')); точка «новое» гаснет.
-function backToCorner() {
-  if (ui.core.open('corner').ok) showProgress();
 }
 
 // «Закрыть», Esc, затемнение: вызванная — к странице, из уголка — в уголок.
@@ -1639,10 +1695,10 @@ function syncPlay() {
   drawToys();
 }
 
-// Кнопки сцены и клавиатура — прямые действия ядру (interact): итог, объявление и лимит — ядро.
+// Кнопки сцены и клавиатура — прямые действия ядру (interact): итог, объявление и лимит — ядро; сцена — по снимку
+// (onCore → syncPlay), как у прямой команды pet.interact.
 function playAct(action) {
   ui.core.interact(action);
-  syncPlay();
 }
 
 // Нажатие на питомца без движения — не поглаживание: подсказка коротко выделяется (подсветка — таймер отображения).
@@ -1762,10 +1818,16 @@ function renderRoom() {
   if (had) (view.querySelector(`[${had.name}="${had.value}"]`) ?? view.querySelector(`[data-room-pick="${draftNow()?.pick}"]`))?.focus({ preventScroll: true });
 }
 
+// «Обустроить уголок» кнопкой — команда ядра open('room'): редактор будит, сценка отменена, черновик — из сохраняемой
+// расстановки; разметку рисует подписка (roomMarkup), как при прямой команде.
 function enterRoom() {
   if (!ui.sheet?.open || ui.play || ui.room || ui.settings.hidden) return;
-  // Вид — ядру: редактор будит, сценка отменена, черновик — из сохраняемой расстановки.
-  if (!ui.core.open('room').ok) return;
+  ui.core.open('room');
+}
+
+// Вид редактора открыт ядром (из уголка или прямой командой из закрытого — до showModal).
+function roomMarkup() {
+  if (ui.room) return;
   ui.roomY = ui.sheet.querySelector('[data-cat-body]').scrollTop;
   ui.room = true;
   ui.sheet.dataset.view = 'room';
@@ -1774,9 +1836,9 @@ function enterRoom() {
   ui.sheet.querySelector('[data-room-pick="rest"]').focus();
 }
 
-// Разметка редактора снята (ядро уже вышло из него: сохранение, отмена, другой питомец, закрытие): перенос указателем
-// отпущен, комната уголка — по сохраняемой; restore — фокус на входе и прокрутка уголка.
-function leaveRoom({ restore = true } = {}) {
+// Разметка редактора снята (ядро уже вышло из него: сохранение, отмена, другой питомец, закрытие, другой вид): перенос
+// указателем отпущен, комната уголка — по сохраняемой; restore — фокус на входе и прокрутка уголка.
+function unroomMarkup({ restore = true } = {}) {
   if (!ui.room) return;
   Room.cancelArrange('close');
   ui.room = false;
@@ -1800,48 +1862,38 @@ function roomDone(text) {
   later('room-done', 4000, () => (done.hidden = true));
 }
 
-// «Сохранить» — ядру: идущий перенос не дописывается; без изменений или записано — выход в уголок с итогом; отказ —
-// редактор открыт, черновик цел, сообщение об ошибке (снимок).
+// «Сохранить» — ядру (тот же путь, что прямая команда pet.room.save): идущий перенос не дописывается; без изменений или
+// записано — ядро выходит в уголок (разметка и итог над сценой — подписка, onCore); отказ — редактор открыт, черновик цел,
+// сообщение об ошибке (снимок).
 function saveRoom() {
   if (!ui.room) return;
   Room.cancelArrange('save');
-  const result = ui.core.room.save();
-  if (!result.ok) return;
-  if (!result.closed) {
-    paintDraft();
-    return;
-  }
-  leaveRoom();
-  roomDone(result.text);
+  ui.core.room.save();
 }
 
-// «Отмена», Esc, затемнение: черновик отброшен (ядро), комната — сохраняемая.
+// «Отмена», Esc, затемнение: черновик отброшен, вид — уголок (ядро; разметка — подписка).
 function cancelRoom() {
   if (!ui.room) return;
   Room.cancelArrange('close');
   ui.core.room.cancel();
-  leaveRoom();
 }
 
-// Обычная расстановка — в черновик ядра (постоянной — после «Сохранить»).
+// Обычная расстановка — в черновик ядра (постоянной — после «Сохранить»); черновик на рисунке — по снимку.
 function resetRoom() {
   if (!ui.room) return;
   Room.cancelArrange('reset');
   ui.core.room.reset();
-  paintDraft();
 }
 
 function pickRoom(id) {
   if (!ui.room || Room.arranging()) return;
   ui.core.room.select(id);
-  paintDraft();
 }
 
 // Кнопка или стрелка: шаг ядра (итог и упор объявляет ядро).
 function moveRoom(dir) {
   if (!ui.room || Room.arranging()) return;
   ui.core.room.nudge(dir);
-  paintDraft();
 }
 
 // Стрелки — только с фокусом на кнопках предметов и направлений.
@@ -1879,24 +1931,21 @@ const roomHooks = {
 // «Скрыть»: ядро закрывает вид, снимает реакции, облако, сценку и все свои задачи (с полуночью), но помнит обработанные
 // события, причины тишины и паузы повторов до отключения (исправление Р1). Здесь — закрытие диалога, места, таймеры показа
 // (проверка конца ввода остаётся), объявление (называет свою кнопку «Показать …» и texts.back сайта) и фокус.
+// Закрытие диалога без возврата и места «спрятан» — подписка (onCore → setShown), как при прямой команде pet.hide.
 function hideCat() {
   cancelMove('hide');
   ui.core.hide();
-  settingsChanged();
-  closeSheet({ restore: false });
-  clearSheet();
   stopDecor();
-  renderAll();
   announce(`${name()} спрятан. Вернуть — «${returnLabel()}»${T.back}.`);
   fallbackFocus()?.focus({ preventScroll: true });
 }
 
 // «Показать»: поверхность по присутствию (по зову — лапка, игра не открывается), покой и полночь заново — ядро (без
-// приветствия); здесь — места, фокус, объявление.
+// приветствия); места — подписка (как при прямой команде pet.show); здесь — знаки сайта заново (пока питомец спрятан,
+// update() ничего не делает — как 0.1.4), фокус, объявление.
 function showCat() {
   ui.core.show();
-  settingsChanged();
-  renderAll();
+  refreshInfo();
   const owner = ui;
   const focusCat = () => ui === owner && ui.mounted && fallbackFocus()?.focus({ preventScroll: true });
   // «Показать …» в открытом диалоге сайта: тот при закрытии возвращает фокус на свою кнопку — питомец получает его после.
@@ -1909,13 +1958,12 @@ function showCat() {
 }
 
 // Имя — команда ядра на каждый ввод (очистка и запись — ядро): декоративные таймеры её не отменят, а закрытие уголка не
-// ждёт отложенной записи.
+// ждёт отложенной записи. Свой ввод — тихо, и когда совпал с готовым именем (внутренний pick: false, как 0.1.4); имя
+// везде — по снимку (onCore → showName).
 function onSheetInput(event) {
   const field = event.target;
   if (field.name !== 'cat-name') return;
-  ui.core.setName(field.value);
-  settingsChanged();
-  showName();
+  ui.core.setName(field.value, { pick: false });
 }
 
 // Имя везде согласованно: заголовок уголка и сцены, подпись в боковой панели, доступные имена кнопок.
@@ -1937,7 +1985,8 @@ function showName() {
     syncKindNames();
     syncNamePick();
   }
-  refreshInfo();
+  // Подписи кнопок мест с именем — по снимку.
+  showProgress();
 }
 
 // Имя здесь не сохраняется: оно уже сохранено на каждый ввод, а change при уходе из поля переписал бы устаревшим текстом
@@ -1955,20 +2004,14 @@ function onSheetChange(event) {
   } else if (field.name === 'cat-view' && field.checked) {
     chooseView(field.value);
   } else if (field.name === 'cat-acc' && field.checked) {
+    // Аксессуар на портретах и рисунках — по снимку (onCore), как у прямой команды pet.setAppearance.
     ui.core.setAppearance({ accessory: field.value });
-    settingsChanged();
-    syncPickerAcc();
-    paint();
   } else if (field.name === 'cat-motion' && field.checked) {
-    // Новый режим: сценка отменена, интервалы покоя заново — ядро; здесь поза и режим рисунков.
+    // Новый режим: сценка отменена, интервалы покоя заново — ядро; поза и режим рисунков — по снимку.
     ui.core.setPreferences({ motion: field.value });
-    settingsChanged();
-    paint();
   } else if (field.name === 'cat-phrases') {
-    // Выключены — облако и реплика вида исчезают (ядро).
+    // Выключены — облако и реплика вида исчезают (ядро; показ — по снимку).
     ui.core.setPreferences({ phrases: field.checked });
-    settingsChanged();
-    render();
   }
 }
 
@@ -1997,11 +2040,9 @@ function onReducedChange() {
 // ---------- выбор напарника ----------
 
 // Выбрали в уголке: команда ядра (другие вкладки переключатся тоже); прежний не доигрывает, новый здоровается (meet) —
-// ядро.
+// ядро; показ нового — подписка (onCore → switchKind), как при прямой команде pet.setPet.
 function chooseKind(kind) {
   if (kind === ui.kind || !ui.core.setPet(kind).ok) return;
-  settingsChanged();
-  applyShown(kind);
   // Фокус — на выбранном (переключатель перерисован вместе с уголком): Tab и стрелки работают дальше.
   ui.sheet?.querySelector('input[name="cat-kind"]:checked')?.focus({ preventScroll: true });
 }
@@ -2023,11 +2064,15 @@ function dropShown() {
   stopDecor();
 }
 
-// Спрятали или вернули (возможно, вместе со сменой вида) в другой вкладке: места целиком по сохранённому, без
-// приветствия, объявлений и записей. Спрятан — уголок закрыт, мест и рисунков нет; вернули — выбранный напарник везде.
+// Спрятали или вернули (возможно, вместе со сменой вида) — кнопкой, прямой командой или в другой вкладке: места целиком
+// по снимку, без приветствия, объявлений и записей. Спрятан — диалог закрыт без возврата (вид закрыло ядро), мест и
+// рисунков нет; вернули — выбранный напарник везде.
 function setShown(kind, next) {
   cancelMove('hide');
-  if (next.hidden) closeSheet({ restore: false });
+  // Фокус был в диалоге, который закрывается (прямая команда pet.hide или другая вкладка при открытом уголке), — не в
+  // никуда: на «Показать …» (кнопка «Скрыть» уголка ставит его сама).
+  const inside = Boolean(next.hidden && ui.sheetOpen && ui.sheet?.contains(document.activeElement));
+  if (next.hidden && ui.sheetOpen) closeMarkup({ restore: false });
   // После закрытия уголка фокус у кнопки, которая его открыла, — её тоже перерисуют.
   const focused = focusedControl();
   dropShown();
@@ -2036,6 +2081,8 @@ function setShown(kind, next) {
   clearSheet();
   renderAll();
   keepFocus(focused);
+  const active = document.activeElement;
+  if (inside && (!active || active === document.body || !shown(active))) fallbackFocus()?.focus({ preventScroll: true });
 }
 
 // Показать другого напарника при неизменном «скрыт»: прогресс, знаки и общие настройки те же — смена не даёт знаков и
@@ -2044,8 +2091,8 @@ function switchKind(kind, next) {
   if (!R.KINDS.includes(kind) || kind === ui.kind) return;
   cancelMove('kind');
   release('kind');
-  // Редактор закрывается без сохранения черновика.
-  leaveRoom();
+  // Редактор закрывается без сохранения черновика (ядро уже вышло из него в уголок).
+  unroomMarkup();
   const memo = sheetMemo();
   dropShown();
   ui.kind = kind;
@@ -2063,7 +2110,7 @@ function switchKind(kind, next) {
     renderFace();
     renderReturn();
   }
-  refreshInfo();
+  showProgress();
   if (memo) restoreSheet(memo);
   else clearSheet();
   if (ui.play) renderPlay();
@@ -2175,35 +2222,87 @@ function onVisibility() {
   paint();
 }
 
-// Что из снимка показывает оболочка по ключам ядра: облик, лакомство, присутствие, место и вид (ключ place), настройки
+// Что из снимка показывает оболочка: облик, лакомство, счёт и ступень, присутствие, место и вид (ключ place), настройки
 // (напарник, «скрыт», имена, аксессуары, движение, реплики, увиденная ступень, сохранность).
 function views(state) {
   return {
     look: JSON.stringify([lookOf(state), state.save.look]),
-    treat: JSON.stringify([state.treat, state.save.treat]),
+    treat: JSON.stringify([state.treat, state.save.treat, state.progress]),
     presence: JSON.stringify([state.presence.mode, state.save.presence]),
     place: JSON.stringify([state.place, state.save.place]),
     settings: JSON.stringify([state.pet, ...['cat', 'dog'].map((kind) => [state.pets[kind].name, state.pets[kind].accessory]), state.prefs, state.presence.hidden, state.progress?.seenStage, state.progress?.seenKnown, state.save.cat, state.save.companion]),
   };
 }
 
+// Отображение догоняет снимок ядра — после любой команды (кнопки отображения, прямые pet.* и pet.core.* хоста), задачи ядра
+// и изменения хранилища (другая вкладка, найденное сверкой перед командой, § 5.5, шаг 1а): один путь правил — ядро, здесь
+// только показ. Тихо (без объявлений и переноса фокуса, кроме исчезнувшего): облик; карточка лакомства, знаки и ступень
+// открытого уголка («Новое в уголке» — по эффекту seen); присутствие (места; открытый диалог и черновик — как были);
+// другой напарник или «скрыт»; имя, аксессуар, движение, реплики; открытый вид. Место и вид legacy-раскладки (ключ place)
+// публичной командой не меняются: по снимку — только изменение другой вкладки (своё показывает выбор места, с
+// «устроился»). Команд ядра не вызывает, кроме объявления сменившейся раскладки (syncDisplay). was — снимок, по которому
+// оболочка уже показана; state — текущий (getState(): переданный слушателю мог устареть).
+function reflect(was, state, reason) {
+  const shown = views(was);
+  const now = views(state);
+  if (shown.look !== now.look) {
+    ui.look = lookOf(state);
+    applyCoat();
+  }
+  if (shown.treat !== now.treat && !ui.settings.hidden) {
+    showProgress();
+    syncSheet();
+    paint();
+  }
+  if (shown.presence !== now.presence) {
+    if (state.presence.mode !== ui.presence) applyPresence();
+    else syncPresenceBox();
+  }
+  // Во время переноса между местами — после него (onMoveEnd).
+  if (reason === 'storage' && shown.place !== now.place) {
+    ui.place = readPlace();
+    applyLayout();
+  }
+  if (shown.settings !== now.settings) {
+    syncStoreNote();
+    // Другой напарник, «скрыт» или «показан» — места и открытый уголок заново (applyShown).
+    if (!applyShown()) {
+      ui.settings = readSettings();
+      showName();
+      // Облако и реплика вида, сценка и покой — ядро, показ — здесь.
+      render();
+      // Открытый уголок согласован с сохранённым: переключатели, имя, аксессуар на портретах, ступень (seenStage).
+      syncControls();
+      syncPickerAcc();
+      syncSheet();
+    }
+  }
+  syncView(state);
+}
+
 // Обновление ядра — каждое (команда, сработавшая задача ядра, изменение хранилища): поза, облако, вещь рядом и реплика вида
-// — по снимку (render); новая реакция с той же позой в «Поиграть» — её движения заново (data-again). Эффекты: объявления
-// (кормление, праздник ступени), предупреждение о повреждённом значении ключа при загрузке, одиночное движение покоя
-// (micro). Редкая сценка — реакция ядра (data-scene по снимку). Изменение другой вкладки, поглощённое ядром (reason
-// 'storage', docs/ARCHITECTURE.md § 8.6), — ещё и тихо, как прежнее событие storage: облик, карточка лакомства,
-// присутствие (места; открытый диалог и черновик — как были), другой напарник или «скрыт», имя, движение, открытый уголок
-// (следствия для реакций, задач, вида и сценки — ядро). Так же приходит сохранённое до команды и найденное её сверкой
-// (§ 5.5, шаг 1а). Остальное своё оболочка показывает после вызова.
+// — по снимку (render); новая реакция с той же позой в «Поиграть» — её движения заново (data-again); остальное показанное
+// — reflect. Эффекты: объявления (кормление, праздник ступени, имя, комната), вещи новой увиденной ступени (seen — «Новое в
+// уголке»), предупреждение о повреждённом значении ключа при загрузке, одиночное движение покоя (micro), «устроился»
+// (arrive). Редкая сценка — реакция ядра (data-scene по снимку). Ядро отключили напрямую (pet.core.destroy(), в том числе
+// из порта или слушателя) — экземпляр снимается целиком, как pet.destroy() (lost).
 function onCore({ effects, reason }) {
   if (!ui.mounted) return;
+  if (reason === 'destroyed') {
+    ui.lost?.();
+    return;
+  }
   const state = snap();
+  for (const effect of effects) if (effect.type === 'seen') ui.fresh = [...new Set([...ui.fresh, ...effect.items])];
   const reaction = state.pose.reaction;
   if (reaction && reaction.id !== ui.reaction) {
     ui.reaction = reaction.id;
     // Та же поза в сцене (гладят дальше) — её движения заново.
     for (const art of ui.sheet?.querySelectorAll('.cat-play .cat-art') ?? []) if (art.dataset.pose === reaction.pose) art.toggleAttribute('data-again');
   }
+  const was = ui.mirror;
+  ui.mirror = state;
+  if (was && was !== state && !ui.booting) reflect(was, state, reason);
   render();
   // Ядро сняло жест поглаживания, перенос предмета или перенос в редакторе само (вид, питомец, облик, фон, новая ступень):
   // указатель отпускается, его поздний конец ядру безвреден. Сцена, черновик и комната уголка — по снимку.
@@ -2215,54 +2314,18 @@ function onCore({ effects, reason }) {
     paintDraft();
     paintCorner();
   }
-  // Новый местный день (задача ядра): знаки, лакомство снова ждёт занятия, учебный шаг открытого уголка.
-  if (reason === 'midnight') {
-    showProgress();
-    syncTreat();
-    syncLearn();
-  }
+  // Новый местный день (задача ядра): учебный шаг открытого уголка (знаки и лакомство — reflect).
+  if (reason === 'midnight') syncLearn();
   for (const effect of effects) {
     if (effect.type === 'announce') announce(effect.text);
     else if (effect.type === 'warning' && effect.code === 'corrupt') console.warn(corruptNote(K[effect.key]));
     else if (effect.type === 'micro') showMicro(effect.kind, effect.ms);
     else if (effect.type === 'arrive') startArrive();
   }
-  const was = ui.mirror;
-  ui.mirror = state;
-  if (reason !== 'storage' || !was) return;
-  const shown = views(was);
-  const now = views(state);
-  if (shown.look !== now.look) {
-    ui.look = lookOf(state);
-    applyCoat();
-  }
-  // Угостили в другой вкладке: карточка и поза — тихо.
-  if (shown.treat !== now.treat && !ui.settings.hidden) {
-    refreshInfo();
-    syncTreat();
-    paint();
-  }
-  // Присутствие из другой вкладки: места — тихо; диалог и черновик не меняются (сценку и задачи решило ядро).
-  if (shown.presence !== now.presence) {
-    if (state.presence.mode !== ui.presence) applyPresence();
-    else syncPresenceBox();
-  }
-  // Место или вид из другой вкладки (или ключ очистили): тихо; во время переноса между местами — после него (onMoveEnd).
-  if (shown.place !== now.place) {
-    ui.place = readPlace();
-    applyLayout();
-  }
-  if (shown.settings === now.settings) return;
-  syncStoreNote();
-  // Другая вкладка выбрала другого напарника, спрятала или вернула его — здесь так же, тихо.
-  if (applyShown()) return;
-  ui.settings = readSettings();
-  showName();
-  // Реплики выключили или сменили движение в другой вкладке: облако и реплика вида, сценка и покой — ядро, показ — здесь.
-  render();
-  // Открытый уголок согласован с сохранённым; ступень — если её подняла увиденная в другой вкладке (seenStage).
-  syncControls();
-  syncSheet();
+  // «Сохранить» вывело в уголок (кнопкой или прямой командой room.save): итог — над сценой уголка.
+  if (reason === 'room.save' && state.view.open === 'corner') roomDone([...effects].reverse().find((effect) => effect.type === 'announce')?.text ?? '');
+  // Вещи, не показанные этим обновлением, не переходят в следующее.
+  ui.fresh = [];
 }
 
 // ---------- подключение и интерфейс для сайта ----------
@@ -2277,9 +2340,11 @@ function host(key, place, cls) {
   O.places[place](box);
 }
 
-function start(options) {
+// lost — снять весь экземпляр (pet.destroy() этого подключения), если ядро отключат напрямую (pet.core.destroy()).
+function start(options, lost) {
   ui = initial();
   ui.abort = new AbortController();
+  ui.lost = lost;
   O = options;
   K = R.storageKeys(options.storage);
   C = { ...CLASSES, ...options.classes };
@@ -2292,7 +2357,8 @@ function start(options) {
   const owner = ui;
   ui.core = createPetCore({ storage, scenes: createWebScenes({ namespace: options.storage ?? 'pet' }), progress, log: { warn: (message, error) => coreWarn(owner, message, error) } });
   ui.mirror = snap();
-  ui.core.subscribe(safe(onCore), { initial: false });
+  // Только своё ядро и только этот экземпляр: поздний вызов прежнего подключения новый не трогает.
+  ui.core.subscribe(safe((update) => ui === owner && onCore(update)), { initial: false });
   ui.look = lookOf(snap());
   ui.kind = snap().pet.shown;
   ui.settings = readSettings();
@@ -2449,6 +2515,7 @@ function start(options) {
   on(document, 'visibilitychange', safe(onVisibility));
 
   ui.mounted = true;
+  ui.booting = true;
   document.documentElement.classList.toggle('cat-paused', document.hidden);
   // До запуска ядро знает, что видно и что умеет отображение: системное «уменьшить движение», видимость вкладки,
   // нарисованные питомцы, виды и сценки (явное объявление legacy, § 11.1). Присутствие и «на виду» — ядра (ключ presence).
@@ -2463,7 +2530,10 @@ function start(options) {
   ui.starting = false;
   if (!started.ok) throw ui.startError ?? new Error(started.error.message);
   ui.settings = readSettings();
-  renderAll();
+  renderAll({ reread: true });
+  // Показано по снимку — дальше обновления ядра догоняет reflect.
+  ui.mirror = snap();
+  ui.booting = false;
   if (ui.settings.hidden) return;
   if (isTextField(document.activeElement)) ui.core.setContext({ typing: true });
 }
@@ -2481,9 +2551,11 @@ function coreWarn(owner, message, error) {
 
 // Полное отключение (и откат неудачного запуска): жесты и перенос отменены, слушатели, таймеры, наблюдатели и кадры сняты,
 // элементы питомца и отметки на html убраны. Каждый шаг — отдельно: частичный запуск и сбой шага не мешают остальным.
-// Отложенное прежнего экземпляра сверяется с ui и ничего не делает.
+// Отложенное прежнего экземпляра сверяется с ui и ничего не делает. Тот же путь — и при pet.core.destroy() (onCore → lost):
+// mounted снимается первым, поэтому обновление 'destroyed' своего ядра сюда не возвращается.
 function destroy() {
   ui.mounted = false;
+  ui.lost = null;
   const html = document.documentElement;
   for (const step of [
     () => ui.sheet?.open && ui.sheet.close(),
@@ -2526,18 +2598,13 @@ function update(flags) {
 // Подтверждённое занятие (detail — { key, counted, hard, first }; null — запись не учебная). Решение и реакция — ядро:
 // знаки заново, первое включение, радость или поддержка (повтор key в экземпляре — без реакции), праздник новой ступени
 // (не в «Поиграть» и редакторе) с отметкой увиденной, продолжение с новой вещью, подсказка про миску, попытка редкой
-// сценки; спрятан или «по зову» и закрыт — только числа. Здесь — показ: числа, открытый уголок. Событие без key — как
-// 0.1.4 (Р2): ядру — ключ String(detail.key), сценки у него нет (scene: false — по исходному key).
+// сценки; спрятан или «по зову» и закрыт — только числа. Показ (числа, открытый уголок, «Новое в уголке» по эффекту seen) —
+// подписка, как у прямой команды pet.core.notify. Событие без key — как 0.1.4 (Р2): ядру — ключ String(detail.key) через
+// внутреннюю границу legacy (scene: false по исходному key: сценки нет, пустой ключ допустим); публичный notify ядра
+// требует непустой key.
 function saved(detail) {
   const event = detail ? { key: String(detail.key), counted: Boolean(detail.counted), hard: Boolean(detail.hard), first: Boolean(detail.first) } : null;
-  const result = ui.core.notify('saved', event, { scene: Boolean(detail?.key) });
-  ui.settings = readSettings();
-  showProgress();
-  if (!result.ok || !result.reaction) return;
-  // Уголок открыли, пока занятие сохранялось: числа и ступень догоняют, праздник — реакцией; ступень без праздника ядро
-  // отметило увиденной — её вещи в «Новое в уголке».
-  if (result.fresh.length) ui.fresh = [...new Set([...ui.fresh, ...result.fresh])];
-  syncSheet();
+  ui.core.notify('saved', event, { scene: Boolean(detail?.key) });
 }
 
 // Занятие не сохранилось: награды нет, только нейтральное ожидание (решение и реакция — ядро); ошибку показывает сайт.
@@ -2562,11 +2629,23 @@ function invalid(o) {
   return o.storage === undefined || (typeof o.storage === 'string' && o.storage) ? '' : 'storage — непустая строка';
 }
 
+// Отказ команды у экземпляра, который так и не подключился (у отключённого — свой результат ядра, тоже destroyed).
+const unmounted = () => ({ ok: false, error: { code: 'destroyed', message: 'Питомец не подключён.' } });
+
 // Подключить питомца (README модуля, «Подключение»). Один активный питомец: новое подключение сначала отключает прежнее (и
 // другой копии модуля), методы прежнего после этого ничего не делают. Отказ (неверные настройки, подключение изнутри
-// подключения, чужие id, исключение сайта при запуске) — console.error, откат всего созданного, pet.mounted === false.
+// подключения, чужие id, нет document — не браузер, исключение сайта при запуске) — console.error, откат всего созданного,
+// pet.mounted === false.
+// С PL05: pet.core — публичный экземпляр ядра этого подключения (pet-companion/core; null, пока не подключён и при отказе;
+// после отключения — тот же отключённый экземпляр); дополнительные методы pet.* — те же команды ядра (pet.setName ===
+// pet.core.setName по смыслу и результату). Совпавшие по имени update, notify, open, close, destroy остаются legacy и
+// возвращают undefined. Команда ядра и кнопка уголка показываются одним путём (подписка onCore); pet.core.destroy()
+// отключает всё, как pet.destroy().
 export function mountPet(options = {}) {
   let entry = null;
+  let core = null;
+  // Команда ядра этого подключения: до подключения и при отказе — destroyed без действий; методы не зависят от this.
+  const forward = (get) => (...args) => (core ? get(core)(...args) : unmounted());
   const pet = {
     version: VERSION,
     update: own(update),
@@ -2582,6 +2661,25 @@ export function mountPet(options = {}) {
     get mounted() {
       return current === pet && ui.mounted;
     },
+    get core() {
+      return core;
+    },
+    getState: () => (core ? core.getState() : null),
+    subscribe: (listener, options) => (core ? core.subscribe(listener, options) : () => {}),
+    refresh: forward((c) => c.refresh),
+    setContext: forward((c) => c.setContext),
+    setName: forward((c) => c.setName),
+    setPet: forward((c) => c.setPet),
+    setAppearance: forward((c) => c.setAppearance),
+    setPreferences: forward((c) => c.setPreferences),
+    setPresence: forward((c) => c.setPresence),
+    hide: forward((c) => c.hide),
+    show: forward((c) => c.show),
+    feed: forward((c) => c.feed),
+    interact: forward((c) => c.interact),
+    stroke: Object.freeze({ start: forward((c) => c.stroke.start), step: forward((c) => c.stroke.step), end: forward((c) => c.stroke.end), cancel: forward((c) => c.stroke.cancel) }),
+    toy: Object.freeze({ drag: forward((c) => c.toy.drag), drop: forward((c) => c.toy.drop), cancel: forward((c) => c.toy.cancel) }),
+    room: Object.freeze(Object.fromEntries(['select', 'move', 'nudge', 'reset', 'drag', 'drop', 'dragCancel', 'save', 'cancel'].map((name) => [name, forward((c) => c.room[name])]))),
     destroy() {
       if (current !== pet) return;
       current = null;
@@ -2595,7 +2693,7 @@ export function mountPet(options = {}) {
   const refuse = (why) => (console.error('Питомец не подключён:', why), pet);
   let why;
   try {
-    why = invalid(options) || (globalThis[PAGE]?.busy ? 'подключение уже идёт (mountPet из функции сайта)' : '');
+    why = invalid(options) || (globalThis[PAGE]?.busy ? 'подключение уже идёт (mountPet из функции сайта)' : '') || (typeof document === 'undefined' ? 'нет document — mountPet подключается только в браузере' : '');
   } catch (error) {
     why = error;
   }
@@ -2611,7 +2709,8 @@ export function mountPet(options = {}) {
   globalThis[PAGE] = entry = { version: VERSION, busy: true, destroy: () => pet.destroy() };
   current = pet;
   try {
-    start(options);
+    start(options, () => pet.destroy());
+    core = exposed(ui.core);
   } catch (error) {
     pet.destroy();
     refuse(error);
