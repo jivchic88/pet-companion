@@ -1,6 +1,8 @@
 /* Пример расширения (вне пакета): стили набора кролика bunny-web.mjs — позы (data-pose), сценка hop (data-scene), одиночные
    движения (data-micro), надетый аксессуар (data-acc) и образцы аксессуаров в уголке. Только transform, opacity и display;
-   «уменьшить движение» и пауза — общими правилами pet.css (html[data-cat-motion='none'], .cat-paused). Без внешних файлов. */
+   «уменьшить движение» и пауза — общими правилами пакета (legacy — pet.css: html[data-cat-motion='none'], .cat-paused;
+   контейнер — свои правила вида для :host). Без внешних файлов. Legacy — страница подключает этот файл сама; контейнер —
+   по styles набора (bunny-web.mjs) в своё теневое дерево. */
 
 .bunny-art :is(.bunny-ear, .bunny-head, .bunny-body, .bunny-all) {
   transform-box: fill-box;

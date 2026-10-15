@@ -42,6 +42,10 @@
       "types": "./pet/behaviors.d.mts",
       "default": "./pet/behaviors.mjs"
     },
+    "./web": {
+      "types": "./pet/web.d.mts",
+      "default": "./pet/web.mjs"
+    },
     "./pet.css": {
       "types": "./pet/css.d.mts",
       "default": "./pet/pet.css"

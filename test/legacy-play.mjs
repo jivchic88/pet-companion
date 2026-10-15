@@ -22,5 +22,7 @@ export const pawBottom = (kind, rect, pose = '') => G.pawBottom(defOf(kind), rec
 export const hitStyle = (e) => G.hitStyle(e, cat.size);
 export const pawStyle = (p) => G.pawStyle(p, cat.size);
 export const hitsHtml = (kind) => G.hitsHtml(defOf(kind));
-// Определение питомца области — по data-kind разметки (без него — кот, как рисунок 0.1.4).
-export const initPlay = (hooks, signal) => G.initPlay({ figure: (kind) => defOf(kind ?? 'cat'), ...hooks }, signal);
+export const paintHits = (box, kind) => G.paintHits(box, defOf(kind));
+// Жест одного отображения (PL07: на экземпляр) — общий указатель pointer; определение питомца области — по data-kind
+// разметки (без него — кот, как рисунок 0.1.4).
+export const createStroke = (pointer, hooks, signal) => G.createStroke(pointer, { figure: (kind) => defOf(kind ?? 'cat'), ...hooks }, signal);

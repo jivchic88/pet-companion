@@ -1,0 +1,14 @@
+/* Только проверки: стили страницы legacy под CSP — файлом. */
+body {
+  margin: 0;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+#head {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 56px;
+  padding: 0 16px;
+}

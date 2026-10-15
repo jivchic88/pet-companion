@@ -1,12 +1,12 @@
 // «Обустроить уголок» (с 2026-10-10) на странице: рисование расстановки на svg сцены и перенос предмета указателем. Правила
 // комнаты (пол, края, перекрытия, ближайшее допустимое место, выбор под точкой, сдвиг к миске, запись) — ядро
 // (core/room.mjs), черновик и перенос — ядро (core/editor.mjs, команды room.*): здесь — перевод CSS px в единицы сцены,
-// порог начала переноса и захват указателя (общий жест — grab из pet-play.mjs). Координаты — единицы сцены (viewBox
-// 400×250). Правила ядра реэкспортом — для оставшегося веб-кода и проверок; второй реализации нет.
+// порог начала переноса и захват указателя (общий указатель отображения — web/pointer.mjs). Координаты — единицы сцены
+// (viewBox 400×250). Правила ядра реэкспортом — для оставшегося веб-кода и проверок; второй реализации нет. Состояние
+// переноса — на экземпляр отображения (createRoomDrag, PL07).
 
 import { sceneCatBox } from './cat-art.mjs';
 import { frames, pickAt, SCENE } from './core/room.mjs';
-import { grab, release } from './pet-play.mjs';
 
 export * from './core/room.mjs';
 
@@ -36,68 +36,85 @@ export function paintRoom(svg, layout, shift = [0, 0]) {
   }
 }
 
-// Область нажатия в процентах сцены (не меньше 44×44 — pet.css).
-export function hitStyle(layout, id) {
+// Область нажатия в процентах сцены (не меньше 44×44 — pet.css): свойства для CSSOM и прежняя строка (проверки).
+export function hitVars(layout, id) {
   const [l, t, r, b] = frames(layout, id, layout.pos[id]).box;
   const pct = (v, total) => `${round((v / total) * 1000) / 10}`;
-  return `--x:${pct((l + r) / 2, SCENE[0])};--y:${pct((t + b) / 2, SCENE[1])};--w:${pct(r - l, SCENE[0])};--h:${pct(b - t, SCENE[1])}`;
+  return { '--x': pct((l + r) / 2, SCENE[0]), '--y': pct((t + b) / 2, SCENE[1]), '--w': pct(r - l, SCENE[0]), '--h': pct(b - t, SCENE[1]) };
 }
 
-// Перенос: hooks = { layout() → { model, stage, pos, pick } черновика (модель комнаты питомца и снимок ядра), drag(id, point)
-// — room.drag, drop() — room.drop, cancel() — room.dragCancel }.
-const st = { hooks: null, drag: null };
+export const hitStyle = (layout, id) =>
+  Object.entries(hitVars(layout, id))
+    .map(([key, value]) => `${key}:${value}`)
+    .join(';');
 
-// Указатель нажат на предмете (идёт перенос — у ядра он начат тем же нажатием): кнопки и стрелки ждут конца.
-export const arranging = () => Boolean(st.drag);
-// Сдвиг дошёл до порога — предмет едет за указателем (сцена помечена data-moving).
-export const moving = () => Boolean(st.drag?.on);
-
-export function initRoom(hooks) {
-  st.hooks = hooks;
+// Область на элементе — через CSSOM (без атрибута style в разметке — строгий CSP, PL07).
+export function paintHit(el, layout, id) {
+  for (const [key, value] of Object.entries(hitVars(layout, id))) el.style.setProperty(key, value);
 }
 
-// Нажатия внутри box (постоянный контейнер редактора) — выбор и перенос.
-export function watchRoom(box) {
-  box.addEventListener('pointerdown', onDown);
-}
+// Перенос одного отображения: pointer — общий указатель отображения; hooks = { layout() → { model, stage, pos, pick }
+// черновика (модель комнаты питомца и снимок ядра), drag(id, point) — room.drag, drop() — room.drop, cancel() —
+// room.dragCancel }; signal снимает слушатели нажатий при отключении.
+export function createRoomDrag(pointer, hooks, signal) {
+  const st = { drag: null };
 
-// Нажатие: предмет под точкой — правило ядра (pickAt: видимый — верхний, увеличенные до 44 CSS px области — выбранный,
-// затем ближайший); ядру — начало переноса с его места (выбор, ручное действие).
-function onDown(event) {
-  const stage = event.target.closest?.('[data-room-stage]');
-  const rect = stage?.querySelector('svg')?.getBoundingClientRect();
-  if (!rect?.width || !event.target.closest('[data-room-hit]')) return;
-  const k = SCENE[0] / rect.width;
-  const layout = st.hooks.layout();
-  if (!layout) return;
-  const id = pickAt(layout, [(event.clientX - rect.left) * k, (event.clientY - rect.top) * k], layout.pick, 44 * k);
-  if (!id || !grab(event, stage, { move: onMove, end: onEnd })) return;
-  st.drag = { id, k, x0: event.clientX, y0: event.clientY, from: layout.pos[id], on: false };
-  st.hooks.drag(id, st.drag.from);
-}
+  // Нажатие: предмет под точкой — правило ядра (pickAt: видимый — верхний, увеличенные до 44 CSS px области —
+  // выбранный, затем ближайший); ядру — начало переноса с его места (выбор, ручное действие). Сцена без размеров —
+  // переноса нет.
+  function onDown(event) {
+    const stage = event.target.closest?.('[data-room-stage]');
+    const rect = stage?.querySelector('svg')?.getBoundingClientRect();
+    if (!rect?.width || !rect.height || !event.target.closest('[data-room-hit]')) return;
+    const k = SCENE[0] / rect.width;
+    const layout = hooks.layout();
+    if (!layout) return;
+    const id = pickAt(layout, [(event.clientX - rect.left) * k, (event.clientY - rect.top) * k], layout.pick, 44 * k);
+    if (!id || !pointer.grab(event, stage, { move: onMove, end: onEnd })) return;
+    st.drag = { id, k, stage, x0: event.clientX, y0: event.clientY, from: layout.pos[id], on: false };
+    hooks.drag(id, st.drag.from);
+  }
 
-// Сдвиг: после порога — точка с той же точкой захвата; допустимое место выбирает ядро.
-function onMove(event) {
-  const d = st.drag;
-  const dx = event.clientX - d.x0;
-  const dy = event.clientY - d.y0;
-  if (!d.on && Math.hypot(dx, dy) < MOVE_PX) return;
-  d.on = true;
-  st.hooks.drag(d.id, [d.from[0] + dx * d.k, d.from[1] + dy * d.k]);
-}
+  // Сдвиг: после порога — точка с той же точкой захвата; допустимое место выбирает ядро. Масштаб — текущий: сцену могли
+  // перерисовать или изменить её размер во время переноса (без размеров — перенос отменён).
+  function onMove(event) {
+    const d = st.drag;
+    const dx = event.clientX - d.x0;
+    const dy = event.clientY - d.y0;
+    if (!d.on && Math.hypot(dx, dy) < MOVE_PX) return;
+    const width = d.stage.querySelector('svg')?.getBoundingClientRect().width;
+    if (!width) {
+      pointer.release('resize');
+      return;
+    }
+    d.k = SCENE[0] / width;
+    d.on = true;
+    hooks.drag(d.id, [d.from[0] + dx * d.k, d.from[1] + dy * d.k]);
+  }
 
-// Конец жеста (release; вернуть — был ли сдвиг): отпустили после сдвига — room.drop, иначе (касание только выбирает,
-// отмена указателя, потеря захвата, Esc) — room.dragCancel.
-function onEnd(reason) {
-  const d = st.drag;
-  st.drag = null;
-  if (reason === 'up' && d.on) st.hooks.drop();
-  else st.hooks.cancel();
-  return d.on;
-}
+  // Конец жеста (release указателя; вернуть — был ли сдвиг): отпустили после сдвига — room.drop, иначе (касание только
+  // выбирает, отмена указателя, потеря захвата, Esc) — room.dragCancel.
+  function onEnd(reason) {
+    const d = st.drag;
+    st.drag = null;
+    if (reason === 'up' && d.on) hooks.drop();
+    else hooks.cancel();
+    return d.on;
+  }
 
-// Прервать перенос снаружи (Esc, сохранение, выход) или ядро уже сняло его (новая ступень, облик, фон): указатель
-// отпущен; поздний room.dragCancel ядру безвреден.
-export function cancelArrange(reason = 'cancel') {
-  if (st.drag) release(reason);
+  return Object.freeze({
+    // Нажатия внутри box (постоянный контейнер редактора) — выбор и перенос.
+    watch(box) {
+      box.addEventListener('pointerdown', onDown, { signal });
+    },
+    // Прервать перенос снаружи (Esc, сохранение, выход) или ядро уже сняло его (новая ступень, облик, фон): указатель
+    // отпущен; поздний room.dragCancel ядру безвреден.
+    cancel(reason = 'cancel') {
+      if (st.drag) pointer.release(reason);
+    },
+    // Указатель нажат на предмете (идёт перенос — у ядра он начат тем же нажатием): кнопки и стрелки ждут конца.
+    arranging: () => Boolean(st.drag),
+    // Сдвиг дошёл до порога — предмет едет за указателем (сцена помечена data-moving).
+    moving: () => Boolean(st.drag?.on),
+  });
 }

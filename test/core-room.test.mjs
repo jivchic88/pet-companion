@@ -35,11 +35,12 @@ test('геометрия комнаты и игрушек — одна реал�
     assert.doesNotMatch(code, /\b(document|window|getBoundingClientRect|requestAnimationFrame|localStorage)\b/, `core/${file}.mjs — без DOM`);
   }
   // Второй реализации правил в веб-модулях нет: формулы пола, доката и поиска места — только в ядре.
-  // (settle в pet.mjs — прежнее «устроился» раскладки legacy, не место предмета: оно передаёт ядру arrive.)
-  for (const file of ['pet-room.mjs', 'pet-toys.mjs', 'pet-play.mjs', 'pet.mjs']) {
+  // (settle в legacy-местах — прежнее «устроился» раскладки, не место предмета: оно передаёт ядру arrive.) С PL07
+  // отображение — общая оболочка web/shell.mjs, места legacy — web/legacy/places.mjs, контейнер — web/view.mjs.
+  for (const file of ['pet-room.mjs', 'pet-toys.mjs', 'pet-play.mjs', 'pet.mjs', 'web/shell.mjs', 'web/legacy/places.mjs', 'web/view.mjs', 'web/pointer.mjs']) {
     const text = await readFile(new URL(`../pet/${file}`, import.meta.url), 'utf8');
     const own = [...text.matchAll(/function (placeToy|rollEnd|rollWay|closer|sideOf|fits|arrange|nudge|feedShift|movedItems|roomRecord|around|petMood|bowlHome|moveBowl|rollBall|onToy|onStroke|resetHint|showResult|playResults)\(/g)].map((match) => match[1]);
-    if (file !== 'pet.mjs' && /function settle\(/.test(text)) own.push('settle');
+    if (file !== 'web/legacy/places.mjs' && /function settle\(/.test(text)) own.push('settle');
     assert.deepEqual(own, [], `${file}: без своей геометрии и правил игры`);
     const temporary = [...text.matchAll(/petMood|toyTimes|petTimes|strokeHeld|strokeTold|playOutcome|setBusy|\.react\(|writeKey|readStored|placeUnsaved/g)].map((match) => match[0]);
     assert.deepEqual(temporary, [], `${file}: без своих лимитов, удержания, временных входов и записи ключей`);

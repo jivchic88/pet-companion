@@ -54,6 +54,24 @@ function stringList(value) {
   return true;
 }
 
+// Адрес стилей набора — абсолютный (обычно new URL('./my.css', import.meta.url)): контейнер подключает его в своё теневое
+// дерево (<link>), относительный адрес разрешался бы от страницы, а не от модуля набора.
+function absoluteUrl(value) {
+  if (typeof value !== 'string' && !(typeof URL === 'function' && value instanceof URL)) return false;
+  try {
+    return Boolean(new URL(String(value)).href);
+  } catch {
+    return false;
+  }
+}
+function stylesList(value) {
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i += 1) if (!Object.hasOwn(value, i) || !absoluteUrl(value[i])) return false;
+  return true;
+}
+// Адреса стилей набора (проверенные kitProblem) строками.
+export const kitStyles = (kit) => (kit.styles ?? []).map((value) => new URL(String(value)).href);
+
 // Что набор обязан нарисовать по определению def (§ 7.3, § 7.1.1). Позы — по роли в формате, а не по тому, использует ли
 // их ещё и сценка: конечная поза (после допустимых замен poseFallback) каждой обязательной позы словаря (calm — всегда
 // сама) и лапы, если у питомца есть actions.paw. Конечной может быть и своя поза сценки или декоративная (yawn, settle) —
@@ -83,6 +101,7 @@ export function kitProblem(kit, defs) {
   if (typeof kit.art !== 'function') return `${at}: art — функция рисунка`;
   if (kit.item !== undefined && typeof kit.item !== 'function') return `${at}: item — функция`;
   if (kit.mini !== undefined && typeof kit.mini !== 'function') return `${at}: mini — функция`;
+  if (kit.styles !== undefined && !stylesList(kit.styles)) return `${at}: styles — плотный массив абсолютных адресов CSS (строка или URL)`;
   const needs = kitNeeds(def);
   for (const field of ['poses', 'coats', 'accessories', 'items']) {
     const missing = needs[field].filter((id) => !kit[field].includes(id));

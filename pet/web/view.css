@@ -1,0 +1,264 @@
+/* Питомец в контейнере (вход pet-companion/web, mountPetIn; этап PL07): стили своего теневого дерева. Подключается видом
+   сам (<link> в Shadow DOM вместе с pet-base.css, pet.css, dog.css и стилями наборов) — сайт этот файл не подключает.
+   Правила pet.css по отметкам на <html> (движение, пауза) внутри теневого дерева не действуют: здесь их пара — по
+   атрибутам своего элемента (:host). Наружу ничего не выходит: ни правил для элементов сайта, ни отметок на <html>.
+
+   Изоляция: свой элемент сбрасывает всё, что мог бы унаследовать или получить от правил сайта (all: initial !important —
+   важное правило теневого дерева сильнее важного правила сайта для своего элемента), кроме переменных: тема --pet-*
+   и --cat-* наследуется от контейнера. Значения по умолчанию не перекрывают тему: внутри — наследованное значение,
+   иначе умолчание (как :root в pet.css, светлое и тёмное). */
+
+:host {
+  all: initial !important;
+  display: block !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: 220 / 204 !important;
+  max-height: 360px !important;
+  min-width: 0 !important;
+  --pet-v-bg: var(--pet-bg, #f6f5f1);
+  --pet-v-surface: var(--pet-surface, #ffffff);
+  --pet-v-surface-2: var(--pet-surface-2, #efede6);
+  --pet-v-ink: var(--pet-ink, #1f2328);
+  --pet-v-ink-2: var(--pet-ink-2, #5b6168);
+  --pet-v-line: var(--pet-line, #e2dfd6);
+  --pet-v-accent: var(--pet-accent, #1f6f5c);
+  --pet-v-accent-ink: var(--pet-accent-ink, #ffffff);
+  --pet-v-accent-soft: var(--pet-accent-soft, #e2efe9);
+  --pet-v-warn: var(--pet-warn, #8a5a00);
+  --pet-v-warn-soft: var(--pet-warn-soft, #fbf0d4);
+  --pet-v-radius: var(--pet-radius, 14px);
+  --cat-v-wall-top: var(--cat-wall-top, #f3ece1);
+  --cat-v-wall: var(--cat-wall, #ece2d3);
+  --cat-v-floor: var(--cat-floor, #dccbb4);
+  --cat-v-board-line: var(--cat-board-line, #cbb79c);
+  --cat-v-rug: var(--cat-rug, #e6d7c2);
+  --cat-v-rug-edge: var(--cat-rug-edge, #d6c3a8);
+  --cat-v-sky: var(--cat-sky, #dbe9ef);
+  --cat-v-sky-dot: var(--cat-sky-dot, #f6d77f);
+  --cat-v-sky-hill: var(--cat-sky-hill, #b9d0b1);
+  --cat-v-frame: var(--cat-frame, #f8f4ed);
+  --cat-v-steam: var(--cat-steam, #b3a99c);
+  --cat-v-bubble: var(--cat-bubble, #ffffff);
+  --cat-v-bubble-ink: var(--cat-bubble-ink, #2b2f33);
+  --cat-v-bubble-line: var(--cat-bubble-line, #e2dfd6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --pet-v-bg: var(--pet-bg, #111413);
+    --pet-v-surface: var(--pet-surface, #191d1c);
+    --pet-v-surface-2: var(--pet-surface-2, #222826);
+    --pet-v-ink: var(--pet-ink, #e7e5df);
+    --pet-v-ink-2: var(--pet-ink-2, #a2aaa6);
+    --pet-v-line: var(--pet-line, #2d3432);
+    --pet-v-accent: var(--pet-accent, #5cc5a7);
+    --pet-v-accent-ink: var(--pet-accent-ink, #0b1f19);
+    --pet-v-accent-soft: var(--pet-accent-soft, #19362e);
+    --pet-v-warn: var(--pet-warn, #e5b646);
+    --pet-v-warn-soft: var(--pet-warn-soft, #362b12);
+    --cat-v-wall-top: var(--cat-wall-top, #262c2a);
+    --cat-v-wall: var(--cat-wall, #212725);
+    --cat-v-floor: var(--cat-floor, #2b302d);
+    --cat-v-board-line: var(--cat-board-line, #373e3a);
+    --cat-v-rug: var(--cat-rug, #343a36);
+    --cat-v-rug-edge: var(--cat-rug-edge, #2e3431);
+    --cat-v-sky: var(--cat-sky, #1d2a3a);
+    --cat-v-sky-dot: var(--cat-sky-dot, #e9e3c8);
+    --cat-v-sky-hill: var(--cat-sky-hill, #2a3a33);
+    --cat-v-frame: var(--cat-frame, #4a514d);
+    --cat-v-steam: var(--cat-steam, #7f857f);
+    --cat-v-bubble: var(--cat-bubble, #252b29);
+    --cat-v-bubble-ink: var(--cat-bubble-ink, #e7e5df);
+    --cat-v-bubble-line: var(--cat-bubble-line, #39413e);
+  }
+}
+
+/* Верхние элементы теневого дерева: место питомца и диалог. Тема — наследованная или умолчание; шрифт и цвет — свои
+   (свой элемент ничего не наследует от сайта). */
+.pet-view,
+.cat-sheet {
+  --pet-bg: var(--pet-v-bg);
+  --pet-surface: var(--pet-v-surface);
+  --pet-surface-2: var(--pet-v-surface-2);
+  --pet-ink: var(--pet-v-ink);
+  --pet-ink-2: var(--pet-v-ink-2);
+  --pet-line: var(--pet-v-line);
+  --pet-accent: var(--pet-v-accent);
+  --pet-accent-ink: var(--pet-v-accent-ink);
+  --pet-accent-soft: var(--pet-v-accent-soft);
+  --pet-warn: var(--pet-v-warn);
+  --pet-warn-soft: var(--pet-v-warn-soft);
+  --pet-radius: var(--pet-v-radius);
+  --cat-wall-top: var(--cat-v-wall-top);
+  --cat-wall: var(--cat-v-wall);
+  --cat-floor: var(--cat-v-floor);
+  --cat-board-line: var(--cat-v-board-line);
+  --cat-rug: var(--cat-v-rug);
+  --cat-rug-edge: var(--cat-v-rug-edge);
+  --cat-sky: var(--cat-v-sky);
+  --cat-sky-dot: var(--cat-v-sky-dot);
+  --cat-sky-hill: var(--cat-v-sky-hill);
+  --cat-frame: var(--cat-v-frame);
+  --cat-steam: var(--cat-v-steam);
+  --cat-bubble: var(--cat-v-bubble);
+  --cat-bubble-ink: var(--cat-v-bubble-ink);
+  --cat-bubble-line: var(--cat-v-bubble-line);
+  color: var(--pet-ink);
+}
+
+/* ---------- место питомца в контейнере ----------
+   Свой элемент занимает ширину контейнера, высоту — контейнера (если задана), иначе по пропорции рисунка, не выше 360 px;
+   содержимое на размер не влияет. Вид — data-view (full, portrait, none) по размеру, кнопка — по присутствию
+   (data-surface: pet, call, none). */
+
+.pet-view {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.pet-view[hidden],
+.pet-view[data-view='none'] {
+  display: none;
+}
+
+.pet-view *,
+.pet-view *::before,
+.pet-view *::after {
+  box-sizing: border-box;
+}
+
+.cat-view-btn {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--pet-radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cat-view-btn > .cat-art {
+  width: 100%;
+  height: 100%;
+}
+
+.pet-view[data-view='portrait'] .cat-view-btn {
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1;
+  width: auto;
+  height: auto;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.pet-view[data-view='portrait'] .cat-view-btn > .cat-art {
+  width: 100%;
+  height: 100%;
+}
+
+.cat-view-btn:focus-visible,
+.cat-view-return:focus-visible,
+.pet-view .cat-call:focus-visible {
+  outline: 2px solid var(--pet-accent);
+  outline-offset: -2px;
+}
+
+.cat-view-return {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--pet-line);
+  border-radius: 50%;
+  background: var(--pet-surface);
+  color: var(--pet-ink-2);
+  cursor: pointer;
+}
+
+.cat-view-return svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Облако реплики — у целого питомца, сверху слева; у портрета его нет. */
+.cat-view-say {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: min(62%, 240px);
+  min-height: 3.2em;
+  margin: 0;
+  pointer-events: none;
+}
+
+.pet-view:not([data-view='full']) .cat-view-say {
+  display: none;
+}
+
+.cat-view-say .cat-bubble::before {
+  display: none;
+}
+
+.cat-view-say.is-saying .cat-bubble {
+  opacity: 1;
+  transform: none;
+}
+
+/* Новая вещь или миска рядом — у целого питомца, снизу слева. */
+.pet-view .cat-dock-mini {
+  bottom: 6px;
+  left: 6px;
+  width: 40px;
+  height: 40px;
+}
+
+.pet-view:not([data-view='full']) .cat-dock-mini {
+  display: none;
+}
+
+/* ---------- движение и пауза: пара html[data-cat-motion] и html.cat-paused pet.css ---------- */
+
+:host([data-cat-paused]) .cat-art,
+:host([data-cat-paused]) .cat-art * {
+  animation-play-state: paused !important;
+}
+
+:host(:not([data-cat-motion='none'])) .cat-play-toy[data-dragging] .cat-play-toy-art {
+  transform: translateY(-2px) scale(1.05);
+}
+
+:host([data-cat-motion='none']) .cat-play-touch {
+  display: none;
+}
+
+/* Без анимации (настройка или «уменьшить движение» системы): весь вид стоит. */
+:host([data-cat-motion='none']) :is(.pet-view, .cat-sheet),
+:host([data-cat-motion='none']) :is(.pet-view, .cat-sheet) * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media print {
+  .pet-view,
+  .cat-sheet {
+    display: none !important;
+  }
+}

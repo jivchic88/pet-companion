@@ -1,0 +1,170 @@
+<!doctype html>
+<!-- Пример расширения в контейнере (в пакет не входит; README, «Питомец в контейнере»): третий питомец — кролик
+     (bunny.mjs, набор отображения bunny-web.mjs со своими стилями bunny.css в styles) и вторая модель поведения — «живая»
+     (lively.mjs) подключаются к контейнерному режиму mountPetIn только публичными входами: pet-companion/web,
+     pet-companion/core (definePet, defineBehavior), pet-companion/pets и /behaviors (штатные кот, собака, calm, общий
+     уголок). Стили пакета и набора вид подключает сам в своё теневое дерево — страница их не загружает. Кнопки сайта
+     вызывают публичные команды ядра вида (view.core): питомец, модель, имя, облик, занятие, кормление, виды, игра, комната;
+     «Без кролика» и «С кроликом» — повторное подключение без определения и с ним (данные кролика сохраняются). Папка лежит
+     в корне проекта рядом с node_modules/: карта импортов связывает имена входов с файлами пакета. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Кролик в контейнере</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "pet-companion/web": "../node_modules/pet-companion/pet/web.mjs",
+          "pet-companion/core": "../node_modules/pet-companion/pet/core.mjs",
+          "pet-companion/pets": "../node_modules/pet-companion/pet/pets.mjs",
+          "pet-companion/behaviors": "../node_modules/pet-companion/pet/behaviors.mjs"
+        }
+      }
+    </script>
+    <style>
+      body {
+        margin: 0;
+        font: 16px/1.4 system-ui, sans-serif;
+        background: #fbf8f2;
+        color: #2b2925;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+        gap: 16px;
+        padding: 16px;
+        max-width: 900px;
+      }
+      @media (max-width: 600px) {
+        main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      #pet {
+        min-width: 0;
+        border: 1px solid #ddd5c8;
+        border-radius: 12px;
+      }
+      #controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 8px;
+      }
+      #controls button {
+        font: inherit;
+        padding: 6px 10px;
+      }
+      #status {
+        grid-column: 1 / -1;
+        min-height: 3em;
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="pet"></div>
+      <div id="controls">
+        <button id="bunny" type="button">Кролик</button>
+        <button id="cat" type="button">Кот</button>
+        <button id="dog" type="button">Собака</button>
+        <button id="calm" type="button">Спокойная модель</button>
+        <button id="lively" type="button">Живая модель</button>
+        <button id="name" type="button">Назвать «Морковкин»</button>
+        <button id="coat" type="button">Другой облик</button>
+        <button id="bow" type="button">Бантик</button>
+        <button id="lesson" type="button">Урок пройден</button>
+        <button id="feed" type="button">Покормить</button>
+        <button id="corner" type="button">Уголок</button>
+        <button id="play" type="button">Поиграть</button>
+        <button id="paw" type="button">Дай лапу</button>
+        <button id="bowl" type="button">Миску ближе</button>
+        <button id="room" type="button">Морковку правее и сохранить</button>
+        <button id="without" type="button">Без кролика</button>
+        <button id="with" type="button">С кроликом</button>
+      </div>
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module">
+      import { calm } from 'pet-companion/behaviors';
+      import { localDay } from 'pet-companion/core';
+      import { cat, dog } from 'pet-companion/pets';
+      import { mountPetIn } from 'pet-companion/web';
+      import { bunny } from './bunny.mjs';
+      import { bunnyWeb } from './bunny-web.mjs';
+      import { lively } from './lively.mjs';
+
+      const marks = [];
+      const today = () => marks.filter((day) => day === localDay()).length;
+      const status = document.getElementById('status');
+      const defs = new Map([cat, dog, bunny].map((def) => [def.id, def]));
+      let view = null;
+
+      // Подключение: штатные кот и собака, кролик со своим набором; модели calm и живая. withBunny: false — без
+      // определения кролика (сохранённый выбор и его данные остаются, показ — запасной).
+      function connect(withBunny) {
+        view?.destroy();
+        view = mountPetIn(document.getElementById('pet'), {
+          namespace: 'extension-view',
+          progress: () => ({ marks: marks.length, today: today(), limit: 3 }),
+          pets: withBunny ? [cat, dog, bunny] : [cat, dog],
+          behaviors: [calm, lively],
+          kits: withBunny ? [bunnyWeb] : [],
+          home: () => document.getElementById('corner'),
+        });
+        window.demoView = view;
+        view.core?.subscribe(show);
+      }
+
+      function show() {
+        const state = view.core?.getState();
+        if (!state) return;
+        status.textContent = `Питомец: ${state.pet.shown}${state.pet.available ? '' : ` (выбран ${state.pet.id} — нет определения)`} · имя: ${state.name.display} · облик: ${state.look.coat} · модель: ${state.behavior.shown}`;
+      }
+      const say = (result) => {
+        if (!result.ok) status.textContent = `Отказ: ${result.error.code}`;
+        return result;
+      };
+      const click = (id, fn) => document.getElementById(id).addEventListener('click', fn);
+      const core = () => view.core;
+
+      click('bunny', () => say(core().setPet('example.bunny')));
+      click('cat', () => say(core().setPet('cat')));
+      click('dog', () => say(core().setPet('dog')));
+      click('calm', () => say(core().setBehavior('calm')));
+      click('lively', () => say(core().setBehavior('example.lively')));
+      click('name', () => say(core().setName('Морковкин')));
+      click('coat', () => {
+        const state = core().getState();
+        const coats = defs.get(state.pet.shown).coats.map((coat) => coat.id);
+        say(core().setAppearance({ coat: coats[(coats.indexOf(state.look.coat) + 1) % coats.length] }));
+      });
+      click('bow', () => say(core().setAppearance({ accessory: 'bow' })));
+      click('lesson', () => {
+        marks.push(localDay());
+        say(core().notify('saved', { key: `lesson-${marks.length}`, counted: true, first: today() === 1 }));
+      });
+      click('feed', () => say(core().feed()));
+      click('corner', () => say(view.open('corner')));
+      click('play', () => say(view.open('play')));
+      click('paw', () => say(core().interact({ type: 'paw' })));
+      click('bowl', () => say(core().interact({ type: 'bowl', to: 'near' })));
+      click('room', () => {
+        if (core().getState().view.open !== 'room') say(view.open('room'));
+        const at = core().getState().room.draft?.pos.carrot;
+        if (!at) return say({ ok: false, error: { code: 'unknown-id' } });
+        say(core().room.move('carrot', [at[0] + 20, at[1]]));
+        say(core().room.save());
+      });
+      click('without', () => connect(false));
+      click('with', () => connect(true));
+
+      connect(true);
+      show();
+    </script>
+  </body>
+</html>

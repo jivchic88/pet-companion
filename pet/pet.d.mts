@@ -113,6 +113,12 @@ export interface PetWebKit {
   item?(id: string, options: { fresh: boolean }): string;
   /** Маленькая своя вещь рядом с питомцем (празднование ступени); `''` — общая. */
   mini?(id: string): string;
+  /**
+   * Стили набора (PL07) — абсолютные адреса CSS, обычно `new URL('./my.css', import.meta.url)`: контейнер
+   * (`pet-companion/web`, `mountPetIn`) подключает их в своё теневое дерево. Legacy `mountPet` их не загружает — CSS набора
+   * страница подключает сама.
+   */
+  readonly styles?: readonly (string | URL)[];
 }
 
 export interface PetOptions {

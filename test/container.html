@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Контейнеры питомца</title>
+    <link rel="icon" href="data:," />
+    <!-- Проверочный стенд контейнерного режима (test/browser-view.mjs): условный сайт без CSS модуля — питомец в своих
+         контейнерах (pet-companion/web, mountPetIn) приносит стили сам. Сценарий подключает виды через window.web; ?rules —
+         агрессивные общие правила сайта (*, теги, !important, svg/path/circle, наследуемые шрифт и разрядка). Его отдаёт
+         только сервер проверки. -->
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 17px/1.6 Georgia, serif;
+        color: #1d1d1f;
+        background: #fffaf0;
+      }
+      .boxes {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      #a {
+        width: 320px;
+      }
+      #b {
+        width: 150px;
+        height: 130px;
+      }
+      #c {
+        width: 260px;
+      }
+      #scroller {
+        height: 220px;
+        overflow: auto;
+        border: 1px solid #999;
+      }
+      #scroller-inner {
+        height: 600px;
+        padding-top: 120px;
+      }
+    </style>
+    <style id="rules" media="not all">
+      * {
+        box-sizing: content-box !important;
+        letter-spacing: 0.3em !important;
+      }
+      #site,
+      #site * {
+        font: italic 700 22px/2.4 'Courier New', monospace !important;
+        text-transform: uppercase !important;
+      }
+      div {
+        padding: 9px;
+        margin: 3px;
+        border: 2px dashed red;
+      }
+      button,
+      #site button {
+        padding: 30px !important;
+        min-width: 200px !important;
+        background: #ff0 !important;
+        color: #f00 !important;
+        border: 5px solid #000 !important;
+        border-radius: 0 !important;
+        font-size: 30px !important;
+      }
+      svg,
+      path,
+      circle,
+      ellipse {
+        fill: #0f0 !important;
+        stroke: #00f !important;
+        opacity: 0.4 !important;
+      }
+      dialog {
+        padding: 50px !important;
+        border: 8px solid #b00 !important;
+        background: #ff0 !important;
+      }
+      h2,
+      h3,
+      p,
+      label,
+      input {
+        font-size: 40px !important;
+        color: #b00 !important;
+      }
+      .cat-sheet,
+      .pet-view,
+      .cat-art,
+      [data-pet-view] {
+        display: none !important;
+        visibility: hidden !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="site">
+      <h1 id="title">Сайт с питомцами</h1>
+      <p id="text">Текст сайта <button id="site-button" type="button">Кнопка сайта</button></p>
+      <label id="label">Поле сайта <input id="field" type="text" /></label>
+      <div class="boxes">
+        <div id="a" class="box"></div>
+        <div id="b" class="box"></div>
+        <div id="c" class="box"><p id="c-own">Свой текст контейнера</p></div>
+      </div>
+      <div id="scroller"><div id="scroller-inner"><div id="d" class="box"></div></div></div>
+    </main>
+    <script type="module">
+      import { catWeb, createWebScenes, createWebStorage, dogWeb, mountPetIn } from '/pet/web.mjs';
+      import { createPetCore } from '/pet/core.mjs';
+      import { calm } from '/pet/behaviors.mjs';
+      import { cat, dog } from '/pet/pets.mjs';
+
+      if (new URLSearchParams(location.search).has('rules')) document.getElementById('rules').media = 'all';
+      window.web = { mountPetIn, createWebStorage, createWebScenes, catWeb, dogWeb, createPetCore, cat, dog, calm };
+      window.qaReady = true;
+    </script>
+  </body>
+</html>

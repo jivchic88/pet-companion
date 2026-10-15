@@ -22,13 +22,34 @@ export function shared(store, namespace, make) {
   return spaces.get(namespace);
 }
 
-// ---------- публичный координатор (вход pet-companion/core, PL05) ----------
+// ---------- публичный координатор (вход pet-companion/core, PL05; веб — pet-companion/web, PL07) ----------
 // createStorage — общий координатор над хранилищем ключ-значение интегратора (Node, своё приложение, страница без
 // mountPet): та же реализация, что у веба (очередь ключа, кэш, барьер load, подключения ядер, раунд), только платформенная
 // часть — его backend. Наружу — непрозрачный объект { status, load() }: подключения создаёт само ядро (createPetCore),
 // интегратор их не видит (docs/ARCHITECTURE.md § 8.1, § 14.1.5). Внутренний координатор — по объекту (coordinatorOf).
+// Публичный фасад — один на внутренний координатор (publicStorage): веб-координатор createWebStorage входа /web (PL07) —
+// тот же внутренний объект, что у mountPet и mountPetIn с тем же namespace (одна очередь ключа и реестр подключений),
+// второго координатора для публичного пути нет.
 const coordinators = new WeakMap();
+const facades = new WeakMap();
 export const coordinatorOf = (value) => ((value && typeof value === 'object') || typeof value === 'function' ? (coordinators.get(value) ?? null) : null);
+
+// Непрозрачный фасад { status, load() } внутреннего координатора: тот же объект для того же координатора; публичный
+// createPetCore этой копии модуля его принимает (coordinatorOf).
+export function publicStorage(coordinator) {
+  let facade = facades.get(coordinator);
+  if (!facade) {
+    facade = Object.freeze({
+      get status() {
+        return coordinator.status;
+      },
+      load: () => coordinator.load(),
+    });
+    facades.set(coordinator, facade);
+    coordinators.set(facade, coordinator);
+  }
+  return facade;
+}
 
 const STORAGE_OPTIONS = ['backend', 'namespace'];
 const thenable = (value) => Boolean(value) && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function';
@@ -80,15 +101,7 @@ export function createStorage(options) {
             }
           },
         };
-    const coordinator = createCoordinator({ keys: STORAGE_NAMES, backend: platform });
-    const facade = Object.freeze({
-      get status() {
-        return coordinator.status;
-      },
-      load: () => coordinator.load(),
-    });
-    coordinators.set(facade, coordinator);
-    return facade;
+    return publicStorage(createCoordinator({ keys: STORAGE_NAMES, backend: platform }));
   });
 }
 

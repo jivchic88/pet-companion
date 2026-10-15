@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- Только проверки (test/browser-view.mjs): legacy mountPet под тем же строгим CSP, что CSP-пример контейнера — default-src
+     'self'; style-src 'self' HTTP-заголовком; стили модуля и страницы — файлы, модуль страницы — файл (legacy.mjs). -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Legacy под строгим CSP</title>
+    <link rel="stylesheet" href="../pet/pet-base.css" />
+    <link rel="stylesheet" href="../pet/pet.css" />
+    <link rel="stylesheet" href="../pet/dog.css" />
+    <link rel="stylesheet" href="./site.css" />
+    <script type="module" src="./legacy.mjs"></script>
+  </head>
+  <body>
+    <header id="head"><span id="title">Сайт</span></header>
+    <main id="main"><button id="done" type="button">Урок пройден</button></main>
+  </body>
+</html>

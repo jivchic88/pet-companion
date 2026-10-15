@@ -2,8 +2,9 @@
 // определения (bunny.mjs) и модели. Рисует по снимку: позу (data-pose), облик (data-coat), надетый аксессуар (data-acc),
 // сценку (data-scene) и одиночные движения (data-micro) показывают стили bunny.css; решений набор не принимает. Рисунок —
 // простой SVG в единицах определения (220×204, земля — y = 188), без сети и внешних ресурсов. Своя вещь комнаты —
-// морковка (data-room="carrot", единицы сцены 400×250). Подключение: mountPet({ pets, behaviors, kits: [bunnyWeb] }) и
-// <link rel="stylesheet" href="./bunny.css">.
+// морковка (data-room="carrot", единицы сцены 400×250). Подключение: legacy — mountPet({ pets, behaviors, kits: [bunnyWeb] }) и
+// <link rel="stylesheet" href="./bunny.css"> на странице; контейнер (PL07) — mountPetIn(el, { pets, behaviors, kits:
+// [bunnyWeb] }): стили набора — его styles (адрес рядом с этим модулем), вид подключает их в своё теневое дерево сам.
 
 const COATS = {
   snow: { fur: '#f6f3ee', shade: '#ddd6cc', line: '#8e8478', inner: '#f2b6bf', spot: 'none' },
@@ -72,4 +73,5 @@ export const bunnyWeb = Object.freeze({
   items: Object.freeze(['carrot']),
   art: (options) => svg(options),
   item: (id, options) => (id === 'carrot' ? carrot(options) : ''),
+  styles: Object.freeze([new URL('./bunny.css', import.meta.url).href]),
 });

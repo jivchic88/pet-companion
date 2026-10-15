@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- Питомец в контейнере под строгим CSP (в пакет не входит; README, «Питомец в контейнере», CSP): политика
+     default-src 'self'; style-src 'self' приходит HTTP-заголовком сервера. На странице нет встроенных скриптов, стилей,
+     карты импортов и атрибутов style: модуль страницы (main.mjs) и её стили (site.css) — файлы того же источника; вход
+     pet-companion/web подключается по пути к файлу установленного пакета. Стили питомца вид загружает сам (<link> в своём
+     теневом дереве, тот же источник), динамические размеры ставит через CSSOM. Папка лежит рядом с node_modules/. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Питомец под строгим CSP</title>
+    <link rel="stylesheet" href="./site.css" />
+    <script type="module" src="./main.mjs"></script>
+  </head>
+  <body>
+    <h1>Сайт со строгим CSP</h1>
+    <p>Политика сервера: <code>default-src 'self'; style-src 'self'</code>.</p>
+    <p><button id="done" type="button">Урок пройден</button></p>
+    <div id="pet"></div>
+    <p id="status" role="status"></p>
+  </body>
+</html>

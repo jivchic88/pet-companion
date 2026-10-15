@@ -10,6 +10,7 @@ import test from 'node:test';
 import * as Core from './legacy-toys.mjs';
 import * as G from './legacy-play.mjs';
 import * as T from '../pet/pet-toys.mjs';
+import { createPointer } from '../pet/web/pointer.mjs';
 import * as R from './legacy-rules.mjs';
 import { DAY, host, LEGACY_DISPLAY, life } from './core-kit.mjs';
 
@@ -74,11 +75,15 @@ test('лапа: область не меньше 44×44 CSS px на малень
   assert.equal(G.petPart('dog', up.cx, up.cy, 'calm'), 'body', 'невидимая поднятая лапа — не лапа');
   assert.equal(G.petPart('dog', 90.5, 185, 'paw'), 'body', 'опущенная лапа в позе «Дай лапу» не видна — не лапа');
   assert.equal(G.petPart('cat', up.cx, up.cy, 'paw'), 'body', 'у кота поднятой лапы нет');
-  // Разметка: та же область, что у правила.
+  // Разметка: та же область, что у правила; размеры — через CSSOM (без атрибута style в разметке — строгий CSP, PL07).
   for (const kind of ['cat', 'dog']) {
     const html = G.hitsHtml(kind);
     assert.match(html, /data-play-hit="paw"[^>]*aria-hidden="true"/);
-    const vars = Object.fromEntries([...html.matchAll(/--(\w+):([\d.]+)%/g)].map(([, key, value]) => [key, Number(value)]));
+    assert.doesNotMatch(html, /style=/, 'без атрибута style');
+    const set = {};
+    const paw = { dataset: { playHit: 'paw' }, style: { setProperty: (key, value) => (set[key] = value) } };
+    G.paintHits({ querySelectorAll: () => [paw] }, kind);
+    const vars = Object.fromEntries(Object.entries(set).map(([key, value]) => [key.slice(2), Number.parseFloat(value)]));
     assert.ok(Math.abs(vars.x - (G.PAW[kind].cx / 220) * 100) < 0.01 && Math.abs(vars.y - (G.PAW[kind].cy / 204) * 100) < 0.01, kind);
     assert.ok(Math.abs(vars.rx - (G.PAW[kind].r / 220) * 100) < 0.01);
     if (kind === 'dog') assert.ok(Math.abs(vars.ux - (up.cx / 220) * 100) < 0.01 && Math.abs(vars.uy - (up.cy / 204) * 100) < 0.01);
@@ -216,28 +221,39 @@ function fakePage() {
   return { view, toys, paw, pet, art, pointer, center, frames, handlers };
 }
 
+// Общий указатель одного отображения (PL07: на экземпляр) на имитации страницы.
+const pointerOf = () => {
+  const signal = new AbortController().signal;
+  return { signal, pointer: createPointer({ signal, root: globalThis.document, win: globalThis.window, doc: globalThis.document }) };
+};
+
 // Настоящее ядро в «Поиграть» с этим отображением предметов: пол объявляет pet-toys.mjs, места — снимок ядра.
 function playCore() {
   const L = life({ cat: CAT }, { counts: host(1, 1), display: LEGACY_DISPLAY });
   assert.equal(L.core.start().ok, true);
   assert.equal(L.core.open('play').ok, true);
-  T.initToys({
-    play: () => L.state().play,
-    drag: (toy, at) => L.core.toy.drag(toy, at),
-    drop: (roll) => L.core.toy.drop(roll === undefined ? undefined : { roll }),
-    cancel: () => L.core.toy.cancel(),
-    floor: (floor, touch) => L.core.setDisplay({ playFloor: floor, playTouch: touch }),
-    motion: () => 'none',
-  });
-  L.core.subscribe(() => T.draw(), { initial: false });
-  return L;
+  const { signal, pointer } = pointerOf();
+  const toys = T.createToys(
+    pointer,
+    {
+      play: () => L.state().play,
+      drag: (toy, at) => L.core.toy.drag(toy, at),
+      drop: (roll) => L.core.toy.drop(roll === undefined ? undefined : { roll }),
+      cancel: () => L.core.toy.cancel(),
+      floor: (floor, touch) => L.core.setDisplay({ playFloor: floor, playTouch: touch }),
+      motion: () => 'none',
+    },
+    signal,
+  );
+  L.core.subscribe(() => toys.draw(), { initial: false });
+  return { L, toys, gesture: pointer };
 }
 
 test('жест с предметом: перенос миски, отмена, касание без сдвига, второй палец, чужой жест; мячик — порог катания; места — ядро', () => {
   const page = fakePage();
-  const L = playCore();
-  T.watchToys(page.view);
-  T.mountToys(page.view);
+  const { L, toys: own, gesture: G2 } = playCore();
+  own.watch(page.view);
+  own.mount(page.view);
   const told = () => L.effects('announce').length;
   const { pointer, toys, center } = page;
   assert.ok(L.state().display.playFloor, 'пол объявлен отображением в единицах рисунка');
@@ -248,17 +264,17 @@ test('жест с предметом: перенос миски, отмена, �
   pointer('pointermove', toys.bowl, home[0] + 4, home[1]);
   assert.deepEqual(center('bowl'), home, 'до порога — на месте');
   pointer('pointerup', toys.bowl, home[0] + 4, home[1]);
-  assert.deepEqual([told(), G.gesturing(), L.state().play.drag], [0, false, null]);
+  assert.deepEqual([told(), G2.gesturing(), L.state().play.drag], [0, false, null]);
   // Перенос: точка захвата сохраняется (предмет сдвинут ровно на сдвиг указателя), отпустили — стоит там.
   pointer('pointerdown', toys.bowl, home[0] + 10, home[1]);
   pointer('pointermove', toys.bowl, home[0] + 70, home[1]);
   assert.deepEqual(center('bowl').map(Math.round), [Math.round(home[0] + 60), Math.round(home[1])], 'без скачка центром под палец');
-  assert.deepEqual([G.gesturing(), L.state().play.drag?.toy], [true, 'bowl'], 'перенос — у ядра');
+  assert.deepEqual([G2.gesturing(), L.state().play.drag?.toy], [true, 'bowl'], 'перенос — у ядра');
   // Второй палец и чужой жест не начинают и не кончают перенос.
   pointer('pointerdown', toys.ball, ...center('ball'), { pointerId: 2, isPrimary: false });
   pointer('pointerup', toys.ball, 0, 0, { pointerId: 2 });
   pointer('pointercancel', toys.ball, 0, 0, { pointerId: 2 });
-  assert.equal(G.gesturing(), true, 'второй палец не завершает');
+  assert.equal(G2.gesturing(), true, 'второй палец не завершает');
   pointer('pointerup', toys.bowl, home[0] + 70, home[1]);
   assert.deepEqual([told(), L.state().play.outcome, L.state().play.toys.bowl.home], [1, 'sniff', false], 'к питомцу — принюхивается; миска не на исходном месте');
   assert.equal(L.state().treat, 'ready', 'миска не кормит');
@@ -268,34 +284,34 @@ test('жест с предметом: перенос миски, отмена, �
     toys.bowl.captured.delete(1);
     toys.bowl.fire('lostpointercapture', { pointerId: 1 });
   };
-  for (const stop of [() => pointer('pointercancel', toys.bowl, 0, 0), lost, () => G.release('close')]) {
+  for (const stop of [() => pointer('pointercancel', toys.bowl, 0, 0), lost, () => G2.release('close')]) {
     pointer('pointerdown', toys.bowl, ...placed);
     pointer('pointermove', toys.bowl, placed[0] + 40, placed[1]);
     assert.notDeepEqual(center('bowl'), placed);
     stop();
     assert.deepEqual(center('bowl'), placed, 'вернулась на место до жеста');
-    assert.deepEqual([G.gesturing(), L.state().play.drag], [false, null]);
+    assert.deepEqual([G2.gesturing(), L.state().play.drag], [false, null]);
   }
   assert.equal(told(), 1, 'отмена — без итога');
   // Идёт другой жест сцены (поглаживание другим указателем) — предмет не берётся, жест не перехватывается.
   const other = { addEventListener() {}, removeEventListener() {}, setPointerCapture() {}, hasPointerCapture: () => false };
   let otherEnd = 0;
-  assert.equal(G.grab({ pointerId: 7, isPrimary: true, button: 0, preventDefault() {} }, other, { move() {}, end: () => (otherEnd += 1) && false }), true);
+  assert.equal(G2.grab({ pointerId: 7, isPrimary: true, button: 0, preventDefault() {} }, other, { move() {}, end: () => (otherEnd += 1) && false }), true);
   pointer('pointerdown', toys.bowl, ...placed, { pointerType: 'mouse' });
   pointer('pointermove', toys.bowl, placed[0] + 40, placed[1], { pointerType: 'mouse' });
   pointer('pointerup', toys.bowl, placed[0] + 40, placed[1], { pointerType: 'mouse' });
   assert.deepEqual(center('bowl'), placed, 'миска не сдвинулась');
   assert.equal(otherEnd, 0, 'чужой жест не кончился');
-  G.release('cancel');
+  G2.release('cancel');
   assert.equal(otherEnd, 1);
   // Мышь: основную кнопку отпустили, держа другую, — как отпустили.
   pointer('pointerdown', toys.bowl, ...placed, { pointerType: 'mouse' });
   pointer('pointermove', toys.bowl, placed[0] - 30, placed[1], { pointerType: 'mouse' });
   pointer('pointermove', toys.bowl, placed[0] - 40, placed[1], { pointerType: 'mouse', buttons: 2 });
-  assert.deepEqual([G.gesturing(), told()], [false, 2]);
+  assert.deepEqual([G2.gesturing(), told()], [false, 2]);
   // Не основная кнопка мыши — не жест.
   pointer('pointerdown', toys.ball, ...center('ball'), { pointerType: 'mouse', button: 2 });
-  assert.equal(G.gesturing(), false);
+  assert.equal(G2.gesturing(), false);
   // Мячик: сдвиг меньше ROLL_PX — не катание, назад; заметный — катится (без анимации — остаётся, где отпустили).
   const ball = center('ball');
   pointer('pointerdown', toys.ball, ...ball);
@@ -317,7 +333,7 @@ test('жест с предметом: перенос миски, отмена, �
   assert.equal(L.state().play.toys.bowl.home, true, '«Вернуть миску»');
   assert.deepEqual(center('bowl'), home, 'на исходном месте');
   assert.notEqual(L.core.interact({ type: 'ball', to: 'roll' }).outcome, 'dropped');
-  T.unmountToys();
+  own.unmount();
 });
 
 test('касание лапы: короткое на лапе — одно действие на отпускание; удержание, сдвиг, уход и второй палец — ничего; жест — ядру', () => {
@@ -326,8 +342,9 @@ test('касание лапы: короткое на лапе — одно де�
   let steps = 0;
   const calls = [];
   let ids = 0;
-  G.initPlay({ start: () => (calls.push('start'), ++ids), step: () => (steps += 1), end: (id) => calls.push(`end ${id}`), cancel: (id) => calls.push(`cancel ${id}`), paw: () => (paws += 1), motion: () => 'none' });
-  G.watchStroke(page.view);
+  const { signal, pointer: P2 } = pointerOf();
+  const stroke = G.createStroke(P2, { start: () => (calls.push('start'), ++ids), step: () => (steps += 1), end: (id) => calls.push(`end ${id}`), cancel: (id) => calls.push(`cancel ${id}`), paw: () => (paws += 1), motion: () => 'none' }, signal);
+  stroke.watch(page.view);
   const { pointer, paw } = page;
   const s = 343 / 220;
   const at = [23 + G.PAW.cat.cx * s, 179 + G.PAW.cat.cy * s];
@@ -357,17 +374,17 @@ test('касание лапы: короткое на лапе — одно де�
   pointer('pointerdown', paw, ...at, { isPrimary: false, pointerId: 2, timeStamp: 5000 });
   pointer('pointerup', paw, ...at, { pointerId: 2, timeStamp: 5050 });
   const other = { addEventListener() {}, removeEventListener() {}, setPointerCapture() {}, hasPointerCapture: () => false };
-  G.grab({ pointerId: 7, isPrimary: true, button: 0, preventDefault() {} }, other, { move() {}, end: () => false });
+  P2.grab({ pointerId: 7, isPrimary: true, button: 0, preventDefault() {} }, other, { move() {}, end: () => false });
   pointer('pointerdown', paw, ...at, { pointerType: 'mouse', timeStamp: 6000 });
   pointer('pointerup', paw, ...at, { pointerType: 'mouse', timeStamp: 6050 });
-  G.release('cancel');
+  P2.release('cancel');
   assert.equal(paws, 1, 'больше откликов нет');
   assert.equal(steps, 0, 'жест с лапы не гладит');
-  assert.equal(G.stroking(), false);
+  assert.equal(stroke.stroking(), false);
   // Ядро сняло жест само: указатель отпущен (отмена), поздний конец безвреден.
   pointer('pointerdown', paw, ...at, { timeStamp: 6500 });
-  G.strokeLost(null);
-  assert.deepEqual([G.stroking(), calls.at(-1)], [false, `cancel ${ids}`]);
+  stroke.lost(null);
+  assert.deepEqual([stroke.stroking(), calls.at(-1)], [false, `cancel ${ids}`]);
   // Следующее обычное касание работает.
   pointer('pointerdown', paw, ...at, { timeStamp: 7000 });
   pointer('pointerup', paw, ...at, { timeStamp: 7100 });

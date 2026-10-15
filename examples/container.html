@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- Питомец в контейнере (в пакет не входит; README, «Питомец в контейнере»): два независимых питомца в двух блоках сайта —
+     вход pet-companion/web (mountPetIn) из node_modules без сборщика (карта импортов). Стили пакета вид подключает сам в
+     своё теневое дерево: страница их не загружает, шапки и панелей для питомца не нужно. Сайт сам считает знаки и
+     сообщает о занятии (view.core.notify), сам блокирует прокрутку, пока открыт диалог питомца (onOpenChange), и может
+     отключить и снова подключить питомца (destroy → mountPetIn). Файл — в корне проекта рядом с node_modules/ (как
+     examples/importmap.html); открывать по http(s). -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Питомец в контейнере</title>
+    <script type="importmap">
+      { "imports": { "pet-companion/web": "./node_modules/pet-companion/pet/web.mjs" } }
+    </script>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+      .pets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+      #main-pet {
+        width: min(100%, 300px);
+      }
+      #small-pet {
+        width: 96px;
+        height: 96px;
+      }
+      html.locked {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Мой сайт</h1>
+    <p><button id="done" type="button">Урок пройден</button> <button id="again" type="button">Подключить заново</button></p>
+    <div class="pets">
+      <div id="main-pet"></div>
+      <div id="small-pet"></div>
+    </div>
+    <script type="module">
+      import { mountPetIn } from 'pet-companion/web';
+
+      let marks = 0; // знаки за занятия — считает сайт
+      let today = 0; // из них сегодня
+      // Прокрутку страницы, пока открыт диалог питомца, блокирует сайт (питомец сам её не трогает).
+      const lock = (open) => document.documentElement.classList.toggle('locked', open);
+      const mount = () => mountPetIn(document.getElementById('main-pet'), { namespace: 'mysite', progress: () => ({ marks, today, limit: 3 }), onOpenChange: lock });
+      let pet = mount();
+      // Второй питомец — в своём пространстве имён: настройки и дневные лимиты у него свои.
+      const small = mountPetIn(document.getElementById('small-pet'), { namespace: 'mysite-small', onOpenChange: lock });
+      if (!pet.mounted || !small.mounted) console.info('Питомец не подключён — причина выше в консоли');
+      window.demo = { get pet() { return pet; }, small };
+
+      // Занятие сохранено и засчитано: сначала счёт сайта, затем событие.
+      document.getElementById('done').addEventListener('click', () => {
+        marks += 1;
+        today += 1;
+        pet.core?.notify('saved', { key: `lesson-${marks}`, counted: true, first: today === 1 });
+      });
+      // Отключить и подключить снова: сохранённые настройки — те же, второй питомец не тронут.
+      document.getElementById('again').addEventListener('click', () => {
+        pet.destroy();
+        pet = mount();
+      });
+    </script>
+  </body>
+</html>

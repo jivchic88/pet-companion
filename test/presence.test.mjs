@@ -1,5 +1,5 @@
 // Присутствие «Всегда рядом» / «Приходит по зову» (правила — pet/core/presence.mjs, реэкспорт — pet/pet-place.mjs;
-// отображение — pet/pet.mjs, pet/pet.css): свой ключ, разбор
+// отображение — pet/web/shell.mjs и web/legacy/places.mjs, pet/pet.css): свой ключ, разбор
 // без перезаписи, запись с чужими полями и номером будущей версии, независимость от «скрыт» и других предпочтений, что
 // видно рядом со страницей и когда разрешено декоративное (в том числе сценки), кнопка вызова — без мордашки, точек,
 // движения и переноса, прямой вызов — без отметки просмотра уголка, при печати кнопки нет.
@@ -96,8 +96,11 @@ test('присутствие: декоративное (движения пок�
 });
 
 test('кнопка вызова: лапка без мордашки, точек и переноса; прямой вызов — сразу «Поиграть», без отметки просмотра уголка', async () => {
-  const ui = await source('pet/pet.mjs');
-  const call = ui.slice(ui.indexOf('const callHtml = () =>'), ui.indexOf('// Вид места:'));
+  // С PL07 отображение — общая оболочка на экземпляр (web/shell.mjs) и поверхность мест legacy (web/legacy/places.mjs).
+  const shell = await source('pet/web/shell.mjs');
+  const places = await source('pet/web/legacy/places.mjs');
+  const ui = `${shell}\n${places}`;
+  const call = shell.slice(shell.indexOf('const callHtml = () =>'), shell.indexOf('const returnLabel'));
   assert.match(call, /<button class="cat-call" type="button" data-cat-call aria-haspopup="dialog" aria-expanded="false" aria-controls="cat-sheet"/);
   assert.match(call, /\$\{PAW_ICON\}/, 'существующий значок лапки');
   assert.doesNotMatch(call, /data-pet-drag|cat-dot|cat-art|art\(/, 'без переноса, точки и рисунка животного');
@@ -107,14 +110,14 @@ test('кнопка вызова: лапка без мордашки, точек 
   // праздник по виду и «на виду» решает ядро (исполнение — test/core-presence.test.mjs).
   // PL05: кнопка — только команда ядра (тот же путь, что прямая pet.core.open); разметку вида рисует подписка (openMarkup)
   // по снимку, команд не вызывает (исполнение — test/browser-commands.mjs).
-  const open = ui.slice(ui.indexOf('function openSheet('), ui.indexOf('// Закрытие отображением'));
-  assert.match(open, /function openSheet\(opener, source = 'pet'\)/);
-  assert.match(open, /ui\.core\.open\(source === 'call' \? 'play' : 'corner', \{ source \}\);/);
+  const open = shell.slice(shell.indexOf('function openSheet('), shell.indexOf('// Закрытие отображением'));
+  assert.match(open, /function openSheet\(opener, source = 'pet', view = null\)/);
+  assert.match(open, /ui\.core\.open\(view \?\? \(source === 'call' \? 'play' : 'corner'\), \{ source \}\);/);
   const markup = open.slice(open.indexOf('function openMarkup('));
   assert.ok(markup.length > 0 && markup.indexOf('playMarkup();') > 0 && markup.indexOf('playMarkup();') < markup.indexOf('ui.sheet.showModal();'), 'вид «Поиграть» — ядру, затем разметка до showModal (без вспышки уголка)');
   assert.doesNotMatch(markup, /ui\.core\./, 'разметка по снимку команд ядра не вызывает');
   assert.doesNotMatch(open, /'greet'|'joy'|'unlock'|markSeen|setSight/, 'без приветствия, радости, праздника и своей отметки');
-  const close = ui.slice(ui.indexOf('function closeSheet('), ui.indexOf('// ---------- сцена «Поиграть»'));
+  const close = shell.slice(shell.indexOf('function closeSheet('), shell.indexOf('// ---------- сцена «Поиграть»'));
   assert.match(close, /ui\.core\.close\(\);/);
   assert.match(ui, /const openedBy = \(\) => snap\(\)\.view\.source;/);
   assert.match(ui, /const playBack = \(\) => \(openedBy\(\) === 'call' \? closeSheet\(\) : leavePlay\(\)\);/);
@@ -125,14 +128,14 @@ test('кнопка вызова: лапка без мордашки, точек 
   for (const rule of ['presenceSurface', 'petAround', 'presenceRecord', 'stageToCelebrate', 'doneOutcome', 'unlockedBetween', 'seenStage: ', 'pickScene', 'sceneTurn', 'sceneCommit', 'sceneFits', 'sceneWaited', 'indexedDB', 'crypto', 'setSight', 'markSeen', 'sceneNext', 'sceneChecked']) {
     assert.equal(ui.includes(rule), false, `в оболочке нет ${rule}`);
   }
-  const saved = ui.slice(ui.indexOf('function saved('), ui.indexOf('function failed('));
+  const saved = shell.slice(shell.indexOf('function saved('), shell.indexOf('function failed('));
   assert.match(saved, /ui\.core\.notify\('saved', event, \{ scene: Boolean\(detail\?\.key\) \}\)/, 'событие без key — без сценки (Р2), решение — ядро');
   // Доработка 2026-10-11: закрытый по зову диалог очищается и при смене режима; фокус спрятанного медиазапросом входа
   // возвращается. «Ничего не доигрывает» — ядро; здесь — таймеры показа и очистка закрытого диалога.
-  const presence = ui.slice(ui.indexOf('function applyPresence('), ui.indexOf('function choosePresence('));
+  const presence = shell.slice(shell.indexOf('function applyPresence('), shell.indexOf('function choosePresence('));
   assert.match(presence, /renderAll\(\);\s*if \(!around\(\)\) \{\s*dropShown\(\);\s*clearSheet\(\);\s*\}/);
-  assert.match(ui, /if \(!relatedTarget && openers\(\)\.includes\(target\) && !shown\(target\)\) ui\.lostEntry = true;/);
-  const layout = ui.slice(ui.indexOf('function applyLayout('), ui.indexOf('const hostBox'));
+  assert.match(places, /if \(!relatedTarget && openers\(\)\.includes\(target\) && !shown\(target\)\) L\.lostEntry = true;/);
+  const layout = places.slice(places.indexOf('function applyLayout('), places.indexOf('const hostBox'));
   assert.match(layout, /if \(lost\) fallbackFocus\(\)\?\.focus\(\{ preventScroll: true \}\);\s*else keepFocus\(focused\);/, 'и для лапки, а не только при смене места питомца');
   // Запись присутствия — команда ядра (setPresence, координатор хранения); оболочка ключ presence не читает и не пишет.
   // С PL04.3 оболочка не пишет ни одного ключа (place и room — тоже ядро): setItem — только веб-адаптер координатора.

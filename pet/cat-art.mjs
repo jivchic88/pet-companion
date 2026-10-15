@@ -278,15 +278,16 @@ export function catSvg({ id = 'cat', view = 'full', className = '', box = null, 
 }
 
 // ---------- сцена: место кота и вещи по ступеням ----------
-// Цвета стены и пола — переменные темы (pet.css); вещи нарисованы в одном стиле с котом.
+// Цвета стены, окна, пола и пара кружки — переменные темы через классы (pet.css), без атрибутов style в разметке
+// (строгий CSP, PL07); вещи нарисованы в одном стиле с котом.
 
 const ITEM_ART = {
   window: () => `<g class="cat-item" data-item="window">
-      <rect x="34" y="24" width="84" height="74" rx="8" style="fill:var(--cat-sky);stroke:var(--cat-frame)" stroke-width="5"/>
-      <path d="M76 26V96M36 61H116" style="stroke:var(--cat-frame)" stroke-width="3.5"/>
-      <circle class="cat-sky-dot" cx="98" cy="40" r="6" style="fill:var(--cat-sky-dot)"/>
-      <path d="M40 92Q58 82 74 90" fill="none" style="stroke:var(--cat-sky-hill)" stroke-width="5" stroke-linecap="round"/>
-      <rect x="28" y="96" width="96" height="7" rx="3" style="fill:var(--cat-frame)"/>
+      <rect class="cat-sky-glass" x="34" y="24" width="84" height="74" rx="8" stroke-width="5"/>
+      <path class="cat-sky-bars" d="M76 26V96M36 61H116" stroke-width="3.5"/>
+      <circle class="cat-sky-dot" cx="98" cy="40" r="6"/>
+      <path class="cat-sky-hill" d="M40 92Q58 82 74 90" fill="none" stroke-width="5" stroke-linecap="round"/>
+      <rect class="cat-sky-sill" x="28" y="96" width="96" height="7" rx="3"/>
     </g>`,
   board: () => `<g class="cat-item" data-item="board">
       <rect x="280" y="26" width="92" height="64" rx="6" fill="#c9a77c" stroke="#8b6a47" stroke-width="3"/>
@@ -327,7 +328,7 @@ const ITEM_ART = {
       <path d="M118 231L121 232.6" stroke="#f0b9a5" stroke-width="3" stroke-linecap="round"/>
     </g>`,
   mug: () => `<g class="cat-item" data-item="mug">
-      <g class="cat-steam" fill="none" style="stroke:var(--cat-steam)" stroke-width="2" stroke-linecap="round">
+      <g class="cat-steam" fill="none" stroke-width="2" stroke-linecap="round">
         <path d="M316 196q-5-7 0-13t0-12"/><path d="M326 198q-5-7 0-13t0-11"/>
       </g>
       <path d="M306 204H336L333.5 232Q333 238 327 238H315Q309 238 308.5 232Z" fill="#f2ead9" stroke="#8b7b67" stroke-width="2" stroke-linejoin="round"/>
@@ -390,13 +391,13 @@ export function sceneSvg({ id = 'scene', stage = 0, fresh = [], cat = '', extra 
     : '';
   return `<svg class="cat-scene-art" viewBox="${SCENE_VIEWBOX}" aria-hidden="true" focusable="false">
     <defs>
-      <linearGradient id="${p}-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--cat-wall-top)"/><stop offset="1" style="stop-color:var(--cat-wall)"/></linearGradient>
+      <linearGradient id="${p}-wall" x1="0" y1="0" x2="0" y2="1"><stop class="cat-wall-top" offset="0"/><stop class="cat-wall-low" offset="1"/></linearGradient>
       <radialGradient id="${p}-glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffd98a" stop-opacity=".42"/><stop offset=".45" stop-color="#ffd98a" stop-opacity=".16"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/></radialGradient>
-      <radialGradient id="${p}-rug" cx=".5" cy=".5" r=".5"><stop offset="0" style="stop-color:var(--cat-rug)"/><stop offset=".85" style="stop-color:var(--cat-rug)"/><stop offset="1" style="stop-color:var(--cat-rug-edge)"/></radialGradient>
+      <radialGradient id="${p}-rug" cx=".5" cy=".5" r=".5"><stop class="cat-rug-mid" offset="0"/><stop class="cat-rug-mid" offset=".85"/><stop class="cat-rug-edge" offset="1"/></radialGradient>
     </defs>
     <rect width="400" height="250" fill="url(#${p}-wall)"/>
-    <path d="M0 176H400V250H0Z" style="fill:var(--cat-floor)"/>
-    <path d="M0 176H400" style="stroke:var(--cat-board-line)" stroke-width="3"/>
+    <path class="cat-floor-fill" d="M0 176H400V250H0Z"/>
+    <path class="cat-floor-line" d="M0 176H400" stroke-width="3"/>
     ${ITEM_ART.window()}
     ${glow}
     ${pick(['board', 'plant', 'lamp'])}

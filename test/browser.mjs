@@ -21,7 +21,10 @@
 // подключение и прежний фасад) — test/browser-commands.mjs; пример расширения (PL06: кролик и живая модель через публичные
 // входы, файлы пакета по адресу установленного архива) — test/browser-extension.mjs; наборы отображения (PL06, по
 // независимой проверке: отказ неполного своего и неподходящего штатного набора до любых действий, контроли) —
-// test/browser-kits.mjs. Часы — page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
+// test/browser-kits.mjs; контейнерный режим (PL07: mountPetIn в Shadow DOM, два контейнера и legacy, общий namespace,
+// отключение посреди действий, размеры по контейнеру, клавиатура, палец, масштаб, стили сайта и тема, id и ссылки,
+// пример расширения в контейнере, наборы, отказы, CSP-стенд с HTTP-заголовком) — test/browser-view.mjs (свой сервер:
+// стенд test/container.html и примеры examples/extension, examples/csp). Часы — page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
 // установленный Google Chrome).
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -38,6 +41,7 @@ import { lifeQa } from './browser-life.mjs';
 import { playQa } from './browser-play.mjs';
 import { presenceQa } from './browser-presence.mjs';
 import { storageQa } from './browser-storage.mjs';
+import { viewQa } from './browser-view.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -85,7 +89,7 @@ export function serve() {
     // Файлы модуля, в том числе вложенные (core/, web/); без «..» и точек в именах папок.
     const name = /^\/(pet|pet2|old|old14)\/((?:[\w-]+\/)*[\w-]+\.(mjs|css))$/.exec(pathname);
     const dir = { old: OLD, old14: OLD14 }[name?.[1]] ?? path.join(root, 'pet');
-    const file = pathname === '/' ? path.join(root, 'test', 'stand.html') : pathname === '/readme' ? 'readme.html' : pathname.startsWith('/site/') ? 'site.html' : name ? path.join(dir, name[2]) : '';
+    const file = pathname === '/' ? path.join(root, 'test', 'stand.html') : pathname === '/container' ? path.join(root, 'test', 'container.html') : pathname === '/readme' ? 'readme.html' : pathname.startsWith('/site/') ? 'site.html' : name ? path.join(dir, name[2]) : '';
     try {
       const body = file === 'readme.html' ? await readmeExample() : file === 'site.html' ? (['/site/plain', '/site/rules'].includes(pathname) ? sitePage(pathname === '/site/rules') : null) : await readFile(file);
       if (body === null) throw new Error('нет');
@@ -1129,6 +1133,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await commandsQa(browser, server.base, check, open, layout);
     await kitsQa(browser, server.base, check, open);
     await extensionQa(browser, check, open, layout);
+    await viewQa(browser, check, open, layout);
   } finally {
     await server.close();
   }

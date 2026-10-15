@@ -1209,6 +1209,56 @@
   gap: 10px;
 }
 
+/* Общий уголок и маленькие вещи: цвета темы — классами (без атрибутов style в разметке — строгий CSP). */
+.cat-sky-glass {
+  fill: var(--cat-sky);
+  stroke: var(--cat-frame);
+}
+
+.cat-sky-bars {
+  stroke: var(--cat-frame);
+}
+
+.cat-sky-dot {
+  fill: var(--cat-sky-dot);
+}
+
+.cat-sky-hill {
+  stroke: var(--cat-sky-hill);
+}
+
+.cat-sky-sill {
+  fill: var(--cat-frame);
+}
+
+.cat-steam {
+  stroke: var(--cat-steam);
+}
+
+.cat-wall-top {
+  stop-color: var(--cat-wall-top);
+}
+
+.cat-wall-low {
+  stop-color: var(--cat-wall);
+}
+
+.cat-rug-mid {
+  stop-color: var(--cat-rug);
+}
+
+.cat-rug-edge {
+  stop-color: var(--cat-rug-edge);
+}
+
+.cat-floor-fill {
+  fill: var(--cat-floor);
+}
+
+.cat-floor-line {
+  stroke: var(--cat-board-line);
+}
+
 .cat-scene-art {
   display: block;
   width: 100%;
