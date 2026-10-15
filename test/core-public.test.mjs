@@ -2,7 +2,10 @@
 // поверхность входа, хранилища и экземпляра (ровно публичные методы, внутренних входов legacy нет); создание — проверка
 // настроек до подключения, регистрация определений не принимается, хранилище — только createStorage и загруженное; при
 // создании ни записи, ни задач, ни слушателей; жизненный цикл; результаты команд — точные поля, честный changed, коды
-// отказов без изменений и обновлений; обязательный непустой key события, failed без подробностей, внутренние признаки
+// отказов без изменений и обновлений; дополнительные поля каждой команды — собственные, нужного типа на всех путях
+// успеха: повтор без изменений (уже показанный питомец — reacted: false), изменение, сбой после применения (по
+// независимой проверке PL05); объявление отображения — плотные массивы строк, неверный индекс — отказ до применения, без
+// отмены сценки и жеста; обязательный непустой key события, failed без подробностей, внутренние признаки
 // (scene, pick) — не параметры; готовые имена; отчёт сохранения — синхронный успех и отказ, partial двух ключей,
 // асинхронные pending → done (успех, отказ, partial, после destroy), статус старой операции не снимает pending новой;
 // снимок — глубоко замороженный, стабильная ссылка, без place и функций, чужие объекты не заморожены; подписка и раунд —
@@ -335,6 +338,273 @@ test('changed честный: повтор того же значения — ch
     assert.deepEqual([result.ok, result.changed, result.save], [true, false, { status: 'none', keys: [], results: {} }]);
   }
   assert.deepEqual([state(L) === before, L.seen.length - seen], [true, 0]);
+});
+
+// Дополнительные поля успеха каждой команды (pet/core.d.mts, § 6.4) — собственное поле нужного типа на всех путях: повтор
+// без изменений, изменение, сбой после применения (по независимой проверке PL05: повторный setPet давал reacted:
+// undefined). Проверяется значение до сериализации (JSON отбросил бы undefined), а не только набор ключей.
+const isBool = (value) => typeof value === 'boolean';
+const isText = (value) => typeof value === 'string';
+const isList = (value) => Array.isArray(value) && Object.keys(value).length === value.length && value.every(isText);
+const isOutcome = (value) => value === null || isText(value);
+const EXTRA = {
+  none: {},
+  refresh: { fresh: isList },
+  saved: { reacted: isBool, duplicate: isBool, celebrate: (value) => value === null || Number.isSafeInteger(value), fresh: isList },
+  failed: { reacted: isBool },
+  open: { fresh: isList },
+  setName: { reacted: isBool },
+  setPet: { reacted: isBool },
+  outcome: { outcome: isOutcome, text: isText },
+  strokeStart: { id: (value) => Number.isSafeInteger(value) && value > 0 },
+  strokeStep: { outcome: isOutcome, announced: isBool },
+  roomSave: { closed: isBool, text: isText, fresh: isList },
+  roomCancel: { text: isText, fresh: isList },
+};
+const NONE = { status: 'none', keys: [], results: {} };
+function shaped(result, extra, title) {
+  assert.equal(result?.ok, true, `${title}: успех`);
+  const fields = ['changed', 'ok', 'save', ...(result.degraded === true ? ['degraded'] : []), ...Object.keys(extra)].sort();
+  assert.deepEqual(Object.keys(result).sort(), fields, `${title}: ровно поля команды`);
+  assert.ok(isBool(result.changed) && ['none', 'saved', 'pending', 'failed', 'partial'].includes(result.save?.status), `${title}: changed и save`);
+  for (const [field, valid] of Object.entries(extra)) assert.ok(Object.hasOwn(result, field) && valid(result[field]), `${title}: ${field} = ${String(result[field])}`);
+  return result;
+}
+// Отказ: ровно { ok: false, error: { code, message } }, ничего не изменено, ни записи, ни обновления, ни журнала.
+function refused(L, call, code, title) {
+  const before = state(L);
+  const seen = L.seen.length;
+  const writes = L.store.writes().length;
+  const logged = L.log.length;
+  const result = call();
+  assert.deepEqual([result.ok, result.error?.code, typeof result.error?.message, Object.keys(result).sort()], [false, code, 'string', ['error', 'ok']], title);
+  assert.deepEqual([state(L) === before, L.seen.length - seen, L.store.writes().length - writes, L.log.length - logged], [true, 0, 0, 0], `${title}: ничего не изменено`);
+}
+
+test('setPet: уже показанный кот или собака — ok, changed false, reacted строго false, save none; снимок прежний, ни записи, ни обновления, ни журнала — до start, запущен, спрятан, «по зову» без вызова', () => {
+  const repeat = (L, id, title) => {
+    const before = state(L);
+    const seen = L.seen.length;
+    const writes = L.store.writes().length;
+    const logged = L.log.length;
+    const result = shaped(L.core.setPet(id), EXTRA.setPet, title);
+    assert.deepEqual([result.changed, result.reacted, result.save, 'degraded' in result], [false, false, NONE, false], title);
+    assert.deepEqual([state(L) === before, L.seen.length - seen, L.store.writes().length - writes, L.log.length - logged], [true, 0, 0, 0], `${title}: ничего не изменено`);
+  };
+  for (const [kind, initial] of [
+    ['cat', { cat: CAT }],
+    ['dog', { cat: CAT, companion: { v: 1, kind: 'dog' } }],
+  ]) {
+    const L = make({ initial, counts: { marks: 1, today: 1 } });
+    repeat(L, kind, `${kind} до start`);
+    L.core.start();
+    L.plan.advance(10_000);
+    repeat(L, kind, `${kind} запущен`);
+    L.core.hide();
+    repeat(L, kind, `${kind} спрятан`);
+    L.core.show();
+    L.core.setPresence('on-call');
+    L.plan.advance(10_000);
+    repeat(L, kind, `${kind} «по зову», не вызван`);
+    L.core.destroy();
+  }
+});
+
+test('setPet контроли: смена — changed, запись companion, reacted boolean (на виду — приветствие, спрятан — тихо); отказы unsupported, unknown-id, invalid-argument, destroyed — без изменений', () => {
+  const L = make({ initial: { cat: CAT }, counts: { marks: 1, today: 1 } });
+  L.core.start();
+  L.plan.advance(10_000);
+  const dog = shaped(L.core.setPet('dog'), EXTRA.setPet, 'смена на собаку');
+  assert.deepEqual([dog.changed, dog.reacted, dog.save, state(L).pet.id, L.json('companion').kind], [true, true, { status: 'saved', keys: ['companion'], results: { companion: 'saved' } }, 'dog', 'dog'], 'на виду — приветствие');
+  L.core.hide();
+  const cat = shaped(L.core.setPet('cat'), EXTRA.setPet, 'смена спрятанного');
+  assert.deepEqual([cat.changed, cat.reacted, state(L).pet.id], [true, false, 'cat'], 'спрятан — тихо');
+  L.core.show();
+  L.core.setDisplay({ pets: ['cat'] });
+  refused(L, () => L.core.setPet('dog'), 'unsupported', 'отображение собаку не рисует');
+  refused(L, () => L.core.setPet('fox'), 'unknown-id', 'неизвестный');
+  refused(L, () => L.core.setPet(['cat']), 'invalid-argument', 'не строка');
+  L.core.destroy();
+  assert.deepEqual(L.core.setPet('cat'), { ok: false, error: { code: 'destroyed', message: 'Питомец отключён.' } });
+});
+
+test('доп. поля успеха каждой команды — собственные поля нужного типа на путях без изменений и изменения; у команд без доп. полей — только ok, changed, save', () => {
+  const L = make({ initial: { cat: CAT }, counts: { marks: 1, today: 1 } });
+  const c = L.core;
+  const ok = (title, result, extra = EXTRA.none) => shaped(result, extra, title);
+  ok('setDisplay', c.setDisplay({ views: VIEWS, playFloor: FLOOR }));
+  ok('setDisplay тот же', c.setDisplay({ views: VIEWS }));
+  ok('start', c.start());
+  L.plan.advance(10_000);
+  ok('refresh без изменений', c.refresh(), EXTRA.refresh);
+  ok('notify saved null', c.notify('saved', null), EXTRA.saved);
+  const saved = ok('notify saved', c.notify('saved', { key: 'a', counted: true }), EXTRA.saved);
+  const repeat = ok('notify saved повтор key', c.notify('saved', { key: 'a', counted: true }), EXTRA.saved);
+  assert.deepEqual([saved.reacted, saved.duplicate, repeat.duplicate], [true, false, true]);
+  L.plan.advance(10_000);
+  ok('notify failed', c.notify('failed'), EXTRA.failed);
+  ok('setName своё', c.setName('Барсик'), EXTRA.setName);
+  ok('setName то же', c.setName('Барсик'), EXTRA.setName);
+  ok('setName готовое', c.setName('Пиксель'), EXTRA.setName);
+  ok('setPet тот же', c.setPet('cat'), EXTRA.setPet);
+  ok('setAppearance', c.setAppearance({ coat: 'ginger' }));
+  ok('setAppearance тот же', c.setAppearance({ coat: 'ginger' }));
+  ok('setPreferences', c.setPreferences({ phrases: false }));
+  ok('setPreferences те же', c.setPreferences({ phrases: false }));
+  ok('setContext', c.setContext({ focus: true }));
+  ok('setContext тот же', c.setContext({ focus: true }));
+  ok('setVisible тот же', c.setVisible(true));
+  ok('setReducedMotion', c.setReducedMotion(false));
+  ok('activity', c.activity());
+  ok('feed', c.feed());
+  ok('close без вида', c.close());
+  ok('open corner', c.open('corner'), EXTRA.open);
+  ok('open corner снова', c.open('corner'), EXTRA.open);
+  ok('refresh в уголке', c.refresh(), EXTRA.refresh);
+  ok('interact pet в уголке', c.interact({ type: 'pet' }), EXTRA.outcome);
+  ok('open play', c.open('play'), EXTRA.open);
+  L.plan.advance(61_000);
+  ok('interact pet в «Поиграть»', c.interact({ type: 'pet' }), EXTRA.outcome);
+  ok('interact bowl', c.interact({ type: 'bowl', to: 'near' }), EXTRA.outcome);
+  const gesture = ok('stroke.start', c.stroke.start(), EXTRA.strokeStart);
+  ok('stroke.step', c.stroke.step(gesture.id), EXTRA.strokeStep);
+  ok('stroke.end', c.stroke.end(gesture.id));
+  ok('stroke.cancel устаревший', c.stroke.cancel(gesture.id));
+  ok('toy.drop без переноса', c.toy.drop(), EXTRA.outcome);
+  ok('toy.drag', c.toy.drag('ball', [150, 214]));
+  ok('toy.drop', c.toy.drop({ roll: 40 }), EXTRA.outcome);
+  ok('toy.cancel без переноса', c.toy.cancel());
+  ok('open room', c.open('room'), EXTRA.open);
+  ok('room.select', c.room.select('yarn'));
+  ok('room.nudge', c.room.nudge('left'));
+  ok('room.move', c.room.move('yarn', [60, 230]));
+  ok('room.drag', c.room.drag('yarn', [80, 230]));
+  ok('room.drop', c.room.drop());
+  ok('room.dragCancel без переноса', c.room.dragCancel());
+  ok('room.reset', c.room.reset());
+  ok('room.cancel', c.room.cancel(), EXTRA.roomCancel);
+  c.open('room');
+  ok('room.save без изменений', c.room.save(), EXTRA.roomSave);
+  c.open('room');
+  c.room.move('yarn', [60, 230]);
+  L.store.deny = /:room:/;
+  const failed = ok('room.save отказ записи', c.room.save(), EXTRA.roomSave);
+  L.store.deny = null;
+  const stored = ok('room.save', c.room.save(), EXTRA.roomSave);
+  assert.deepEqual([failed.closed, failed.save.status, stored.closed, stored.save.status], [false, 'failed', true, 'saved']);
+  ok('setPresence', c.setPresence('on-call'));
+  ok('setPresence то же', c.setPresence('on-call'));
+  ok('hide', c.hide());
+  ok('hide снова', c.hide());
+  ok('notify failed спрятан', c.notify('failed'), EXTRA.failed);
+  ok('notify saved спрятан', c.notify('saved', { key: 'b' }), EXTRA.saved);
+  ok('setName спрятан', c.setName('Котлетыч'), EXTRA.setName);
+  ok('show', c.show());
+  ok('setPet', c.setPet('dog'), EXTRA.setPet);
+  ok('setPet тот же «по зову»', c.setPet('dog'), EXTRA.setPet);
+  ok('setVisible', c.setVisible(false));
+  c.destroy();
+});
+
+// Порты, отказывающие по флагу: random (выбор реплики, шанс) и clock.now (время реакции, отмена сценки) — исключение в
+// оркестровке после применения команды (§ 5.5: ok с degraded, warning internal).
+function trapped() {
+  const ns = `trap${++spaces}`;
+  const L = make({ backend: syncBackend({ [`${ns}:cat:v1`]: JSON.stringify(CAT) }), ns, counts: { marks: 2, today: 1 } });
+  const trap = { random: false, clock: false };
+  const { random, clock } = L.opts;
+  L.opts.random = () => {
+    if (trap.random) throw new Error('random отказал (проверка)');
+    return random();
+  };
+  L.opts.clock = {
+    ...clock,
+    now: () => {
+      if (trap.clock) throw new Error('clock.now отказал (проверка)');
+      return clock.now();
+    },
+  };
+  L.ready();
+  L.core.setDisplay({ views: VIEWS, playFloor: FLOOR });
+  L.core.start();
+  L.plan.advance(10_000);
+  L.trap = trap;
+  // Команда при отказавшем порте: ok, degraded, все поля команды; в её обновлении — warning internal.
+  L.fault = (port, title, call, extra) => {
+    const seen = L.seen.length;
+    trap[port] = true;
+    let result;
+    try {
+      result = call();
+    } finally {
+      trap[port] = false;
+    }
+    shaped(result, extra, title);
+    assert.equal(result.degraded, true, `${title}: degraded`);
+    assert.ok(L.seen.slice(seen).some((update) => update.effects.some((effect) => effect.type === 'warning' && effect.code === 'internal')), `${title}: warning internal`);
+    return result;
+  };
+  return L;
+}
+
+test('сбой после применения (исключение random или clock.now в оркестровке): ok, degraded, warning internal и все поля своей команды; решения до сбоя — в полях; номер жеста — уже выделенный, жест с ним не идёт', () => {
+  const A = trapped();
+  const effectsSince = (seen, type) => A.seen.slice(seen).flatMap((update) => update.effects.filter((effect) => effect.type === type));
+  // Событие занятия: праздник и запись приняты до сбоя реакции — в результате; реакции нет.
+  A.counts.marks = 3;
+  let seen = A.seen.length;
+  const saved = A.fault('random', 'notify saved', () => A.core.notify('saved', { key: 'k', counted: true }), EXTRA.saved);
+  assert.deepEqual([saved.reacted, saved.duplicate, saved.celebrate, A.json('cat').seenStage, effectsSince(seen, 'celebrate').map((effect) => effect.stage)], [true, false, 1, 1, [1]]);
+  A.plan.advance(10_000);
+  // Уголок: увиденные вещи — те, что в эффекте seen; отклик на имя и приветствие питомца не сыграны.
+  A.counts.marks = 9;
+  seen = A.seen.length;
+  const opened = A.fault('random', 'open corner', () => A.core.open('corner'), EXTRA.open);
+  assert.deepEqual([opened.fresh.length > 0, effectsSince(seen, 'seen').map((effect) => effect.items)], [true, [opened.fresh]]);
+  A.plan.advance(10_000);
+  const named = A.fault('random', 'setName готовое', () => A.core.setName('Пиксель'), EXTRA.setName);
+  assert.deepEqual([named.changed, named.reacted, A.json('cat').name], [true, false, 'Пиксель']);
+  A.plan.advance(10_000);
+  const pet = A.fault('random', 'setPet', () => A.core.setPet('dog'), EXTRA.setPet);
+  assert.deepEqual([pet.changed, pet.reacted, pet.save.status, A.json('companion').kind], [true, false, 'saved', 'dog']);
+  const back = A.fault('clock', 'setPet обратно', () => A.core.setPet('cat'), EXTRA.setPet);
+  assert.deepEqual([back.reacted, A.json('companion').kind], [false, 'cat']);
+  // «Поиграть»: прямое действие, шаг жеста, начало жеста, перенос предмета.
+  A.core.open('play');
+  A.plan.advance(61_000);
+  const touched = A.fault('random', 'interact pet', () => A.core.interact({ type: 'pet' }), EXTRA.outcome);
+  assert.deepEqual([touched.outcome, touched.text], [null, '']);
+  A.plan.advance(61_000);
+  const gesture = A.core.stroke.start();
+  const step = A.fault('random', 'stroke.step', () => A.core.stroke.step(gesture.id), EXTRA.strokeStep);
+  assert.deepEqual([step.outcome, step.announced], [null, false]);
+  A.core.stroke.end(gesture.id);
+  A.plan.advance(61_000);
+  // Часы отказали при отмене сценки — до начала жеста: номер выделен, жеста с ним нет.
+  const started = A.fault('clock', 'stroke.start', () => A.core.stroke.start(), EXTRA.strokeStart);
+  assert.deepEqual([started.id > gesture.id, state(A).play.stroke], [true, null], 'свой новый номер, жест не начат');
+  assert.equal(A.core.stroke.step(started.id).error?.code, 'no-gesture', 'шаг — no-gesture');
+  const ended = A.core.stroke.end(started.id);
+  assert.deepEqual([ended.ok, ended.changed], [true, false], 'конец — без изменений');
+  const next = A.core.stroke.start();
+  assert.ok(next.ok && next.id > started.id, 'следующий жест — другой номер');
+  A.core.stroke.end(next.id);
+  A.core.toy.drag('bowl', [100, 214]);
+  A.core.toy.drag('bowl', [10, 214]);
+  A.plan.advance(61_000);
+  const dropped = A.fault('clock', 'toy.drop', () => A.core.toy.drop(), EXTRA.outcome);
+  assert.deepEqual([dropped.outcome, dropped.text, state(A).play?.drag ?? null], [null, '', null]);
+  // Редактор: «Сохранить» — запись прошла, выход по виду; «Отмена» — итог без объявления.
+  A.core.open('room');
+  A.core.room.move('yarn', [60, 230]);
+  const [x, y] = state(A).room.draft.pos.yarn;
+  const stored = A.fault('clock', 'room.save', () => A.core.room.save(), EXTRA.roomSave);
+  assert.deepEqual([stored.save.status, stored.closed, stored.text, A.json('room').cat.yarn], ['saved', state(A).view.open !== 'room', '', { x, y }]);
+  A.core.close();
+  A.core.open('room');
+  const cancelled = A.fault('clock', 'room.cancel', () => A.core.room.cancel(), EXTRA.roomCancel);
+  assert.deepEqual([cancelled.text, cancelled.fresh], ['', []]);
+  A.core.destroy();
 });
 
 test('notify: публичный saved требует непустой key и только известные поля; failed — без подробностей; null — только счёт; признак scene — не параметр', () => {
@@ -762,6 +1032,129 @@ test('входы отображения публично: setVisible, setReduced
   assert.equal(L.core.setPet('dog').error.code, 'unsupported', 'отображение собаку не рисует');
   assert.equal(L.core.open('play').error.code, 'unsupported', 'вид не объявлен');
   L.core.destroy();
+});
+
+// Неверные массивы строк объявления (views, pets, значения scenes): пустой индекс разреженного массива — every и some его
+// пропускали (по независимой проверке PL05: ['corner', , 'room'] давал undefined в снимке), явный undefined, null, не
+// строка. a, b — допустимые строки; каждый вызов — новые массивы. Пары [подпись, значение].
+function badStrings(a, b) {
+  const grown = [a, b];
+  grown.length = 3;
+  return [
+    ['Array(1)', new Array(1)],
+    ['Array(2)', new Array(2)],
+    [`[${a}, пусто, ${b}]`, [a, , b]],
+    [`[${a}, ${b}, пусто]`, [a, b, ,]],
+    ['увеличенная length', grown],
+    ['[undefined]', [undefined]],
+    [`[${a}, undefined]`, [a, undefined]],
+    [`[${a}, null]`, [a, null]],
+    [`[${a}, 5]`, [a, 5]],
+    [`[new String(${a})]`, [new String(a)]],
+    [`[${a}, [${b}]]`, [a, [b]]],
+  ];
+}
+
+test('setDisplay: пустой индекс, undefined, null или не строка в views, pets, значениях scenes — invalid-argument до применения; объявление и снимок прежние, ни обновления, ни журнала; верные свойства рядом с неверным не применяются', () => {
+  const L = make({ initial: { cat: CAT }, counts: { marks: 1, today: 1 } });
+  L.core.setDisplay({ full: true, moving: false, views: ['corner', 'play'], pets: ['cat', 'dog'], scenes: { cat: ['stretch'], dog: ['fetch'] } });
+  L.core.start();
+  const declared = state(L).display;
+  const cases = [
+    ...badStrings('corner', 'room').map(([title, list]) => [`views ${title}`, { views: list }]),
+    ...badStrings('cat', 'dog').map(([title, list]) => [`pets ${title}`, { pets: list }]),
+    ...badStrings('stretch', 'curl').map(([title, list]) => [`scenes.cat ${title}`, { scenes: { cat: list } }]),
+    ['scenes.dog разреженный при верном cat', { scenes: { cat: ['curl'], dog: [, 'fetch'] } }],
+    ['верные full и moving при разреженных views', { full: false, moving: true, views: ['corner', , 'room'] }],
+    ['верные views при разреженных pets', { views: ['room'], pets: ['cat', , 'dog'] }],
+    ['верные pets и views при разреженных scenes', { pets: ['dog'], views: ['corner'], scenes: { cat: ['stretch', , 'curl'] } }],
+    ['верный пол при Array(2) в views', { playFloor: FLOOR, views: new Array(2) }],
+  ];
+  for (const [title, display] of cases) refused(L, () => L.core.setDisplay(display), 'invalid-argument', title);
+  assert.equal(state(L).display, declared, 'объявление прежнее');
+  assert.deepEqual(JSON.parse(JSON.stringify(declared)), { full: true, moving: false, pets: ['cat', 'dog'], views: ['corner', 'play'], scenes: { cat: ['stretch'], dog: ['fetch'] }, playFloor: null, playTouch: 0 });
+  L.core.destroy();
+});
+
+test('setDisplay: неверное объявление не отменяет ждущую сценку и идущий жест поглаживания — сценка затем состоялась, шаг того же жеста принят', async () => {
+  const days = new Map();
+  const reserver = { calls: 0, reserve: (decide, show) => Promise.resolve().then(() => { reserver.calls += 1; const record = decide(days.get('d')); if (!record) return 'skip'; days.set('d', record); show(); return 'shown'; }) };
+  const random = series();
+  const S = make({ initial: { cat: CAT }, counts: { marks: 1, today: 1 }, random, scenes: reserver });
+  S.core.setDisplay({ views: VIEWS, scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] }, playFloor: FLOOR });
+  S.core.start();
+  S.plan.advance(5000);
+  // Порядок случайности 0.1.4: реплика, шанс сценки (< 0,25), вариант.
+  random.push(0.5, 0.1, 0.5);
+  S.core.notify('saved', { key: 'k1', counted: true });
+  const waiting = state(S).scene.waiting;
+  assert.notEqual(waiting, null, 'попытка ждёт конца реакции события');
+  const bad = () => [{ views: ['corner', , 'room'] }, { full: false, scenes: { cat: new Array(1) } }, { moving: true, pets: [undefined] }];
+  for (const display of bad()) refused(S, () => S.core.setDisplay(display), 'invalid-argument', JSON.stringify(display));
+  assert.equal(state(S).scene.waiting, waiting, 'попытка та же');
+  // Конец радости — резервирование и показ (ручные часы, шаг 100 мс).
+  for (let i = 0; i < 100 && !reserver.calls; i += 1) {
+    S.plan.advance(100);
+    await flush();
+  }
+  assert.deepEqual([reserver.calls, days.size, state(S).pose.reaction?.scene], [1, 1, true], 'сценка состоялась, день занят');
+  S.plan.advance(10_000);
+  // Жест поглаживания в «Поиграть».
+  assert.equal(S.core.open('play').ok, true);
+  S.plan.advance(61_000);
+  const gesture = S.core.stroke.start();
+  assert.equal(S.core.stroke.step(gesture.id).outcome, 'pet');
+  const held = state(S).play.stroke;
+  assert.deepEqual([held?.id, held?.held], [gesture.id, true]);
+  for (const display of bad()) refused(S, () => S.core.setDisplay(display), 'invalid-argument', `в жесте ${JSON.stringify(display)}`);
+  assert.equal(state(S).play.stroke, held, 'жест идёт');
+  assert.equal(S.core.stroke.step(gesture.id).ok, true, 'шаг того же жеста принят');
+  S.core.destroy();
+});
+
+test('setDisplay контроли: пустые и плотные массивы, переданное заменяется целиком, непереданное сохраняется, дубли схлопываются, неизвестные строковые питомцы и сценки пропускаются с журналом; неизвестный вид, неверный пол и радиус — invalid-argument; верная смена full отменяет ждущую сценку', () => {
+  const L = make({ initial: { cat: CAT }, counts: { marks: 1, today: 1 } });
+  L.core.start();
+  const display = () => JSON.parse(JSON.stringify(state(L).display));
+  assert.equal(L.core.setDisplay({ views: [], pets: [], scenes: { cat: [] } }).ok, true);
+  assert.deepEqual([display().views, display().pets, display().scenes], [[], [], { cat: [] }], 'пустые массивы допустимы');
+  const dense = L.core.setDisplay({ views: ['corner', 'play', 'corner', 'room'], pets: ['cat', 'dog', 'cat'], scenes: { cat: ['stretch', 'curl', 'stretch'], dog: ['fetch'] } });
+  assert.deepEqual([dense.ok, dense.changed, display().views, display().pets, display().scenes], [true, true, ['corner', 'play', 'room'], ['cat', 'dog'], { cat: ['stretch', 'curl'], dog: ['fetch'] }], 'дубли схлопнуты');
+  assert.equal(L.core.setDisplay({ views: ['room'] }).ok, true);
+  assert.deepEqual([display().views, display().pets, display().scenes.cat], [['room'], ['cat', 'dog'], ['stretch', 'curl']], 'переданное заменено, прочее сохранено');
+  const logged = L.log.length;
+  const unknown = L.core.setDisplay({ pets: ['cat', 'fox'], scenes: { cat: ['stretch', 'dance'], fox: ['run'] } });
+  assert.deepEqual([unknown.ok, display().pets, display().scenes], [true, ['cat'], { cat: ['stretch'] }]);
+  assert.deepEqual(L.log.slice(logged).map((line) => line.split(' — ')[0]), ['setDisplay: fox', 'setDisplay: cat/dance'], 'одно предупреждение на ссылку');
+  for (const [title, value] of [
+    ['неизвестный вид', { views: ['garden'] }],
+    ['вид другим регистром', { views: ['corner', 'Corner'] }],
+    ['views не массив', { views: 'corner' }],
+    ['scenes — массив', { scenes: [['stretch']] }],
+    ['scenes — строка вместо массива', { scenes: { cat: 'stretch' } }],
+    ['пол l = r', { playFloor: [0, 0, 0, 10] }],
+    ['пол Array(4)', { playFloor: new Array(4) }],
+    ['пол из трёх', { playFloor: [0, 0, 10] }],
+    ['пол с NaN', { playFloor: [0, Number.NaN, 10, 10] }],
+    ['радиус < 0', { playTouch: -1 }],
+  ]) {
+    refused(L, () => L.core.setDisplay(value), 'invalid-argument', title);
+  }
+  assert.equal(L.core.setDisplay({ playFloor: FLOOR, playTouch: 4 }).ok, true);
+  assert.deepEqual([display().playFloor, display().playTouch], [FLOOR, 4]);
+  L.core.destroy();
+  // Верное объявление full отменяет ждущую попытку сценки (как смена раскладки 0.1.4).
+  const random = series();
+  const S = make({ initial: { cat: CAT }, counts: { marks: 1, today: 1 }, random, scenes: { reserve: () => Promise.resolve('skip') } });
+  S.core.setDisplay({ views: VIEWS, scenes: { cat: ['stretch', 'curl'] } });
+  S.core.start();
+  S.plan.advance(5000);
+  random.push(0.5, 0.1, 0.5);
+  S.core.notify('saved', { key: 'k1', counted: true });
+  assert.notEqual(state(S).scene.waiting, null);
+  assert.equal(S.core.setDisplay({ full: false }).ok, true);
+  assert.equal(state(S).scene.waiting, null, 'попытка отменена');
+  S.core.destroy();
 });
 
 // Объединения строк из pet/core.d.mts (export type X = 'a' | 'b' | Y;) — с подстановкой упомянутых типов.

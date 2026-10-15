@@ -171,7 +171,10 @@ export interface PetFailure {
   readonly ok: false;
   readonly error: { readonly code: PetErrorKind; readonly message: string };
 }
-/** Успех: изменение действует в памяти; `degraded` — сбой оркестровки после применения (изменение и запись остались). */
+/**
+ * Успех: изменение действует в памяти; `degraded` — сбой оркестровки после применения (изменение и запись остались).
+ * Дополнительные поля команды (`Extra`) — на каждом успехе: и без изменений (`changed: false`), и при `degraded`.
+ */
 export type PetSuccess<Extra = {}> = {
   readonly ok: true;
   readonly changed: boolean;
@@ -208,6 +211,10 @@ export interface PetSavedExtra {
 
 export type PetPlayAction = { type: 'pet' } | { type: 'paw' } | { type: 'bowl'; to: 'near' | 'home' | PetPoint } | { type: 'ball'; to: 'roll' | number };
 
+/**
+ * Объявление отображения: переданное свойство заменяет прежнее целиком. Массивы — плотные, строка в каждом индексе
+ * (пустой индекс, `undefined`, `null` — `invalid-argument`, объявление прежнее).
+ */
 export interface PetDisplay {
   /** Показ целиком (иначе портрет). */
   full?: boolean;
@@ -461,6 +468,7 @@ export interface PetCommands {
   setContext(flags: PetContext): PetResult;
   /** Имя (очистка: без управляющих символов и `<>`, ≤ 24 знаков); `''` — «ещё не выбирали». Готовое — отклик и объявление. */
   setName(name: string): PetResult<{ readonly reacted: boolean }>;
+  /** Показанный питомец; уже показанный — `changed: false`, `reacted: false`, без записи и реакции. */
   setPet(id: PetId): PetResult<{ readonly reacted: boolean }>;
   setAppearance(look: { coat?: PetCoat; accessory?: PetAccessory }): PetResult;
   setPreferences(prefs: { motion?: PetMotion; phrases?: boolean }): PetResult;

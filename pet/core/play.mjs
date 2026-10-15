@@ -115,11 +115,14 @@ export function createPlay(host) {
   // ---------- жест поглаживания (§ 6.4, § 6.8) ----------
 
   // Начало: прежний жест завершается как отмена; удержания и отклика нет. Начало жеста — ручное действие (сценка отменена).
+  // Номер выделяется первым: если остановка прежнего жеста или отмена сценки откажет (порт часов), у команды уже есть свой
+  // номер (lastStroke — результат ядра при сбое после применения), ни с одним другим жестом не совпадающий.
   function strokeStart() {
+    const id = ++strokes;
     if (stroke) strokeStop(stroke.id);
     host.cancelScene();
-    stroke = { id: ++strokes, held: false, told: '' };
-    return stroke.id;
+    stroke = { id, held: false, told: '' };
+    return id;
   }
 
   // Пройденный порог: то же правило, что одиночное поглаживание; первый сыгранный отклик включает удержание позы до
@@ -289,6 +292,7 @@ export function createPlay(host) {
     held: () => Boolean(stroke?.held),
     gesturing: () => Boolean(stroke || drag),
     stroking: (id) => Boolean(stroke && stroke.id === id),
+    lastStroke: () => strokes,
     dragging: () => drag?.toy ?? '',
     floored: () => zone() !== null,
   };

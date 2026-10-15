@@ -60,6 +60,14 @@ function numbers(value, n) {
 }
 // Точка [x, y] (единицы сцены или рисунка): room.move/drag, interact({ type: 'bowl', to }), toy.drag.
 const point = (value) => numbers(value, 2);
+// Плотный массив строк — собственная строка в каждом индексе 0…length−1 (setDisplay: views, pets, значения scenes). Не
+// every/some: они пропускают пустые индексы — ['corner', , 'room'] прошёл бы, а Set добавил бы undefined в снимок (по
+// независимой проверке PL05). Неверное не фильтруется молча: отказ всего объявления.
+function strings(value) {
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i += 1) if (!Object.hasOwn(value, i) || typeof value[i] !== 'string') return false;
+  return true;
+}
 // Неявная запись (первое включение, отметка ступени, праздник, приветствие) повреждённое значение не заменяет (§ 8.2).
 const KEEP = Symbol('повреждённое значение неявная запись не заменяет');
 
@@ -578,7 +586,10 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // остаётся и доставляется.
   // Входы отображения PL04.1 (контекст, активность, вид, занятость, прямой отклик, сценка, «уменьшить движение») решают по
   // памяти сессии и не пишут: сверка им не нужна (sync: false) — те же проверки, раунд и обработка сбоя без фазы сверки.
-  function act(name, body, { sync = true } = {}) {
+  // Успех несёт все дополнительные поля своей команды (§ 6.4) и при сбое после применения (по независимой проверке PL05):
+  // extra() — их значения «оркестровка не состоялась» (реакции и итога нет, новых вещей нет; номер жеста — уже выделенный),
+  // вызывается в момент сбоя; решения, принятые телом до сбоя (праздник, увиденные вещи), тело кладёт в step.extra поверх.
+  function act(name, body, { sync = true, extra = null } = {}) {
     if (status === 'destroyed') return fail('destroyed', 'Питомец отключён.');
     if (Round.working()) return fail('reentrant', 'Команда вызвана во время обработки другого вызова (из порта или progress()).');
     return Round.hold(() => {
@@ -590,7 +601,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       }
       if (status === 'destroyed') return fail('destroyed', 'Питомец отключён.');
       return Round.run(order, () => {
-        const step = { applied: false, save: null };
+        const step = { applied: false, save: null, extra: null };
         const outer = working;
         working = step;
         mark(name);
@@ -607,7 +618,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
           }
           effects.push({ type: 'warning', code: 'internal', message: `сбой после применения: ${describe(error)}` });
           warnQuiet(`сбой команды ${name} после применения`, error);
-          return { ok: true, changed: true, save: step.save ?? report([]), degraded: true };
+          return { ok: true, changed: true, save: step.save ?? report([]), degraded: true, ...extra?.(), ...step.extra };
         } finally {
           working = outer;
         }
@@ -739,15 +750,20 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // refresh: перечитать счёт хоста и день; первое включение молча; открыт уголок — новая ступень увидена (fresh — вещи,
   // ставшие увиденными).
   const refresh = () =>
-    act('refresh', (step) => {
-      const was = build();
-      const next = readHost();
-      const writes = firstSwitch(next);
-      const mark = session.view().open === 'corner' ? seeStage(next, writes, memory()) : null;
-      apply(step, { next, writes });
-      const fresh = saw(mark);
-      return { ok: true, changed: !same(was, build()), save: step.save, fresh };
-    });
+    act(
+      'refresh',
+      (step) => {
+        const was = build();
+        const next = readHost();
+        const writes = firstSwitch(next);
+        const mark = session.view().open === 'corner' ? seeStage(next, writes, memory()) : null;
+        apply(step, { next, writes });
+        const fresh = saw(mark);
+        step.extra = { fresh };
+        return { ok: true, changed: !same(was, build()), save: step.save, fresh };
+      },
+      { extra: () => ({ fresh: [] }) },
+    );
 
   // Подтверждённое занятие: счёт хоста уже включает знак. Спрятан, не на виду, до start или detail === null — только числа.
   // Иначе решение: радость или поддержка, праздник новой ступени (не в «Поиграть» и редакторе) с отметкой увиденной,
@@ -762,69 +778,77 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // Публичное событие (PL05, фасад facade.mjs вызывает без options): detail — null или { key: непустая строка, counted?,
   // hard?, first?: boolean } без других полей; failed — без подробностей. Любой ввод в строку не превращается.
   const notify = (type, detail, options) =>
-    act('notify', (step) => {
-      if (type !== 'saved' && type !== 'failed') return fail('invalid-argument', 'Событие — saved или failed.');
-      if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'scene') && (options.scene === undefined || typeof options.scene === 'boolean'))) {
-        return fail('invalid-argument', 'Настройки события — { scene?: boolean }.');
-      }
-      if (type === 'failed' && detail !== undefined && detail !== null) return fail('invalid-argument', "notify('failed') — без подробностей.");
-      const at = clock.now();
-      const where = sight();
-      if (type === 'failed') {
-        // Нейтральное ожидание без награды; спрятан или не на виду — ничего.
-        const reacted = status === 'running' && !memory().cat.hidden && where.around;
-        if (reacted) {
-          const was = build();
-          step.applied = true;
-          session.react('wait');
-          return { ok: true, changed: !same(was, build()), save: report([]), reacted, reaction: { type: 'wait' } };
+    act(
+      'notify',
+      (step) => {
+        if (type !== 'saved' && type !== 'failed') return fail('invalid-argument', 'Событие — saved или failed.');
+        if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'scene') && (options.scene === undefined || typeof options.scene === 'boolean'))) {
+          return fail('invalid-argument', 'Настройки события — { scene?: boolean }.');
         }
-        return { ok: true, changed: false, save: report([]), reacted, reaction: null };
-      }
-      const flags = ['counted', 'hard', 'first'];
-      const legacy = options?.scene === false;
-      const known = (key) => key === 'key' || flags.includes(key);
-      if (detail !== null && !(isRecord(detail) && Object.keys(detail).every(known) && typeof detail.key === 'string' && (legacy || detail.key.length > 0) && flags.every((flag) => detail[flag] === undefined || typeof detail[flag] === 'boolean'))) {
-        return fail('invalid-argument', 'detail — { key: непустая строка, counted?, hard?, first?: boolean } или null.');
-      }
-      const was = build();
-      const next = readHost();
-      const writes = firstSwitch(next);
-      const m = memory();
-      const quiet = { ok: true, reacted: false, duplicate: false, celebrate: null, reaction: null, scene: null, fresh: [] };
-      if (detail === null || status !== 'running' || m.cat.hidden || !where.around) {
+        if (type === 'failed' && detail !== undefined && detail !== null) return fail('invalid-argument', "notify('failed') — без подробностей.");
+        const at = clock.now();
+        const where = sight();
+        if (type === 'failed') {
+          // Нейтральное ожидание без награды; спрятан или не на виду — ничего.
+          const reacted = status === 'running' && !memory().cat.hidden && where.around;
+          if (reacted) {
+            const was = build();
+            step.applied = true;
+            step.extra = { reacted };
+            session.react('wait');
+            return { ok: true, changed: !same(was, build()), save: report([]), reacted, reaction: { type: 'wait' } };
+          }
+          return { ok: true, changed: false, save: report([]), reacted, reaction: null };
+        }
+        const flags = ['counted', 'hard', 'first'];
+        const legacy = options?.scene === false;
+        const known = (key) => key === 'key' || flags.includes(key);
+        if (detail !== null && !(isRecord(detail) && Object.keys(detail).every(known) && typeof detail.key === 'string' && (legacy || detail.key.length > 0) && flags.every((flag) => detail[flag] === undefined || typeof detail[flag] === 'boolean'))) {
+          return fail('invalid-argument', 'detail — { key: непустая строка, counted?, hard?, first?: boolean } или null.');
+        }
+        const was = build();
+        const next = readHost();
+        const writes = firstSwitch(next);
+        const m = memory();
+        const quiet = { ok: true, reacted: false, duplicate: false, celebrate: null, reaction: null, scene: null, fresh: [] };
+        if (detail === null || status !== 'running' || m.cat.hidden || !where.around) {
+          apply(step, { next, writes });
+          return { ...quiet, changed: !same(was, build()), save: step.save };
+        }
+        const kind = m.companion.kind;
+        const name = companionName({ kind, name: kind === 'dog' ? m.companion.dog.name : m.cat.name });
+        const seen = writes.length ? writes[0].fields.seenStage : seenOf(m);
+        const outcome = doneOutcome(detail, next.marks);
+        const stage = stageToCelebrate(outcome, seen);
+        const celebrate = where.view === 'play' || where.view === 'room' ? null : stage;
+        const told = [];
+        let follow = null;
+        if (celebrate !== null) {
+          const { items, accessories } = unlockedBetween(Math.max(outcome.stageBefore, seen), celebrate, kind);
+          writes.push({ key: 'cat', fields: { seenStage: celebrate }, implicit: true });
+          const tryOn = accessories.includes('plaid') && !items.length ? 'plaid' : '';
+          // Рядом с напарником — его вещь ступени (у собаки на «Нашем ритуале» — мячик).
+          const mini = (items.includes('ball') ? 'ball' : '') || (items.find((item) => item !== 'cushion' && item !== 'bed') ?? (items.includes('bed') ? 'bed' : ''));
+          follow = { type: 'unlock', extra: { tryOn, mini, phrases: tryOn ? 'plaid' : 'unlock' } };
+          told.push({ type: 'celebrate', stage: celebrate, items, accessories }, { type: 'announce', text: `${name}: открыта ступень «${STAGES[celebrate].title}» — ${stageGift(celebrate, kind, name).toLowerCase()}.` });
+        }
+        const mark = celebrate === null && where.view === 'corner' ? seeStage(next, writes, m) : null;
+        // Первое занятие дня открыло лакомство — радость подсказывает про миску.
+        const hint = !outcome.hard && treatState(next.day, m.treat.fedDay, next.today) === 'ready' && detail.first === true;
+        const reaction = { type: outcome.hard ? 'support' : 'joy', key: `entry:${detail.key}`, extra: { ...(hint ? { phrases: 'joyTreat' } : {}), ...(follow ? { follow } : {}) } };
         apply(step, { next, writes });
-        return { ...quiet, changed: !same(was, build()), save: step.save };
-      }
-      const kind = m.companion.kind;
-      const name = companionName({ kind, name: kind === 'dog' ? m.companion.dog.name : m.cat.name });
-      const seen = writes.length ? writes[0].fields.seenStage : seenOf(m);
-      const outcome = doneOutcome(detail, next.marks);
-      const stage = stageToCelebrate(outcome, seen);
-      const celebrate = where.view === 'play' || where.view === 'room' ? null : stage;
-      const told = [];
-      let follow = null;
-      if (celebrate !== null) {
-        const { items, accessories } = unlockedBetween(Math.max(outcome.stageBefore, seen), celebrate, kind);
-        writes.push({ key: 'cat', fields: { seenStage: celebrate }, implicit: true });
-        const tryOn = accessories.includes('plaid') && !items.length ? 'plaid' : '';
-        // Рядом с напарником — его вещь ступени (у собаки на «Нашем ритуале» — мячик).
-        const mini = (items.includes('ball') ? 'ball' : '') || (items.find((item) => item !== 'cushion' && item !== 'bed') ?? (items.includes('bed') ? 'bed' : ''));
-        follow = { type: 'unlock', extra: { tryOn, mini, phrases: tryOn ? 'plaid' : 'unlock' } };
-        told.push({ type: 'celebrate', stage: celebrate, items, accessories }, { type: 'announce', text: `${name}: открыта ступень «${STAGES[celebrate].title}» — ${stageGift(celebrate, kind, name).toLowerCase()}.` });
-      }
-      const mark = celebrate === null && where.view === 'corner' ? seeStage(next, writes, m) : null;
-      // Первое занятие дня открыло лакомство — радость подсказывает про миску.
-      const hint = !outcome.hard && treatState(next.day, m.treat.fedDay, next.today) === 'ready' && detail.first === true;
-      const reaction = { type: outcome.hard ? 'support' : 'joy', key: `entry:${detail.key}`, extra: { ...(hint ? { phrases: 'joyTreat' } : {}), ...(follow ? { follow } : {}) } };
-      apply(step, { next, writes });
-      effects.push(...told);
-      const fresh = saw(mark);
-      const { duplicate } = session.react(reaction.type, { key: reaction.key, extra: { ...reaction.extra, event: detail.key } });
-      // Выбор сценки — после реакции (порядок random как 0.1.4: реплика, затем шанс и вариант).
-      session.choose({ key: options?.scene === false ? '' : detail.key, outcome, stage, day: next.day, at }, sense());
-      return { ok: true, changed: !same(was, build()), save: step.save, reacted: true, duplicate, celebrate, reaction, scene: { outcome, stage }, fresh };
-    });
+        effects.push(...told);
+        const fresh = saw(mark);
+        step.extra = { reacted: true, duplicate: false, celebrate, fresh };
+        const { duplicate } = session.react(reaction.type, { key: reaction.key, extra: { ...reaction.extra, event: detail.key } });
+        step.extra.duplicate = duplicate;
+        // Выбор сценки — после реакции (порядок random как 0.1.4: реплика, затем шанс и вариант).
+        session.choose({ key: options?.scene === false ? '' : detail.key, outcome, stage, day: next.day, at }, sense());
+        return { ok: true, changed: !same(was, build()), save: step.save, reacted: true, duplicate, celebrate, reaction, scene: { outcome, stage }, fresh };
+      },
+      // Сбой после применения: реакции нет; решение о ней, праздник и увиденные вещи — принятые до сбоя (step.extra).
+      { extra: () => (type === 'failed' ? { reacted: false } : { reacted: false, duplicate: false, celebrate: null, fresh: [] }) },
+    );
 
   // Кормление: день заново, отметка дня — сверенная (act): уже угостили до команды — treat-fed без записи и реакции. Отметка
   // дня в памяти и операция записи — до реакции (второго лакомства в экземпляре нет). Объявление — по известному итогу
@@ -862,30 +886,35 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // действует). Уголок виден — новая ступень увидена (fresh — эти вещи, для «Новое в уголке»), в том числе при возврате из
   // «Поиграть» или редактора, и после вызова тоже. Открытие и смена вида отменяют сценку.
   const open = (target, options) =>
-    act('open', (step) => {
-      if (!VIEW_IDS.includes(target)) return fail('invalid-argument', 'Вид — corner, play или room.');
-      if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'source') && [undefined, 'pet', 'call'].includes(options.source))) {
-        return fail('invalid-argument', 'Настройки открытия — { source?: pet | call }.');
-      }
-      const source = options?.source ?? 'pet';
-      if (source === 'call' && target !== 'play') return fail('invalid-argument', 'Вызов «по зову» открывает сразу «Поиграть».');
-      if (!session.display().views.includes(target)) return fail('unsupported', `Вид «${target}» отображение не объявило.`);
-      const m = memory();
-      if (m.cat.hidden) return fail('hidden', 'Питомец спрятан.');
-      const was = session.view().open;
-      if (was === target) return { ...unchanged(), fresh: [] };
-      const next = was === null ? readHost() : host;
-      const writes = was === null ? firstSwitch(next) : [];
-      const mark = target === 'corner' ? seeStage(next, writes, m) : null;
-      apply(step, { next, writes });
-      const fresh = saw(mark);
-      // Редактор: черновик — из сохраняемой расстановки (выбрано место отдыха); уход из редактора отбрасывает черновик и
-      // перенос без объявления.
-      draft = null;
-      session.openView(target, source, sense());
-      if (target === 'room') draft = openEditor();
-      return { ok: true, changed: true, save: step.save, fresh };
-    });
+    act(
+      'open',
+      (step) => {
+        if (!VIEW_IDS.includes(target)) return fail('invalid-argument', 'Вид — corner, play или room.');
+        if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'source') && [undefined, 'pet', 'call'].includes(options.source))) {
+          return fail('invalid-argument', 'Настройки открытия — { source?: pet | call }.');
+        }
+        const source = options?.source ?? 'pet';
+        if (source === 'call' && target !== 'play') return fail('invalid-argument', 'Вызов «по зову» открывает сразу «Поиграть».');
+        if (!session.display().views.includes(target)) return fail('unsupported', `Вид «${target}» отображение не объявило.`);
+        const m = memory();
+        if (m.cat.hidden) return fail('hidden', 'Питомец спрятан.');
+        const was = session.view().open;
+        if (was === target) return { ...unchanged(), fresh: [] };
+        const next = was === null ? readHost() : host;
+        const writes = was === null ? firstSwitch(next) : [];
+        const mark = target === 'corner' ? seeStage(next, writes, m) : null;
+        apply(step, { next, writes });
+        const fresh = saw(mark);
+        step.extra = { fresh };
+        // Редактор: черновик — из сохраняемой расстановки (выбрано место отдыха); уход из редактора отбрасывает черновик и
+        // перенос без объявления.
+        draft = null;
+        session.openView(target, source, sense());
+        if (target === 'room') draft = openEditor();
+        return { ok: true, changed: true, save: step.save, fresh };
+      },
+      { extra: () => ({ fresh: [] }) },
+    );
 
   function openEditor() {
     const m = memory();
@@ -944,42 +973,52 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // выбор готового без проверки списка (проверки ядра). changed — имя или снимок изменились (отмена попытки, отклик).
   const PICKS = [undefined, true, false, 'preset'];
   const setName = (value, options) =>
-    act('setName', (step) => {
-      if (typeof value !== 'string') return fail('invalid-argument', 'Имя — строка.');
-      if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'pick') && PICKS.includes(options.pick))) return fail('invalid-argument', "Настройки имени — { pick?: boolean | 'preset' }.");
-      const was = build();
-      const name = cleanName(value);
-      const m = memory();
-      const kind = m.companion.kind;
-      const target = ownerOf(m);
-      const renamed = target.settings.name !== name;
-      const picked = options?.pick === true || (options?.pick === 'preset' && name !== '' && namePresets(kind).includes(name));
-      if (renamed) apply(step, { writes: [{ key: target.key, fields: { [`${target.prefix}name`]: name } }] });
-      let reacted = false;
-      // Отклик и объявление — только пока питомец на виду (как событие занятия): спрятанный или «по зову» и не вызванный
-      // (прямая команда хоста) получает имя тихо.
-      if (picked && session.around(sense())) {
-        step.applied = true;
-        reacted = session.manual('named').played;
-        effects.push({ type: 'announce', text: `Имя: ${companionName({ kind, name })}.` });
-      }
-      return renamed ? { ok: true, changed: true, save: step.save, reacted } : { ...unchanged(), changed: !same(was, build()), reacted };
-    });
+    act(
+      'setName',
+      (step) => {
+        if (typeof value !== 'string') return fail('invalid-argument', 'Имя — строка.');
+        if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'pick') && PICKS.includes(options.pick))) return fail('invalid-argument', "Настройки имени — { pick?: boolean | 'preset' }.");
+        const was = build();
+        const name = cleanName(value);
+        const m = memory();
+        const kind = m.companion.kind;
+        const target = ownerOf(m);
+        const renamed = target.settings.name !== name;
+        const picked = options?.pick === true || (options?.pick === 'preset' && name !== '' && namePresets(kind).includes(name));
+        if (renamed) apply(step, { writes: [{ key: target.key, fields: { [`${target.prefix}name`]: name } }] });
+        let reacted = false;
+        // Отклик и объявление — только пока питомец на виду (как событие занятия): спрятанный или «по зову» и не вызванный
+        // (прямая команда хоста) получает имя тихо.
+        if (picked && session.around(sense())) {
+          step.applied = true;
+          reacted = session.manual('named').played;
+          effects.push({ type: 'announce', text: `Имя: ${companionName({ kind, name })}.` });
+        }
+        return renamed ? { ok: true, changed: true, save: step.save, reacted } : { ...unchanged(), changed: !same(was, build()), reacted };
+      },
+      { extra: () => ({ reacted: false }) },
+    );
 
   // Другой питомец: прежний ничего не доигрывает (реакции, отложенная, облако, задачи — сессия), память событий, тишина и
-  // паузы повторов остаются; на виду (не спрятан; «по зову» — вызван) — приветствие meet (пауза повтора 6 с).
+  // паузы повторов остаются; на виду (не спрятан; «по зову» — вызван) — приветствие meet (пауза повтора 6 с). Уже
+  // показанный — без записи, реакции и обновления, но с полем reacted: false, как у каждого успеха (по независимой
+  // проверке PL05).
   const setPet = (id) =>
-    act('setPet', (step) => {
-      if (typeof id !== 'string') return fail('invalid-argument', 'Питомец — строка ID.');
-      if (!KINDS.includes(id)) return fail('unknown-id', `Питомца «${id}» нет.`);
-      const drawn = session.display().pets;
-      if (drawn && !drawn.includes(id)) return fail('unsupported', `Питомца «${id}» отображение не рисует.`);
-      if (memory().companion.kind === id) return unchanged();
-      apply(step, { writes: [{ key: 'companion', fields: { kind: id } }] });
-      session.reconcile(sense());
-      const reacted = session.around(sense()) && session.react('meet').played;
-      return { ok: true, changed: true, save: step.save, reacted };
-    });
+    act(
+      'setPet',
+      (step) => {
+        if (typeof id !== 'string') return fail('invalid-argument', 'Питомец — строка ID.');
+        if (!KINDS.includes(id)) return fail('unknown-id', `Питомца «${id}» нет.`);
+        const drawn = session.display().pets;
+        if (drawn && !drawn.includes(id)) return fail('unsupported', `Питомца «${id}» отображение не рисует.`);
+        if (memory().companion.kind === id) return { ...unchanged(), reacted: false };
+        apply(step, { writes: [{ key: 'companion', fields: { kind: id } }] });
+        session.reconcile(sense());
+        const reacted = session.around(sense()) && session.react('meet').played;
+        return { ok: true, changed: true, save: step.save, reacted };
+      },
+      { extra: () => ({ reacted: false }) },
+    );
 
   // Облик и аксессуар — два независимых ключа: ставятся сразу оба, итог по ключам (возможен partial).
   const setAppearance = (look) =>
@@ -1117,7 +1156,6 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   function displayOf(value) {
     const shape = 'Отображение — { full?, moving?: boolean, pets?: string[], views?: (corner | play | room)[], scenes?: { petId: string[] }, playFloor?: [l, t, r, b], playTouch?: число ≥ 0 }.';
     if (!isRecord(value) || Object.keys(value).some((key) => !DISPLAY.includes(key))) return { error: shape };
-    const strings = (list) => Array.isArray(list) && list.every((item) => typeof item === 'string');
     const patch = {};
     const unknown = [];
     for (const key of ['full', 'moving']) {
@@ -1178,26 +1216,30 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // (ok: false) ничего не меняет и сценку не трогает. Результат: outcome — pet, paw, enough, quiet, sniff, look, ball, moved
   // (предмет сдвинулся, питомец занят), dropped (предмет не сдвинулся) или null (отклик не сыгран), text — его текст.
   const interact = (action) =>
-    act('interact', (step) => {
-      const shape = 'Действие — { type: pet | paw }, { type: bowl, to: near | home | [u, v] } или { type: ball, to: roll | число ≠ 0 }.';
-      if (!isRecord(action) || !ACTIONS.includes(action.type)) return fail('invalid-argument', shape);
-      const toy = TOYS.includes(action.type);
-      if (Object.keys(action).some((key) => key !== 'type' && !(toy && key === 'to'))) return fail('invalid-argument', shape);
-      if (action.type === 'bowl' && !(action.to === 'near' || action.to === 'home' || point(action.to))) return fail('invalid-argument', shape);
-      if (action.type === 'ball' && !(action.to === 'roll' || (Number.isFinite(action.to) && action.to !== 0))) return fail('invalid-argument', shape);
-      const refused = nearby();
-      if (refused) return refused;
-      const view = session.view().open;
-      const s = sense();
-      if (action.type === 'paw' && view !== 'play' && !profileOf(s.kind).paw) return fail('unsupported', 'У питомца нет команды «Дай лапу» вне «Поиграть».');
-      if (toy && view !== 'play') return fail('not-open', 'Предметы — только в открытой «Поиграть».');
-      if (toy && !session.play.floored()) return fail('unsupported', 'Пол «Поиграть» не объявлен отображением (setDisplay({ playFloor })).');
-      const was = build();
-      step.applied = true;
-      const outcome = toy ? session.play[action.type](action.to) : session.play.touch(action.type, view === 'play');
-      const text = outcome && outcome !== 'dropped' ? playText(outcome, action.type, s.kind, s.name) : '';
-      return { ok: true, changed: !same(was, build()), save: report([]), outcome: outcome ?? null, text };
-    });
+    act(
+      'interact',
+      (step) => {
+        const shape = 'Действие — { type: pet | paw }, { type: bowl, to: near | home | [u, v] } или { type: ball, to: roll | число ≠ 0 }.';
+        if (!isRecord(action) || !ACTIONS.includes(action.type)) return fail('invalid-argument', shape);
+        const toy = TOYS.includes(action.type);
+        if (Object.keys(action).some((key) => key !== 'type' && !(toy && key === 'to'))) return fail('invalid-argument', shape);
+        if (action.type === 'bowl' && !(action.to === 'near' || action.to === 'home' || point(action.to))) return fail('invalid-argument', shape);
+        if (action.type === 'ball' && !(action.to === 'roll' || (Number.isFinite(action.to) && action.to !== 0))) return fail('invalid-argument', shape);
+        const refused = nearby();
+        if (refused) return refused;
+        const view = session.view().open;
+        const s = sense();
+        if (action.type === 'paw' && view !== 'play' && !profileOf(s.kind).paw) return fail('unsupported', 'У питомца нет команды «Дай лапу» вне «Поиграть».');
+        if (toy && view !== 'play') return fail('not-open', 'Предметы — только в открытой «Поиграть».');
+        if (toy && !session.play.floored()) return fail('unsupported', 'Пол «Поиграть» не объявлен отображением (setDisplay({ playFloor })).');
+        const was = build();
+        step.applied = true;
+        const outcome = toy ? session.play[action.type](action.to) : session.play.touch(action.type, view === 'play');
+        const text = outcome && outcome !== 'dropped' ? playText(outcome, action.type, s.kind, s.name) : '';
+        return { ok: true, changed: !same(was, build()), save: report([]), outcome: outcome ?? null, text };
+      },
+      { extra: () => ({ outcome: null, text: '' }) },
+    );
 
   // Жест поглаживания (§ 6.4, сценарии § 6.8). Отображение распознаёт попадание и пороги и вызывает start → step на каждый
   // пройденный порог → end (отпустили) или cancel (прерван); ядро — лимит и приоритет, удержание позы, объявления без
@@ -1205,14 +1247,20 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // destroy (play.stroke → null; поздние end/cancel безвредны, step — no-gesture).
   const gestureId = (id) => (Number.isSafeInteger(id) && id > 0 ? null : fail('invalid-argument', 'id жеста — целое положительное число.'));
   const stroke = Object.freeze({
+    // Сбой после применения: номер, уже выделенный этому началу (play.mjs выделяет его первым), — жест с ним мог не
+    // начаться, тогда step — no-gesture, end и cancel — без изменений.
     start: () =>
-      act('stroke.start', (step) => {
-        const refused = nearby();
-        if (refused) return refused;
-        if (session.view().open !== 'play') return fail('not-open', 'Жест поглаживания — только в открытой «Поиграть».');
-        step.applied = true;
-        return { ok: true, changed: true, save: report([]), id: session.play.strokeStart() };
-      }),
+      act(
+        'stroke.start',
+        (step) => {
+          const refused = nearby();
+          if (refused) return refused;
+          if (session.view().open !== 'play') return fail('not-open', 'Жест поглаживания — только в открытой «Поиграть».');
+          step.applied = true;
+          return { ok: true, changed: true, save: report([]), id: session.play.strokeStart() };
+        },
+        { extra: () => ({ id: session.play.lastStroke() }) },
+      ),
     step: (id) =>
       act(
         'stroke.step',
@@ -1225,7 +1273,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
           const result = session.play.strokeStep(id);
           return { ok: true, changed: !same(was, build()), save: report([]), outcome: result.outcome, announced: result.announced };
         },
-        { sync: false },
+        { sync: false, extra: () => ({ outcome: null, announced: false }) },
       ),
     end: (id) => strokeStop('stroke.end', id),
     cancel: (id) => strokeStop('stroke.cancel', id),
@@ -1257,7 +1305,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     if (!session.play.floored()) return fail('unsupported', 'Пол «Поиграть» не объявлен отображением (setDisplay({ playFloor })).');
     return null;
   };
-  const toyAct = (name, body) =>
+  const toyAct = (name, body, extra = null) =>
     act(
       `toy.${name}`,
       (step) => {
@@ -1265,7 +1313,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         const result = body(step);
         return result.ok === false ? result : { ok: true, changed: !same(was, build()), save: report([]), ...result };
       },
-      { sync: false },
+      { sync: false, extra },
     );
   const toy = Object.freeze({
     drag: (id, at) =>
@@ -1278,15 +1326,19 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         return {};
       }),
     drop: (options) =>
-      toyAct('drop', (step) => {
-        if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'roll') && (options.roll === undefined || Number.isFinite(options.roll)))) return fail('invalid-argument', 'Отпустили — { roll?: число }.');
-        if (!session.play.dragging()) return { changed: false, outcome: null, text: '' };
-        step.applied = true;
-        const s = sense();
-        const item = session.play.dragging();
-        const outcome = session.play.drop(options ?? {});
-        return { outcome, text: outcome && outcome !== 'dropped' ? playText(outcome, item, s.kind, s.name) : '' };
-      }),
+      toyAct(
+        'drop',
+        (step) => {
+          if (options !== undefined && !(isRecord(options) && Object.keys(options).every((key) => key === 'roll') && (options.roll === undefined || Number.isFinite(options.roll)))) return fail('invalid-argument', 'Отпустили — { roll?: число }.');
+          if (!session.play.dragging()) return { changed: false, outcome: null, text: '' };
+          step.applied = true;
+          const s = sense();
+          const item = session.play.dragging();
+          const outcome = session.play.drop(options ?? {});
+          return { outcome, text: outcome && outcome !== 'dropped' ? playText(outcome, item, s.kind, s.name) : '' };
+        },
+        () => ({ outcome: null, text: '' }),
+      ),
     cancel: () =>
       toyAct('cancel', (step) => {
         step.applied = true;
@@ -1299,7 +1351,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // Только в открытом редакторе (not-open); предмет — доступный показанному питомцу на этой ступени (unknown-id); точка —
   // [x, y] единиц сцены 400×250. Предмет — собственный ключ черновика, а не in: унаследованные constructor, toString,
   // __proto__ — unknown-id до изменения выбора, черновика и переноса (по независимой проверке PL04.3).
-  const roomAct = (name, body, { sync = false } = {}) =>
+  const roomAct = (name, body, { sync = false, extra = null } = {}) =>
     act(
       `room.${name}`,
       (step) => {
@@ -1308,7 +1360,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         const result = body(step);
         return result.ok === false ? result : { ok: true, changed: !same(was, build()), save: step.save ?? report([]), ...result };
       },
-      { sync },
+      { sync, extra },
     );
   const itemOf = (id) => (typeof id !== 'string' ? fail('invalid-argument', 'Предмет — строка ID.') : Object.hasOwn(draft.pos, id) ? null : fail('unknown-id', `Предмета «${id}» нет в этой комнате.`));
   const told = (list) => {
@@ -1409,7 +1461,8 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
           if (text) told([text]);
           return { closed: true, text, fresh };
         },
-        { sync: true },
+        // Сбой после применения: итога для отображения нет; закрыт ли редактор — по виду.
+        { sync: true, extra: () => ({ closed: session.view().open !== 'room', text: '', fresh: [] }) },
       ),
     // Отменить весь редактор: перенос и черновик отброшены, вид — уголок. Объявление честное: несохранённая прежде
     // расстановка (отказ записи) действует до перезагрузки.
@@ -1423,7 +1476,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
           told([text]);
           return { text, fresh };
         },
-        { sync: true },
+        { sync: true, extra: () => ({ text: '', fresh: [] }) },
       ),
   });
 

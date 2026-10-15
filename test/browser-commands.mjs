@@ -6,7 +6,9 @@
 // сценой, запись и перезагрузка); фокус, Esc, блокировка прокрутки и её снятие с возвратом позиции; pet.core.destroy() —
 // снимает всё, как pet.destroy() (элементы, отметки html, слушатели document и window, таймеры, захват), и из слушателя;
 // повторное подключение — прежние pet.*, pet.core и фасад нового не трогают; кнопка уголка и прямая команда — одно
-// обновление для подписчика pet.core. Компьютер 1280×900 (мышь, клавиатура), телефон 390×844 (касания, CDP), узкий
+// обновление для подписчика pet.core; уже показанный питомец через pet.setPet и pet.core.setPet — reacted: false (тип до
+// сериализации), без записи и обновления; разреженный views через pet.core.setDisplay — отказ без изменений (по
+// независимой проверке PL05). Компьютер 1280×900 (мышь, клавиатура), телефон 390×844 (касания, CDP), узкий
 // 320×740, боком 844×390; кот и собака. Только свои ключи, неизвестные поля, v и другие животные целы; без ошибок страницы,
 // необработанных отклонений, горизонтальной прокрутки и внешних запросов. Часы — page.clock. Запуск — в составе
 // npm run test:browser.
@@ -58,6 +60,26 @@ const call = (page, path, ...args) =>
     },
     [path, args],
   );
+
+// Уже показанный питомец через pet.setPet и pet.core.setPet (по независимой проверке PL05): поля результата — до
+// сериализации (JSON отбросил бы reacted: undefined); снимок, запись companion и обновления подписчика pet.core прежние.
+const repeatPet = (page, ns, id) =>
+  page.evaluate(
+    ([kind, space]) => {
+      const pet = window.stand.pet;
+      const updates = [];
+      const off = pet.core.subscribe((update) => updates.push(update.reason), { initial: false });
+      const before = pet.getState();
+      const stored = localStorage.getItem(`${space}:companion:v1`);
+      const shape = (result) => ({ keys: Object.keys(result).sort().join(), reacted: typeof result.reacted === 'boolean' && result.reacted === false, changed: result.changed, save: result.save?.status });
+      const legacy = shape(pet.setPet(kind));
+      const core = shape(pet.core.setPet(kind));
+      off();
+      return { legacy, core, same: pet.getState() === before, stored: localStorage.getItem(`${space}:companion:v1`) === stored, updates };
+    },
+    [id, ns],
+  );
+const quietRepeat = (r) => [r.legacy, r.core].every((one) => one.keys === 'changed,ok,reacted,save' && one.reacted && one.changed === false && one.save === 'none') && r.same && r.stored && r.updates.length === 0;
 
 // Слушатели document и window (CDP): после отключения — как до подключения.
 async function listeners(cdp) {
@@ -132,6 +154,8 @@ async function desktop(browser, base, check, open, layout) {
     await mount(page, 'ca', { marks: 3, today: 1, seed });
     const surface = await page.evaluate(() => ({ core: Boolean(window.stand.pet.core), status: window.stand.pet.core.status, version: window.stand.pet.core.version === window.stand.VERSION, place: 'place' in window.stand.pet.getState() }));
     check(`${label}: pet.core — публичный экземпляр запущенного ядра той же версии, снимок без внутреннего place`, surface.core && surface.status === 'running' && surface.version && !surface.place, JSON.stringify(surface));
+    const sameCat = await repeatPet(page, 'ca', 'cat');
+    check(`${label}: pet.setPet('cat') и pet.core.setPet('cat') при показанном коте — reacted строго false (тип до сериализации), changed false, save none; снимок, запись и обновления прежние`, quietRepeat(sameCat), JSON.stringify(sameCat));
 
     // ---- Имя: готовое — отклик и объявление ядра; подпись в боковой панели и доступное имя кнопки ----
     const named = await call(page, 'setName', 'Пиксель');
@@ -184,6 +208,16 @@ async function desktop(browser, base, check, open, layout) {
     await page.clock.runFor(100);
     const switched = { title: await text(page, '#cat-sheet-title'), kind: await checked(page, 'cat-kind'), dock: await attr(page, '#cat-dock .cat-art', 'data-kind'), stored: await stored(page, 'ca:companion:v1') };
     check(`${label}: pet.setPet('dog') — уголок, переключатель и рисунки собаки; запись kind, неизвестные поля и данные собаки целы`, dog.ok && switched.title === 'Тоби' && switched.kind === 'dog' && switched.dock === 'dog' && switched.stored.kind === 'dog' && switched.stored.future === 1 && switched.stored.dog.extra === 'x', JSON.stringify({ dog, switched }));
+    const sameDog = await repeatPet(page, 'ca', 'dog');
+    check(`${label}: повторный pet.setPet('dog') и pet.core.setPet('dog') при открытом уголке — reacted строго false, changed false, save none; снимок, запись и обновления прежние`, quietRepeat(sameDog) && switched.title === (await text(page, '#cat-sheet-title')), JSON.stringify(sameDog));
+    // Разреженный массив видов (по независимой проверке PL05) — отказ до применения: объявление, снимок и уголок прежние.
+    const sparse = await page.evaluate(() => {
+      const pet = window.stand.pet;
+      const before = pet.getState();
+      const result = pet.core.setDisplay({ views: ['corner', , 'room'] });
+      return { ok: result.ok, code: result.error?.code, same: pet.getState() === before, views: pet.getState().display.views.every((one) => typeof one === 'string') };
+    });
+    check(`${label}: pet.core.setDisplay({ views: ['corner', , 'room'] }) — invalid-argument, снимок прежний, уголок открыт`, !sparse.ok && sparse.code === 'invalid-argument' && sparse.same && sparse.views && (await view(page)).open, JSON.stringify({ sparse, view: await view(page) }));
 
     // ---- «Поиграть» прямой командой: прямое действие, жест мышью снят ядром по команде облика ----
     const play = await call(page, 'core.open', 'play');
@@ -372,6 +406,8 @@ async function phone(browser, base, check, open, layout) {
     const baseline = await listeners(cdp);
     const gestureBase = await gestureListeners(cdp);
     await mount(page, 'cp', { marks: 1, today: 1, seed: { companion: { v: 1, kind: 'dog' } } });
+    const sameDog = await repeatPet(page, 'cp', 'dog');
+    check(`${label}: pet.setPet('dog') и pet.core.setPet('dog') при показанной собаке — reacted строго false (тип до сериализации), changed false, save none; снимок, запись и обновления прежние`, quietRepeat(sameDog), JSON.stringify(sameDog));
     await call(page, 'setName', 'Батон');
     await page.clock.runFor(100);
     check(`${label}: pet.setName('Батон') — доступное имя кнопки в шапке без касания`, (await attr(page, '.cat-face', 'aria-label'))?.startsWith('Батон'), await attr(page, '.cat-face', 'aria-label'));
