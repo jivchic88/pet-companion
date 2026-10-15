@@ -34,7 +34,7 @@ import { playTexts } from './core/play.mjs';
 import { cancelMove, initMover, moving, startMoveMode, stopMover, watchDrag } from './pet-move.mjs';
 import { cancelStroke, hitsHtml, initPlay, release, strokeLost, watchStroke } from './pet-play.mjs';
 import { draw as drawToys, initToys, mountToys, toyDragging, toyLost, unmountToys, watchToys } from './pet-toys.mjs';
-import { kitProblem, STOCK_KITS } from './web/kits.mjs';
+import { kitProblem, kitScenes, STOCK_KITS } from './web/kits.mjs';
 import { createWebScenes } from './web/scenes.mjs';
 import { createWebStorage } from './web/storage.mjs';
 import { VERSION } from './core/version.mjs';
@@ -427,12 +427,12 @@ function showMini() {
 
 // ---------- что умеет и показывает отображение (setDisplay) ----------
 // Возможности legacy-отображения объявляются ядру явно, до start (docs/ARCHITECTURE.md § 11.1): питомцы — те, у кого есть
-// набор, виды и сценки — ровно нарисованные наборами (штатные — рисунки 0.1.4: кот — stretch, curl, собака — fetch; без
-// объявления сценок их не было бы, а не «были бы все»). Редкую сценку — выбор, попытку, отмену, резервирование дня и
+// набор, виды и сценки — ровно нарисованные наборами и есть в определении (kitScenes; штатные — рисунки 0.1.4: кот —
+// stretch, curl, собака — fetch; без объявления сценок их не было бы, а не «были бы все»). Редкую сценку — выбор, попытку, отмену, резервирование дня и
 // показ — ведёт ядро; здесь только рисунок (data-scene по снимку) и факты раскладки: целиком или портрет и идёт ли перенос
 // между местами.
 const VIEWS = ['corner', 'play', 'room'];
-const legacyDisplay = () => ({ pets: [...ui.drawn], views: VIEWS, scenes: Object.fromEntries(ui.drawn.map((id) => [id, [...kitOf(id).scenes]])) });
+const legacyDisplay = () => ({ pets: [...ui.drawn], views: VIEWS, scenes: Object.fromEntries(ui.drawn.map((id) => [id, kitScenes(kitOf(id), defOf(id))])) });
 
 // Раскладка мест: целиком ли питомец на странице и идёт ли перенос (уголок целиком — смысл открытого вида, его учитывает
 // ядро). Объявляется, только когда факт раскладки сменился: перерисовка по снимку команду не повторяет.
@@ -2378,14 +2378,22 @@ function host(key, place, cls) {
   O.places[place](box);
 }
 
+// Выбранные наборы подключения (ID → набор): у зарегистрированного питомца — свой из kits, иначе штатный того же ID. Одна
+// выборка и для проверки (invalid: каждый выбранный, штатный тоже, — kitProblem против своего определения), и для
+// подключения (catalogOf).
+function kitsOf(pets, list = []) {
+  const kits = new Map();
+  for (const kit of [...STOCK_KITS, ...list]) if (pets.has(kit.pet)) kits.set(kit.pet, kit);
+  return kits;
+}
+
 // Питомцы, модели и наборы подключения (PL06): options.pets и options.behaviors — определения (по умолчанию штатные кот,
 // собака и calm), options.kits — наборы сторонних питомцев (у кота и собаки — штатные, если свой не передан). Проверка —
 // invalid() до любых действий; здесь — уже проверенные. Рисуются питомцы, у которых есть набор.
 function catalogOf(options) {
   const defs = register(options.pets ?? STOCK_PETS, options.behaviors ?? STOCK_BEHAVIORS);
   const pets = new Map(defs.pets.map((def) => [def.id, def]));
-  const kits = new Map();
-  for (const kit of [...STOCK_KITS, ...(options.kits ?? [])]) if (pets.has(kit.pet)) kits.set(kit.pet, kit);
+  const kits = kitsOf(pets, options.kits);
   return { defs, pets, kits, drawn: defs.pets.map((def) => def.id).filter((id) => kits.has(id)) };
 }
 
@@ -2699,8 +2707,15 @@ function invalid(o) {
     if (seen.has(o.kits[i].pet)) return `kits[${i}]: второй набор питомца «${o.kits[i].pet}»`;
     seen.add(o.kits[i].pet);
   }
-  const drawn = defs.pets.filter((def) => seen.has(def.id) || STOCK_KITS.some((kit) => kit.pet === def.id));
-  return drawn.length ? '' : 'ни у одного питомца из pets нет набора отображения (kits)';
+  // Тем же правилом — выбранные штатные наборы (не заменённые своим): совпадение ID не значит, что набор покрывает ресурсы
+  // переданного определения (по независимой проверке PL06: изменённый кот с обликом purple подключался, а рисовался smoke).
+  const kits = kitsOf(pets, o.kits);
+  for (const [id, kit] of kits) {
+    if (seen.has(id)) continue;
+    const problem = kitProblem(kit, pets);
+    if (problem) return `штатный ${problem} — свой набор этого питомца передаётся в kits`;
+  }
+  return kits.size ? '' : 'ни у одного питомца из pets нет набора отображения (kits)';
 }
 
 // Отказ команды у экземпляра, который так и не подключился (у отключённого — свой результат ядра, тоже destroyed).

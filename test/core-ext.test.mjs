@@ -6,13 +6,16 @@
 // асинхронном координаторе — оба ключа pending с команды, второй шаг ставится только после результата первого, новый
 // выбор ждёт поставленного шага и снимает запланированные, destroy между шагами, done не отклоняется; независимая запись
 // другого ядра между шагами; вкладка 0.1.4 по фикстуре (mergeCompanion(parseCompanion(…), { kind })); сценарий
-// кролик → собака → кролик и предел A → B → A. Данные синтетические.
+// кролик → собака → кролик и предел A → B → A. По независимой проверке PL06 — новый выбор, пока своя операция выбора не
+// разрешена: шаги по подтверждённому после её успеха или отказа (порядок записей, без промежуточного оживления, итог и
+// повторное подключение), соседние переходы, унесённые поля выбора, перевыбор, destroy, другое ядро, публичный вход и
+// синхронный веб. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { calm } from '../pet/defs/calm.mjs';
 import { cat } from '../pet/defs/cat.mjs';
 import { dog } from '../pet/defs/dog.mjs';
-import { definePet } from '../pet/core.mjs';
+import { createPetCore as publicCore, createStorage, definePet } from '../pet/core.mjs';
 import { bunny } from '../examples/extension/bunny.mjs';
 import { lively } from '../examples/extension/lively.mjs';
 import * as old from './fixtures/pet-0.1.4/pet-rules.mjs';
@@ -323,6 +326,237 @@ test('асинхронно: условная очистка не стирает 
   assert.deepEqual([A.state().pet.shown, B.state().pet.shown], ['dog', 'dog'], 'запись B устарела после шага 1 A — оба видят собаку');
   A.core.destroy();
   B.core.destroy();
+});
+
+// ---------- асинхронно: новый выбор после результата своей операции выбора (по независимой проверке PL06) ----------
+// Пока своя операция с полем выбора (шаг прежнего выбора или правка, унёсшая несохранённое поле выбора) не разрешена,
+// новый выбор ждёт её и строит шаги по подтверждённому после её успеха или отказа. trail — подтверждённые записи по
+// порядку и что после каждой покажут новые клиенты при перезапуске: промежуточного оживления спящей записи нет.
+
+async function confirmAll(store) {
+  const trail = [];
+  while (store.waiting.length) {
+    const { op, key } = store.waiting[0];
+    await store.next(op, key);
+    if (op === 'set') trail.push([key, await restart(store)]);
+  }
+  return trail;
+}
+const SAVED = { status: 'saved', pending: [], unsaved: [], corrupt: false };
+const CAT = { id: 'cat', shown: 'cat', available: true };
+// Сохранено: собака, спящая запись кролика (over = кот) — показана собака.
+const SLEEPING = { companion: { v: 1, kind: 'dog' }, ext: { v: 1, pet: BUNNY_CAT } };
+
+for (const failure of ['get', 'set']) {
+  test(`асинхронно: отказ ${failure} поставленной записи кролика — новый выбор кота: сначала снята спящая запись, затем kind; saved и кот, а не кролик`, async () => {
+    const store = await slow(SLEEPING);
+    const A = tab(store.storage);
+    assert.equal(A.state().pet.shown, 'dog', 'запись кролика спит');
+    const first = A.core.setPet('example.bunny');
+    const latest = A.core.setPet('cat');
+    // Сразу после команды: кот в памяти, оба ключа pending; шаги нового выбора ещё не поставлены — ждут записи ext.
+    assert.deepEqual([A.state().pet, A.state().save.companion.status, A.state().save.ext.status], [CAT, 'pending', 'pending']);
+    assert.deepEqual([latest.save.status, latest.save.keys, latest.save.results, waits(store)], ['pending', ['companion', 'ext'], { companion: 'pending', ext: 'pending' }, ['get ext']]);
+    if (failure === 'get') await store.next('get', 'ext', 'fail');
+    else {
+      await store.next('get', 'ext');
+      await store.next('set', 'ext', 'fail');
+    }
+    assert.deepEqual([A.state().pet, A.state().save.ext.status, waits(store)], [CAT, 'pending', ['get ext']], 'после отказа — кот; первый шаг нового выбора — очистка ext');
+    const trail = await confirmAll(store);
+    assert.deepEqual(trail, [['ext', 'dog'], ['companion', 'cat']], 'kind = cat — только после снятия записи кролика с over = cat');
+    assert.deepEqual([await first.save.done, await latest.save.done], ['failed', 'saved']);
+    assert.deepEqual([store.json('companion').kind, store.json('ext')], ['cat', { v: 1 }]);
+    assert.deepEqual([A.state().pet, A.state().save.companion, A.state().save.ext], [CAT, SAVED, SAVED]);
+    assert.deepEqual([await restart(store), oldSees(store.data.get('companion'))], ['cat', 'cat'], 'повторное подключение и вкладка 0.1.4 — кот');
+    A.core.destroy();
+  });
+}
+
+test('асинхронно: контроль — поставленная запись кролика подтверждена: новый выбор кота — kind, затем условная очистка этой записи; saved', async () => {
+  const store = await slow(SLEEPING);
+  const A = tab(store.storage);
+  const first = A.core.setPet('example.bunny');
+  const latest = A.core.setPet('cat');
+  assert.deepEqual([A.state().pet, latest.save.keys, waits(store)], [CAT, ['companion', 'ext'], ['get ext']]);
+  const trail = await confirmAll(store);
+  assert.deepEqual(trail, [['ext', 'example.bunny'], ['companion', 'cat'], ['ext', 'cat']], 'прежний выбор (кролик поверх собаки), затем kind, затем очистка');
+  assert.deepEqual([await first.save.done, await latest.save.done, store.json('companion').kind, store.json('ext')], ['saved', 'saved', 'cat', { v: 1 }]);
+  assert.deepEqual([A.state().pet, A.state().save.ext, await restart(store)], [CAT, SAVED, 'cat']);
+  A.core.destroy();
+});
+
+test('асинхронно: отказ поставленной очистки прежнего выбора — выбор over этой записи сначала снимает её, затем kind (без оживления)', async () => {
+  // Кролик поверх кота → собака: kind = dog подтверждён, очистка записи стоит в очереди. Новый выбор — кот (over записи).
+  const store = await slow({ ext: { v: 1, pet: BUNNY_CAT } });
+  const A = tab(store.storage);
+  const first = A.core.setPet('dog');
+  await store.next('get', 'companion');
+  await store.next('set', 'companion');
+  assert.deepEqual(waits(store), ['get ext']);
+  const latest = A.core.setPet('cat');
+  assert.deepEqual([A.state().pet, A.state().save.companion.status, A.state().save.ext.status, latest.save.keys], [CAT, 'pending', 'pending', ['companion', 'ext']]);
+  await store.next('get', 'ext', 'fail');
+  const trail = await confirmAll(store);
+  assert.deepEqual(trail, [['ext', 'dog'], ['companion', 'cat']], 'по памяти хватило бы kind = cat — он оживил бы кролика');
+  assert.deepEqual([await first.save.done, await latest.save.done, store.json('companion').kind, store.json('ext')], ['partial', 'saved', 'cat', { v: 1 }]);
+  assert.deepEqual([A.state().pet, await restart(store)], [CAT, 'cat']);
+  A.core.destroy();
+});
+
+test('асинхронно: соседние переходы двух ключей — ожидаемый шаг kind или безусловная очистка, успех и отказ: шаги по действительному состоянию, ненужный ключ без записи', async () => {
+  // [начало, первый выбор (его шаг ждёт), новый выбор, исход ожидаемого чтения, keys нового, trail, done обоих, ext после]
+  const CASES = [
+    // Кролик поверх кота → собака (kind ждёт) → кот. Отказ: кролик действителен — безусловная очистка, kind уже кот.
+    [{ ext: { v: 1, pet: BUNNY_CAT } }, 'dog', 'cat', 'fail', ['ext', 'companion'], [['ext', 'cat']], ['failed', 'saved'], { v: 1 }],
+    // Успех: kind = dog, запись спит с over = кот — сначала её очистка, затем kind = кот.
+    [{ ext: { v: 1, pet: BUNNY_CAT } }, 'dog', 'cat', 'ok', ['ext', 'companion'], [['companion', 'dog'], ['ext', 'dog'], ['companion', 'cat']], ['partial', 'saved'], { v: 1 }],
+    // Кролик поверх собаки → собака (безусловная очистка ждёт) → кот. Отказ: кролик действителен — kind, затем его очистка.
+    [{ companion: { v: 1, kind: 'dog' }, ext: { v: 1, pet: { id: 'example.bunny', over: 'dog' } } }, 'dog', 'cat', 'fail', ['companion', 'ext'], [['companion', 'cat'], ['ext', 'cat']], ['failed', 'saved'], { v: 1 }],
+    // Успех: записи нет — только kind; ext — без записи (saved).
+    [{ companion: { v: 1, kind: 'dog' }, ext: { v: 1, pet: { id: 'example.bunny', over: 'dog' } } }, 'dog', 'cat', 'ok', ['companion', 'ext'], [['ext', 'dog'], ['companion', 'cat']], ['saved', 'saved'], { v: 1 }],
+    // Кролик поверх кота → собака (kind ждёт) → свой питомец: over — подтверждённый kind после ожидания.
+    [{ ext: { v: 1, pet: BUNNY_CAT } }, 'dog', 'example.bunny.big', 'fail', ['ext'], [['ext', 'example.bunny.big']], ['failed', 'saved'], { v: 1, pet: { id: 'example.bunny.big', over: 'cat' } }],
+  ];
+  for (const [initial, before, target, outcome, keys, trail, done, ext] of CASES) {
+    const label = JSON.stringify({ initial, before, target, outcome });
+    const store = await slow(initial);
+    const A = tab(store.storage);
+    const first = A.core.setPet(before);
+    const latest = A.core.setPet(target);
+    assert.deepEqual([A.state().pet.shown, latest.save.keys, Object.values(latest.save.results)], [target, keys, keys.map(() => 'pending')], label);
+    const head = store.waiting[0];
+    if (outcome === 'fail') await store.next(head.op, head.key, 'fail');
+    assert.deepEqual(await confirmAll(store), trail, label);
+    assert.deepEqual([await first.save.done, await latest.save.done, store.json('ext')], [...done, ext], label);
+    assert.deepEqual([A.state().pet.shown, await restart(store), A.state().save.companion.status, A.state().save.ext.status], [target, target, 'saved', 'saved'], label);
+    A.core.destroy();
+  }
+});
+
+test('асинхронно: правка, унёсшая несохранённый kind, — новый выбор своего питомца ждёт её: over по её результату; её kind не досылается, имя собаки — досылается', async () => {
+  for (const outcome of ['ok', 'fail']) {
+    const store = await slow({});
+    const A = tab(store.storage);
+    const refused = A.core.setPet('dog');
+    await store.next('get', 'companion');
+    await store.next('set', 'companion', 'fail');
+    assert.deepEqual([await refused.save.done, A.state().save.companion.unsaved], ['failed', ['kind']]);
+    // Имя собаки — правка companion: несохранённый kind уходит с ней (оживлять нечего).
+    const named = A.core.setName('Бобик');
+    const latest = A.core.setPet('example.bunny');
+    assert.deepEqual([A.state().pet.shown, latest.save.keys, waits(store)], ['example.bunny', ['ext'], ['get companion']], 'запись ext ждёт правку с kind');
+    if (outcome === 'fail') await store.next('get', 'companion', 'fail');
+    const trail = await confirmAll(store);
+    const over = outcome === 'ok' ? 'dog' : 'cat';
+    assert.deepEqual(trail.at(-1), ['ext', 'example.bunny'], outcome);
+    assert.deepEqual([await named.save.done, await latest.save.done, store.json('ext').pet], [outcome === 'ok' ? 'saved' : 'failed', 'saved', { id: 'example.bunny', over }], outcome);
+    // Отказ правки: kind выбора заменён новым выбором (не несохранённый), имя собаки — несохранённое.
+    assert.deepEqual([A.state().pet.shown, A.state().save.companion.unsaved, await restart(store)], ['example.bunny', outcome === 'ok' ? [] : ['dog.name'], 'example.bunny'], outcome);
+    A.core.destroy();
+  }
+  // Унесённый ext.pet: отказ записи кролика, модель уносит его; выбор собаки ждёт эту правку. Модель — независимое поле.
+  for (const outcome of ['ok', 'fail']) {
+    const store = await slow({});
+    const A = tab(store.storage);
+    const refused = A.core.setPet('example.bunny');
+    await store.next('get', 'ext');
+    await store.next('set', 'ext', 'fail');
+    assert.deepEqual([await refused.save.done, A.state().save.ext.unsaved], ['failed', ['pet']]);
+    const model = A.core.setBehavior('example.lively');
+    const latest = A.core.setPet('dog');
+    assert.deepEqual([A.state().pet.shown, latest.save.keys, waits(store)], ['dog', ['companion', 'ext'], ['get ext']], 'шаги ждут правку с ext.pet');
+    if (outcome === 'fail') await store.next('get', 'ext', 'fail');
+    await confirmAll(store);
+    assert.deepEqual([await model.save.done, await latest.save.done, store.json('companion').kind, store.json('ext')?.pet], [outcome === 'ok' ? 'saved' : 'failed', 'saved', 'dog', undefined], outcome);
+    // Отказ правки: поле выбора не досылается, модель — несохранённая и уйдёт со следующей правкой ext.
+    assert.deepEqual([A.state().pet.shown, A.state().behavior.shown, A.state().save.ext.unsaved, await restart(store)], ['dog', 'example.lively', outcome === 'ok' ? [] : ['behavior'], 'dog'], outcome);
+    A.core.destroy();
+  }
+});
+
+test('асинхронно: перевыбор, пока выбор ждёт, — ждущий снят (skipped, failed), новейший строится после ожидания; destroy ждущего — ничего не пишет', async () => {
+  for (const outcome of ['ok', 'fail']) {
+    const store = await slow(SLEEPING);
+    const A = tab(store.storage);
+    const first = A.core.setPet('example.bunny');
+    const second = A.core.setPet('cat');
+    const third = A.core.setPet('dog');
+    assert.deepEqual([A.state().pet.shown, await second.save.done, waits(store)], ['dog', 'failed', ['get ext']], 'шаги ждущего сняты до постановки');
+    if (outcome === 'fail') await store.next('get', 'ext', 'fail');
+    const trail = await confirmAll(store);
+    // Отказ: собака и спящая запись (over = кот) — переход «только kind», kind уже dog: записей нет, запись спит.
+    assert.deepEqual(trail, outcome === 'ok' ? [['ext', 'example.bunny'], ['ext', 'dog']] : [], outcome);
+    assert.deepEqual([await first.save.done, await second.save.done, await third.save.done], [outcome === 'ok' ? 'saved' : 'failed', 'failed', 'saved'], outcome);
+    assert.deepEqual([store.json('companion').kind, store.json('ext').pet, A.state().pet.shown, await restart(store)], ['dog', outcome === 'ok' ? undefined : BUNNY_CAT, 'dog', 'dog'], outcome);
+    A.core.destroy();
+  }
+  const store = await slow(SLEEPING);
+  const A = tab(store.storage);
+  const first = A.core.setPet('example.bunny');
+  const latest = A.core.setPet('cat');
+  A.core.destroy();
+  await store.next('get', 'ext', 'fail');
+  assert.deepEqual([waits(store), await first.save.done, await latest.save.done, store.json('companion').kind, store.json('ext').pet], [[], 'failed', 'failed', 'dog', BUNNY_CAT], 'после destroy шаги ждущего выбора не ставятся');
+});
+
+test('асинхронно: выбор другого ядра и независимые поля, пока выбор ждёт: модель записана, условная очистка не стирает более новую запись другого ядра', async () => {
+  const store = await slow(SLEEPING);
+  const A = tab(store.storage);
+  const B = tab(store.storage);
+  const first = A.core.setPet('example.bunny');
+  const model = A.core.setBehavior('example.lively');
+  const latest = A.core.setPet('cat');
+  const other = B.core.setPet('example.bunny.big');
+  assert.deepEqual(waits(store), ['get ext'], 'очередь ext: запись A, модель A, выбор B');
+  await store.next('get', 'ext', 'fail');
+  // Шаги A — после ожидания и за записью B; очистка A записи не меняет (там запись B) — записи нет; kind — последним.
+  assert.deepEqual(await confirmAll(store), [['ext', 'dog'], ['ext', 'example.bunny.big'], ['companion', 'cat']], 'без промежуточного оживления кролика');
+  assert.deepEqual([await first.save.done, await model.save.done, await latest.save.done, await other.save.done], ['failed', 'saved', 'saved', 'saved']);
+  // Шаги A поставлены после ожидания — за записью B; очистка A снимает только запись, которую видела (кролик, over = кот).
+  assert.deepEqual([store.json('companion').kind, store.json('ext')], ['cat', { v: 1, behavior: 'example.lively', pet: { id: 'example.bunny.big', over: 'dog' } }]);
+  assert.deepEqual([A.state().pet.shown, B.state().pet.shown, A.state().behavior.shown, await restart(store)], ['cat', 'cat', 'example.lively', 'cat'], 'запись B устарела после kind = cat и спит');
+  A.core.destroy();
+  B.core.destroy();
+});
+
+test('публичный вход: createStorage + createPetCore — отказ get и set прежней записи ext, новый выбор кота — saved и кот', async () => {
+  for (const failure of ['get', 'set']) {
+    const store = manual({ 'review:cat:v1': COMMON, 'review:companion:v1': { v: 1, kind: 'dog' }, 'review:ext:v1': { v: 1, pet: BUNNY_CAT } });
+    const storage = createStorage({ backend: store.backend, namespace: 'review' });
+    const loaded = storage.load();
+    await store.drain();
+    assert.equal(await loaded, 'ready');
+    const quiet = idle();
+    const pet = publicCore({ storage, pets: [cat, dog, bunny], behaviors: [calm], clock: clock().port, random: quiet.random, scheduler: quiet.scheduler, progress: host(4, 1).progress });
+    const first = pet.setPet('example.bunny');
+    const latest = pet.setPet('cat');
+    assert.deepEqual(pet.getState().pet, CAT);
+    if (failure === 'get') await store.next('get', 'review:ext:v1', 'fail');
+    else {
+      await store.next('get', 'review:ext:v1');
+      await store.next('set', 'review:ext:v1', 'fail');
+    }
+    await store.drain();
+    assert.deepEqual([await first.save.done, await latest.save.done, pet.getState().pet, store.json('review:companion:v1'), store.json('review:ext:v1')], ['failed', 'saved', CAT, { v: 1, kind: 'cat' }, { v: 1 }], failure);
+    pet.destroy();
+  }
+});
+
+test('синхронный веб: отказ записи кролика, затем кот — без ожидания и видимого pending: очистка спящей записи, затем kind', () => {
+  const list = [];
+  const s = site(SLEEPING, list);
+  const A = tab(s.storage);
+  const seen = [];
+  A.core.subscribe((update) => seen.push(update.snapshot.save.companion.status, update.snapshot.save.ext.status), { initial: false });
+  s.store.denySet = /:ext:/;
+  const first = A.core.setPet('example.bunny');
+  s.store.denySet = null;
+  list.length = 0;
+  const latest = A.core.setPet('cat');
+  assert.deepEqual([first.save.status, latest.save.status, latest.save.keys, writes(list)], ['failed', 'saved', ['ext', 'companion'], ['ext', 'companion']]);
+  assert.deepEqual([seen.includes('pending'), 'done' in latest.save, A.state().pet, fresh(s), oldSees(s.raw('companion'))], [false, false, CAT, 'cat', 'cat']);
+  A.core.destroy();
 });
 
 // ---------- вкладка 0.1.4 ----------

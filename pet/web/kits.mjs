@@ -8,11 +8,12 @@
 // box?, accessory? }) — строка <svg class="cat-art" data-kind data-view data-coat data-pose data-acc …> (view — 'full' или
 // 'portrait'; box — место во вложенной сцене комнаты { x, y, width, height }); item(id, { fresh }) — строка <g data-room="id">
 // своей вещи или игрушки комнаты в единицах сцены 400×250; mini?(id) — маленькая вещь рядом с питомцем }. Общий уголок
-// (стена, пол, мебель ступеней, миска) рисует отображение. Проверка — до подключения (kitProblem): набор без определения
-// или не покрывший обязательные позы, облики, аксессуары и свои вещи определения — отказ подключения.
+// (стена, пол, мебель ступеней, миска) рисует отображение. Проверка — до подключения (kitProblem), для каждого
+// выбранного набора, штатного тоже: набор без определения или не покрывший обязательные позы (по роли и заменам), облики,
+// аксессуары и свои вещи определения — отказ подключения. Сценки набора, которых нет в определении, не объявляются.
 
 import { catSvg, yarnArt } from '../cat-art.mjs';
-import { POSES, OPTIONAL_POSES } from '../core/define.mjs';
+import { PAW_POSE, POSES, REQUIRED_POSES, resolvePose } from '../core/define.mjs';
 import { cornerItems } from '../defs/room.mjs';
 import { ballArt, ballMiniSvg, dogSvg, ropeArt } from '../dog-art.mjs';
 
@@ -53,18 +54,24 @@ function stringList(value) {
   return true;
 }
 
-// Что набор обязан нарисовать по определению def (§ 7.3): позы питомца (кроме необязательных yawn, settle и поз сценок —
-// их набор может не рисовать: необязательная — заменой отображения), облики, аксессуары, свои игрушки комнаты и вещи
-// ступеней вне общего уголка.
+// Что набор обязан нарисовать по определению def (§ 7.3, § 7.1.1). Позы — по роли в формате, а не по тому, использует ли
+// их ещё и сценка: конечная поза (после допустимых замен poseFallback) каждой обязательной позы словаря (calm — всегда
+// сама) и лапы, если у питомца есть actions.paw. Конечной может быть и своя поза сценки или декоративная (yawn, settle) —
+// тогда её набор тоже обязан нарисовать. yawn, settle и позы сценок, которые обязательным заменам не служат, —
+// необязательные: их набор может не рисовать (сценку он тогда не объявляет, необязательную позу отображение показывает
+// базовой). Ещё облики, аксессуары, свои игрушки комнаты и вещи ступеней вне общего уголка.
 export function kitNeeds(def) {
-  const scenePoses = new Set(def.scenes.map((scene) => scene.pose));
+  const roles = def.actions.paw ? [...REQUIRED_POSES, PAW_POSE] : REQUIRED_POSES;
   return {
-    poses: def.poses.filter((pose) => !OPTIONAL_POSES.includes(pose) && !scenePoses.has(pose)),
+    poses: [...new Set(roles.map((pose) => resolvePose(def, pose)))],
     coats: def.coats.map((coat) => coat.id),
     accessories: def.accessories.map((item) => item.id),
     items: [...new Set([...def.room.toys.map((toy) => toy.id), ...def.items.list.map((item) => item.id).filter((id) => !SHARED_ITEMS.includes(id))])],
   };
 }
+
+// Сценки, которые отображение объявляет ядру для питомца с этим набором: нарисованные набором и есть в определении.
+export const kitScenes = (kit, def) => kit.scenes.filter((id) => def.scenes.some((scene) => scene.id === id));
 
 // Проблема набора (строка для отказа подключения) или ''. defs — Map ID → определение зарегистрированных питомцев.
 export function kitProblem(kit, defs) {
@@ -82,9 +89,11 @@ export function kitProblem(kit, defs) {
     if (missing.length) return `${at}: не нарисовано (${field}): ${missing.join(', ')}`;
   }
   if (needs.items.length && typeof kit.item !== 'function') return `${at}: item — функция рисунка своих вещей`;
-  for (const id of kit.scenes) {
+  // Объявленная сценка определения обязана быть нарисована; сценки набора, которых в определении нет, — лишний рисунок
+  // (как лишний облик): не ошибка, отображение их не объявляет (kitScenes) — так штатный набор подходит и определению, из
+  // которого сценку убрали.
+  for (const id of kitScenes(kit, def)) {
     const scene = def.scenes.find((item) => item.id === id);
-    if (!scene) return `${at}: сценки «${id}» нет в определении питомца`;
     if (!kit.poses.includes(scene.pose)) return `${at}: сценка «${id}» — поза ${scene.pose} не нарисована`;
   }
   // Пробный рисунок: строка svg с классом cat-art (механизм поз, движения и паузы отображения).

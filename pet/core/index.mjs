@@ -485,7 +485,9 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
     };
   }
 
-  // Результат операции — один раз, внутри фиксации (§ 8.4). После destroy — только done (и снятие следующих шагов цепочки).
+  // Результат операции — один раз, внутри фиксации (§ 8.4); шаг выбора без записи (none) — в pump, писать нечего. После
+  // destroy — только done (и снятие следующих шагов цепочки). Результат шага или ожидаемой операции продолжает цепочку
+  // выбора (stepDone, resume) — не здесь, а в фазе работы после фиксации.
   function settle(key, op, ok) {
     if (op.result !== 'pending') return;
     op.result = ok ? 'saved' : 'failed';
@@ -508,6 +510,7 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
       mark('save');
     }
     if (op.step) stepDone(op.step, op.late);
+    else if (lane.chain?.awaits.includes(op)) resume(op.late);
   }
 
   // Чужое подтверждённое изменение (§ 8.6): забыть вытесненные им несохранённые поля; патчи своих неразрешённых операций не
@@ -552,7 +555,7 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
 
   function operation(key, fields, { onSettle = null, step = null } = {}) {
     const own = keys[key];
-    const op = { n: ++own.n, fields, result: 'pending', onSettle, late: false, fault: null, resolve: null, step, replaced: null };
+    const op = { key, n: ++own.n, fields, result: 'pending', onSettle, late: false, fault: null, resolve: null, step, replaced: null };
     op.done = new Promise((resolve) => (op.resolve = resolve));
     own.ops.push(op);
     return op;
@@ -598,45 +601,65 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
   // результата предыдущего, его правка (plan) захватывается в момент постановки (над подтверждённым тогда), ставит его фаза
   // работы того же раунда после фиксации (синхронно — в той же команде, асинхронно — в конце раунда фиксации), не сам
   // settle. Отказ шага — дальше skipped; destroy — поставленный шаг выполняется очередью, следующие — skipped.
+  //
+  // Порядок шагов и условная очистка зависят от подтверждённых companion.kind и ext.pet. Пока своя операция, несущая поле
+  // выбора (поставленный шаг прежнего выбора или правка, унёсшая его несохранённое поле), не разрешена, их будущее значение
+  // неизвестно: её отказ оставляет прежнее, а не то, что в памяти. Поэтому такой выбор ждёт (chain.awaits) и строит шаги
+  // по подтверждённому только после её результата (replan) — по независимой проверке PL06: план по памяти с ещё не
+  // подтверждённой операцией после её отказа оживлял записью kind прежнюю спящую запись, а его условная очистка её не
+  // снимала.
 
   const confirmedRaw = (key) => readRecord(keys[key].confirmed).raw;
+  const SELECTION = ['companion', 'ext'];
   const selectionLabel = { companion: fieldLabel(['kind']), ext: fieldLabel(['pet']) };
+  // Свои неразрешённые операции ключей выбора, несущие поле выбора (запланированные шаги цепочки — тоже: их снимает skipRest
+  // раньше).
+  const selectionOps = () => SELECTION.flatMap((key) => keys[key].ops.filter((op) => Object.hasOwn(op.fields, selectionLabel[key])));
+
+  // Шаги выбора target по таблице § 7.7 для состояния (kind — companion.kind, pet — запись ext.pet или null) по порядку:
+  // { key, plan } — правка при постановке; запись условной очистки захвачена здесь (запись, появившаяся позже, — чужая и
+  // более новая, её очистка не снимает); guess — правка в памяти до постановки, если отличается.
+  function stepsFor(target, kind, pet) {
+    const toKind = { key: 'companion', plan: () => [[['kind'], target]] };
+    const active = Boolean(pet) && pet.over === kind;
+    // Штатный или расширение → расширение: только ext.pet = { id, over }, over — подтверждённый companion.kind в момент
+    // постановки; companion не трогается — вкладки 0.1.4 видят прежнего штатного.
+    if (!LEGACY_KINDS.includes(target)) return [{ key: 'ext', plan: () => [[['pet'], { id: target, over: storedKind(confirmedRaw('companion')) }]], guess: [[['pet'], { id: target, over: kind }]] }];
+    // Расширение (over = target) → штатный target: ext без pet, безусловно (companion.kind уже он).
+    if (active && pet.over === target) return [{ key: 'ext', plan: () => [[['pet'], clearPet()]] }];
+    // Расширение (over = O) → штатный X ≠ O: сначала companion.kind = X (он сам делает запись устаревшей), затем — только
+    // после его подтверждения — условная очистка той же записи (не стирает более новый выбор другого экземпляра).
+    if (active) return [toKind, { key: 'ext', plan: () => [[['pet'], clearPet(pet)]] }];
+    // Штатный Y при устаревшей записи с over = X → X: сначала условная очистка, затем — после её подтверждения — kind = X:
+    // промежуточной записи, которая оживила бы устаревшее расширение, нет.
+    if (pet && pet.over === target) return [{ key: 'ext', plan: () => [[['pet'], clearPet(pet)]] }, toKind];
+    return [toKind];
+  }
+  const confirmedSteps = (target) => stepsFor(target, storedKind(confirmedRaw('companion')), extPet(confirmedRaw('ext')?.pet));
 
   function select(step, target) {
-    // Прежний выбор — целое: его несохранённые поля и ещё не поставленные шаги снимаются (не досылаются); поставленный
-    // шаг выполняется очередью, а его поля выбора при отказе в несохранённые не переходят.
-    for (const key of ['companion', 'ext']) delete keys[key].unsaved[selectionLabel[key]];
-    if (lane.chain) {
-      const old = lane.chain;
-      if (lane.inflight?.chain === old) lane.inflight.op.replaced = new Set([selectionLabel[lane.inflight.key]]);
-      skipRest(old, { replaced: true });
-    }
-    // Ожидание — по памяти (подтверждённое и свои неразрешённые операции): так новый выбор встаёт после поставленного шага.
-    const m = memory();
-    const kind = storedKind(m.raw.companion);
-    const pet = m.ext.pet;
-    const active = Boolean(pet) && pet.over === kind;
-    const toKind = { key: 'companion', plan: () => [[['kind'], target]] };
-    const plan = [];
-    if (!LEGACY_KINDS.includes(target)) {
-      // Штатный или расширение → расширение: только ext.pet = { id, over }, over — подтверждённый companion.kind в момент
-      // постановки; companion не трогается — вкладки 0.1.4 видят прежнего штатного.
-      plan.push({ key: 'ext', plan: () => [[['pet'], { id: target, over: storedKind(confirmedRaw('companion')) }]], guess: [[['pet'], { id: target, over: kind }]] });
-    } else if (active && pet.over === target) {
-      // Расширение (over = target) → штатный target: ext без pet, безусловно (companion.kind уже он).
-      plan.push({ key: 'ext', plan: () => [[['pet'], clearPet()]] });
-    } else if (active) {
-      // Расширение (over = O) → штатный X ≠ O: сначала companion.kind = X (он сам делает запись устаревшей), затем — только
-      // после его подтверждения — условная очистка той же записи (не стирает более новый выбор другого экземпляра).
-      plan.push(toKind, { key: 'ext', plan: () => [[['pet'], clearPet(pet)]] });
-    } else if (pet && pet.over === target) {
-      // Штатный Y при устаревшей записи с over = X → X: сначала условная очистка, затем — после её подтверждения — kind = X:
-      // промежуточной записи, которая оживила бы устаревшее расширение, нет.
-      plan.push({ key: 'ext', plan: () => [[['pet'], clearPet(pet)]] }, toKind);
-    } else plan.push(toKind);
-    const chain = { gen: ++choices, steps: [], failed: false };
+    // Прежний выбор — целое: его ещё не поставленные шаги и несохранённые поля выбора снимаются (не досылаются);
+    // поставленные операции с полем выбора (шаг прежнего выбора, правка, унёсшая несохранённое поле выбора) выполняются
+    // очередью, но их поле выбора при отказе в несохранённые не переходит (replaced), а новый выбор ждёт их результата.
+    if (lane.chain) skipRest(lane.chain, { replaced: true });
+    for (const key of SELECTION) delete keys[key].unsaved[selectionLabel[key]];
+    const awaits = selectionOps();
+    for (const op of awaits) (op.replaced ??= new Set()).add(selectionLabel[op.key]);
+    let plan;
+    if (awaits.length) {
+      // Ждёт: шаги построит replan по подтверждённому после результата ожидаемых операций. До того — оба ключа выбора
+      // (штатному питомцу может понадобиться любой; своему — только ext), в порядке и с правками, ожидаемыми по памяти:
+      // оба ключа pending с команды, выбор в памяти — сразу.
+      const m = memory();
+      plan = stepsFor(target, storedKind(m.raw.companion), m.ext.pet);
+      if (LEGACY_KINDS.includes(target)) {
+        if (!plan.some((item) => item.key === 'companion')) plan.push({ key: 'companion', plan: () => [[['kind'], target]] });
+        if (!plan.some((item) => item.key === 'ext')) plan.push({ key: 'ext', plan: () => [[['pet'], clearPet(m.ext.pet)]] });
+      }
+    } else plan = confirmedSteps(target);
+    const chain = { gen: ++choices, target, steps: [], failed: false, awaits };
     for (const item of plan) {
-      const s = { chain, key: item.key, plan: item.plan, state: 'planned', op: null };
+      const s = { chain, key: item.key, plan: item.plan, state: 'planned', op: null, none: false };
       s.op = operation(item.key, edits(item.guess ?? item.plan()), { step: s });
       chain.steps.push(s);
     }
@@ -648,15 +671,46 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
     step.save = report(step.entries);
   }
 
-  // Следующий шаг новейшей цепочки, если ничего не стоит в очереди: правка — по подтверждённому сейчас; синхронный
-  // координатор разрешает шаг в том же вызове — цепочка идёт дальше здесь же; асинхронный — шаг ждёт своей фиксации.
+  // Ожидание разрешено: шаги — по подтверждённому после успеха или отказа ожидаемых операций (таблица § 7.7 для
+  // действительного состояния): порядок, условная очистка той записи, что лежит сейчас (появившаяся позже — чужая, более
+  // новая). Ключ, которому действительное состояние ничего не требует, — шаг без записи (none): после нужных шагов
+  // разрешается saved (писать нечего, § 8.3), при отказе нужного — skipped, его поле в несохранённые не переходит.
+  function replan(chain) {
+    chain.awaits = [];
+    const plan = confirmedSteps(chain.target);
+    const at = (s) => {
+      const i = plan.findIndex((item) => item.key === s.key);
+      return i < 0 ? plan.length : i;
+    };
+    chain.steps.sort((a, b) => at(a) - at(b));
+    for (const s of chain.steps) {
+      const item = plan.find((entry) => entry.key === s.key);
+      if (!item) {
+        s.none = true;
+        continue;
+      }
+      s.plan = item.plan;
+      s.op.fields = edits(item.plan());
+    }
+  }
+
+  // Следующий шаг новейшей цепочки, если ничего не стоит в очереди и ожидаемые операции разрешены: правка — по
+  // подтверждённому сейчас; синхронный координатор разрешает шаг в том же вызове — цепочка идёт дальше здесь же;
+  // асинхронный — шаг ждёт своей фиксации. Синхронный координатор ожидания не знает: к команде все операции разрешены.
   function pump() {
     for (;;) {
       const chain = lane.chain;
       if (!chain || lane.inflight) return;
       if (status === 'destroyed' || chain.failed) return skipRest(chain);
+      if (chain.awaits.some((op) => op.result === 'pending')) return;
+      if (chain.awaits.length) replan(chain);
       const s = chain.steps.find((item) => item.state === 'planned');
       if (!s) return finish(chain);
+      if (s.none) {
+        // Писать нечего: операция разрешена без записи (не в фиксации — в фазе работы, как снятие шага).
+        settle(s.key, s.op, true);
+        continue;
+      }
       send(s);
       if (s.op.result === 'pending') {
         lane.inflight = s;
@@ -684,13 +738,18 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
     s.state = 'done';
     if (s.op.result !== 'saved') s.chain.failed = true;
     if (lane.inflight === s) lane.inflight = null;
+    resume(late);
+  }
+  // Поздний результат, которого ждёт цепочка (свой шаг или ожидаемая операция): продолжение — в фазе работы раунда после
+  // фиксации, не из settle внутри неё. Синхронный результат продолжает вызывающий pump.
+  function resume(late) {
     if (!late) return;
     if (Round.working()) Round.defer(pump);
     else pump();
   }
 
   // Шаги, ещё не поставленные, не выполняются: skipped. Их поля — несохранённые (уходят со следующей правкой ключа), кроме
-  // смены выбора более новым (replaced) и отключения.
+  // смены выбора более новым (replaced), шага без записи (none — писать было нечего) и отключения.
   function skipRest(chain, { replaced = false } = {}) {
     for (const s of chain.steps) {
       if (s.state !== 'planned') continue;
@@ -701,7 +760,7 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
       if (status === 'destroyed') continue;
       const own = keys[s.key];
       own.ops = own.ops.filter((item) => item !== op);
-      if (!replaced) for (const [label, field] of Object.entries(op.fields)) own.unsaved[label] = field;
+      if (!replaced && !s.none) for (const [label, field] of Object.entries(op.fields)) own.unsaved[label] = field;
       tidy(s.key);
       mark('save');
     }
