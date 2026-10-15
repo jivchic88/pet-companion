@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as P from '../pet/pet-place.mjs';
-import * as R from '../pet/pet-rules.mjs';
+import * as R from './legacy-rules.mjs';
 
 const K = R.storageKeys('site');
 

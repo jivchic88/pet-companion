@@ -5,7 +5,7 @@
 // 400×250). Правила ядра реэкспортом — для оставшегося веб-кода и проверок; второй реализации нет.
 
 import { sceneCatBox } from './cat-art.mjs';
-import { frames, HOME, pickAt, SCENE } from './core/room.mjs';
+import { frames, pickAt, SCENE } from './core/room.mjs';
 import { grab, release } from './pet-play.mjs';
 
 export * from './core/room.mjs';
@@ -15,16 +15,18 @@ export const MOVE_PX = 6;
 
 const round = (v) => Math.round(v * 10) / 10;
 
-// Раскладка на svg сцены: место отдыха и питомец (вложенный svg — x, y) вместе, остальное — сдвигом; shift — сдвиг позы
-// «ест» к миске из снимка ядра (room.feedShift).
+// Раскладка на svg сцены: место отдыха и питомец (вложенный svg — x, y) вместе, остальное — сдвигом от исходного места
+// (layout.model.home — модель комнаты питомца, его определение); shift — сдвиг позы «ест» к миске из снимка ядра
+// (room.feedShift).
 export function paintRoom(svg, layout, shift = [0, 0]) {
   const base = sceneCatBox(layout.stage);
   for (const el of svg?.querySelectorAll('[data-room]') ?? []) {
     const id = el.dataset.room;
     const p = layout.pos[id];
-    if (!p) continue;
-    const dx = round(p[0] - HOME[id][0]);
-    const dy = round(p[1] - HOME[id][1]);
+    const home = Object.hasOwn(layout.model.home, id) ? layout.model.home[id] : null;
+    if (!p || !home) continue;
+    const dx = round(p[0] - home[0]);
+    const dy = round(p[1] - home[1]);
     if (el.classList.contains('cat-art')) {
       el.setAttribute('x', round(base.x + dx));
       el.setAttribute('y', round(base.y + dy));
@@ -41,8 +43,8 @@ export function hitStyle(layout, id) {
   return `--x:${pct((l + r) / 2, SCENE[0])};--y:${pct((t + b) / 2, SCENE[1])};--w:${pct(r - l, SCENE[0])};--h:${pct(b - t, SCENE[1])}`;
 }
 
-// Перенос: hooks = { layout() → { kind, stage, pos, pick } черновика (снимок ядра), drag(id, point) — room.drag, drop() —
-// room.drop, cancel() — room.dragCancel }.
+// Перенос: hooks = { layout() → { model, stage, pos, pick } черновика (модель комнаты питомца и снимок ядра), drag(id, point)
+// — room.drag, drop() — room.drop, cancel() — room.dragCancel }.
 const st = { hooks: null, drag: null };
 
 // Указатель нажат на предмете (идёт перенос — у ядра он начат тем же нажатием): кнопки и стрелки ждут конца.

@@ -10,7 +10,7 @@
 // показ сценки и попытка (scene.waiting). Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
 import { QUIET_REASONS } from '../pet/core/session.mjs';
 import { DAY, flush, host, LEGACY_DISPLAY, life, reserver } from './core-kit.mjs';
 

@@ -9,8 +9,8 @@
 // чужая запись без приветствия и записи, сверка без события, барьер, запись до destroy. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
-import { createPetCore } from '../pet/core/index.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
+import { createPetCore } from './core-kit.mjs';
 import { calendar, DAY, flush, host, journal, LEGACY_DISPLAY, life, manual, planner, series, VIEWS, web } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };

@@ -2,7 +2,7 @@
 // потери чужих полей и облика другого животного, та же геометрия и позы у всех обликов.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as R from '../pet/pet-rules.mjs';
+import * as R from './legacy-rules.mjs';
 import { CAT_COATS, PALETTE, catSvg, sceneCatBox, sceneSvg } from '../pet/cat-art.mjs';
 import { DOG_COATS, DOG_PALETTE, dogSvg } from '../pet/dog-art.mjs';
 

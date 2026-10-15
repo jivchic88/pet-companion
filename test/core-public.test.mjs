@@ -1,6 +1,7 @@
-// Публичный вход ядра pet-companion/core (этап PL05; docs/ARCHITECTURE.md § 4–6, § 14.1.5) — только через pet/core.mjs:
-// поверхность входа, хранилища и экземпляра (ровно публичные методы, внутренних входов legacy нет); создание — проверка
-// настроек до подключения, регистрация определений не принимается, хранилище — только createStorage и загруженное; при
+// Публичный вход ядра pet-companion/core (этапы PL05, PL06; docs/ARCHITECTURE.md § 4–7, § 14.1.5) — только через
+// pet/core.mjs: поверхность входа, хранилища и экземпляра (ровно публичные методы, внутренних входов legacy нет); создание —
+// проверка настроек до подключения, регистрация определений — непустые списки pets и behaviors (здесь — штатные кот,
+// собака и calm входов /pets и /behaviors, если проверка не задала свои), хранилище — только createStorage и загруженное; при
 // создании ни записи, ни задач, ни слушателей; жизненный цикл; результаты команд — точные поля, честный changed, коды
 // отказов без изменений и обновлений; дополнительные поля каждой команды — собственные, нужного типа на всех путях
 // успеха: повтор без изменений (уже показанный питомец — reacted: false), изменение, сбой после применения (по
@@ -16,9 +17,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as Core from '../pet/core.mjs';
+import { calm } from '../pet/behaviors.mjs';
+import { cat, dog } from '../pet/pets.mjs';
 import { calendar, DAY, flush, planner, series } from './core-kit.mjs';
 
-const { createPetCore, createStorage, PetError, VERSION, localDay } = Core;
+const { createStorage, PetError, VERSION, localDay } = Core;
+// Штатные определения (PL06) — если проверка не задала свои pets и behaviors.
+const STOCK = { pets: [cat, dog], behaviors: [calm] };
+const createPetCore = (options) => Core.createPetCore(options && typeof options === 'object' && !Array.isArray(options) && !('pets' in options) && !('behaviors' in options) ? { ...STOCK, ...options } : options);
 const VIEWS = ['corner', 'play', 'room'];
 const FLOOR = [-40, -10, 300, 230];
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
@@ -100,8 +106,8 @@ function make({ initial = {}, backend = null, counts = { marks: 0, today: 0 }, r
 }
 const state = (L) => L.core.getState();
 
-test('вход: ровно createPetCore, createStorage, PetError, localDay, VERSION; localDay и VERSION — те же, что у legacy-входа', async () => {
-  assert.deepEqual(Object.keys(Core).sort(), ['PetError', 'VERSION', 'createPetCore', 'createStorage', 'localDay']);
+test('вход: ровно createPetCore, createStorage, definePet, defineBehavior (PL06), PetError, localDay, VERSION; localDay и VERSION — те же, что у legacy-входа', async () => {
+  assert.deepEqual(Object.keys(Core).sort(), ['PetError', 'VERSION', 'createPetCore', 'createStorage', 'defineBehavior', 'definePet', 'localDay']);
   const legacy = await import('../pet/pet.mjs');
   assert.equal(VERSION, legacy.VERSION);
   assert.equal(localDay, legacy.localDay);
@@ -125,8 +131,8 @@ test('createStorage: настройки проверяются (PetError invalid
   assert.equal(a.load(), 'ready');
   assert.deepEqual(
     store.log,
-    ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'].map((key) => `get same:${key}:v1`),
-    'загрузка — восемь ключей пространства с прежними именами v1',
+    ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room', 'ext'].map((key) => `get same:${key}:v1`),
+    'загрузка — девять ключей пространства (PL06: ещё ext) с прежними именами v1',
   );
   const broken = syncBackend();
   broken.denyGet = /:look:/;
@@ -161,7 +167,7 @@ test('createStorage асинхронно: load — обещание итога (
   offline.destroy();
 });
 
-test('createPetCore: проверка до подключения; pets и behaviors не принимаются (регистрация — следующий этап); storage — только загруженный координатор createStorage', () => {
+test('createPetCore: проверка до подключения; pets и behaviors — непустые списки определений (PL06); storage — только загруженный координатор createStorage', () => {
   const store = syncBackend();
   const storage = createStorage({ namespace: 'opts', backend: store.backend });
   storage.load();
@@ -188,7 +194,8 @@ test('createPetCore: проверка до подключения; pets и behav
     } catch (error) {
       return error.message;
     }
-  })(), /регистрация определений ещё не поддерживается/);
+  })(), /pets — непустой массив определений/);
+  assert.throws(() => Core.createPetCore({ storage }), (error) => error.code === 'invalid-options' && /pets/.test(error.message), 'без pets — invalid-options');
   assert.equal(store.log.length, reads, 'отказ создания хранилище не трогает');
   const fresh = createStorage({ namespace: 'opts-not-loaded', backend: store.backend });
   assert.throws(() => createPetCore({ storage: fresh }), (error) => error.code === 'storage-not-loaded');
@@ -197,7 +204,7 @@ test('createPetCore: проверка до подключения; pets и behav
 test('экземпляр: ровно публичные методы и свойства, вложенные stroke, toy, room; входов legacy-отображения нет; заморожен; version, status', () => {
   const L = make();
   const core = L.core;
-  assert.deepEqual(Object.keys(core).sort(), ['activity', 'close', 'destroy', 'feed', 'getState', 'hide', 'interact', 'notify', 'open', 'refresh', 'room', 'setAppearance', 'setContext', 'setDisplay', 'setName', 'setPet', 'setPreferences', 'setPresence', 'setReducedMotion', 'setVisible', 'show', 'start', 'status', 'stroke', 'subscribe', 'toy', 'version']);
+  assert.deepEqual(Object.keys(core).sort(), ['activity', 'close', 'destroy', 'feed', 'getState', 'hide', 'interact', 'notify', 'open', 'refresh', 'room', 'setAppearance', 'setBehavior', 'setContext', 'setDisplay', 'setName', 'setPet', 'setPreferences', 'setPresence', 'setReducedMotion', 'setVisible', 'show', 'start', 'status', 'stroke', 'subscribe', 'toy', 'version']);
   assert.deepEqual(Object.keys(core.stroke).sort(), ['cancel', 'end', 'start', 'step']);
   assert.deepEqual(Object.keys(core.toy).sort(), ['cancel', 'drag', 'drop']);
   assert.deepEqual(Object.keys(core.room).sort(), ['cancel', 'drag', 'dragCancel', 'drop', 'move', 'nudge', 'reset', 'save', 'select']);
@@ -744,7 +751,7 @@ test('снимок: глубоко заморожен, простые данны
   L.core.start();
   const a = state(L);
   assert.equal('place' in a, false, 'внутреннее предпочтение места legacy не входит в публичный снимок');
-  assert.deepEqual(Object.keys(a).sort(), ['context', 'display', 'look', 'name', 'pet', 'pets', 'phrase', 'play', 'pose', 'prefs', 'presence', 'progress', 'room', 'save', 'scene', 'scenePhrase', 'status', 'storage', 'treat', 'v', 'view', 'visible']);
+  assert.deepEqual(Object.keys(a).sort(), ['behavior', 'context', 'display', 'look', 'name', 'pet', 'pets', 'phrase', 'play', 'pose', 'prefs', 'presence', 'progress', 'room', 'save', 'scene', 'scenePhrase', 'status', 'storage', 'treat', 'v', 'view', 'visible']);
   const frozen = (value) => value === null || typeof value !== 'object' || (Object.isFrozen(value) && Object.values(value).every(frozen));
   assert.equal(frozen(a), true, 'глубоко заморожен');
   assert.deepEqual(JSON.parse(JSON.stringify(a)), a, 'только простые данные');

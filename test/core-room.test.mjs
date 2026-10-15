@@ -1,7 +1,7 @@
 // Ядро PL04.3 в Node — комната и место legacy-раскладки как ключи ядра (docs/ARCHITECTURE.md § 3.1, § 8, § 11.1, § 13
 // «Геометрия комнаты», «Формат места»). Геометрия комнаты и игрушек — одна реализация в ядре (веб — реэкспорт тех же
-// функций), без импорта рисунков: масштаб и рамки — данные рисунка ядра, сверенные с веб-графикой (sceneCatBox, области
-// попадания, лапа). Ключ room: память ядра (подтверждённое, несохранённое, операции), сохранная запись, поглощение другой
+// функций), без импорта рисунков: масштаб и рамки — данные определений питомцев (PL06: size, play, room), сверенные с
+// веб-графикой (sceneCatBox, области попадания, лапа). Ключ room: память ядра (подтверждённое, несохранённое, операции), сохранная запись, поглощение другой
 // вкладки без записи, сверка перед решением, отказ загрузки. Ключ place: запись только командой ядра setPlace через его
 // подключение (как прежний placeRecord для правок отображения), несохранённое и его забывание чужой записью, неизвестное и
 // больший v, неверная правка — invalid-argument. Данные синтетические.
@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { sceneCatBox } from '../pet/cat-art.mjs';
-import * as Figure from '../pet/core/figure.mjs';
+import { cat } from '../pet/defs/cat.mjs';
+import { dog } from '../pet/defs/dog.mjs';
 import { prefRecord } from '../pet/core/formats/legacy.mjs';
 import * as Core from '../pet/core/room.mjs';
 import * as CoreToys from '../pet/core/toys.mjs';
@@ -24,8 +25,9 @@ const CAT = { v: 1, seenStage: 0, greetDay: DAY };
 test('геометрия комнаты и игрушек — одна реализация в ядре: веб реэкспортирует те же функции; ядро не импортирует рисунки', async () => {
   for (const name of ['arrange', 'settle', 'fits', 'frames', 'range', 'nudge', 'pickAt', 'hitBox', 'feedShift', 'roomRecord', 'parseRoom', 'readPoint', 'movedItems', 'samePlaces', 'roomItems', 'itemTitle', 'seatOf']) assert.equal(Web[name], Core[name], `pet-room.mjs: ${name} — функция ядра`);
   for (const name of ['placeToy', 'rollEnd', 'rollWay', 'rollDist', 'closer', 'sideOf', 'zoneOf']) assert.equal(WebToys[name], CoreToys[name], `pet-toys.mjs: ${name} — функция ядра`);
-  for (const name of ['HIT', 'PAW', 'PET_BOX']) assert.equal(Play[name], Figure[name], `pet-play.mjs: ${name} — данные ядра`);
-  for (const file of ['room', 'toys', 'figure', 'play', 'editor']) {
+  // PL06: данных рисунка (области, лапа, рамка) у веб-модуля нет — они в определении питомца.
+  for (const name of ['HIT', 'PAW', 'PET_BOX']) assert.equal(Play[name], undefined, `pet-play.mjs: ${name} — данные определения, не модуля`);
+  for (const file of ['room', 'toys', 'play', 'editor', 'catalog', 'define']) {
     const text = await readFile(new URL(`../pet/core/${file}.mjs`, import.meta.url), 'utf8');
     const specs = [...text.matchAll(/^import [^;]*? from '([^']+)';/gm)].map((match) => match[1]);
     assert.ok(specs.every((spec) => spec.startsWith('./') && !spec.includes('art')), `core/${file}.mjs импортирует только ядро: ${specs.join(', ')}`);
@@ -44,14 +46,16 @@ test('геометрия комнаты и игрушек — одна реал�
   }
 });
 
-test('данные рисунка ядра совпадают с веб-графикой: масштаб 160/204, рамка сцены, области и лапа', () => {
-  assert.deepEqual([Figure.SCENE_PET.width, Figure.SCENE_PET.height], [sceneCatBox(0).width, sceneCatBox(0).height]);
+test('данные рисунка в определениях совпадают с веб-графикой: масштаб 160/204, рамка сцены, области и лапа', () => {
+  for (const def of [cat, dog]) {
+    assert.deepEqual([def.room.frame[0], def.room.frame[1]], [sceneCatBox(0).width, sceneCatBox(0).height], `${def.id}: рамка питомца в сцене`);
+    assert.equal(Core.roomModel(def).scale, 160 / 204, `${def.id}: рисунок 220×204 вписан в 176×160 по высоте`);
+    assert.equal(def.size.ground, 176, `${def.id}: линия пола у лап`);
+    assert.deepEqual([def.size.width, def.size.height], [220, 204]);
+    // Область лапы определения — та же, что попадание отображения.
+    assert.equal(Play.petPart(def, def.play.paw.cx, def.play.paw.cy), 'paw', `${def.id}: лапа`);
+  }
   assert.deepEqual([sceneCatBox(3).width, sceneCatBox(3).height], [sceneCatBox(0).width, sceneCatBox(0).height], 'на лежанке — та же рамка');
-  assert.equal(Core.PET_SCALE, 160 / 204, 'рисунок 220×204 вписан в 176×160 по высоте');
-  assert.equal(CoreToys.FLOOR_LINE, 176);
-  assert.deepEqual(Figure.PET_BOX, { width: 220, height: 204 });
-  // Область лапы ядра — та же, что попадание отображения.
-  for (const kind of ['cat', 'dog']) assert.equal(Play.petPart(kind, Figure.PAW[kind].cx, Figure.PAW[kind].cy), 'paw');
 });
 
 test('ключ room — ядро: чтение и запись только через его подключение; несохранённое; поглощение другой вкладки без записи', () => {
@@ -65,7 +69,7 @@ test('ключ room — ядро: чтение и запись только че
   // Повреждённое значение — показ по умолчанию, предупреждение при загрузке, явная запись (сохранение) его заменяет.
   const C = life({ cat: CAT, room: '{bad' }, { counts: host(1, 1), display: LEGACY_DISPLAY });
   C.core.start();
-  assert.deepEqual([C.state().room.pos, C.state().save.room.corrupt, C.effects('warning').some((effect) => effect.key === 'room' && effect.code === 'corrupt')], [Core.arrange('cat', 0, {}).pos, true, true]);
+  assert.deepEqual([C.state().room.pos, C.state().save.room.corrupt, C.effects('warning').some((effect) => effect.key === 'room' && effect.code === 'corrupt')], [Core.arrange(Core.roomModel(cat), 0, {}).pos, true, true]);
   C.core.open('room');
   C.core.room.move('yarn', [120, 234]);
   C.core.room.save();

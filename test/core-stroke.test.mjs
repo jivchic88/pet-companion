@@ -9,7 +9,7 @@
 // только у коротких откликов). Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
 import { DAY, host, LEGACY_DISPLAY, life } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };

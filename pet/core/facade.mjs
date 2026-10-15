@@ -1,5 +1,5 @@
-// Ядро: публичный экземпляр (вход pet-companion/core и pet.core legacy-фасада, PL05; docs/ARCHITECTURE.md § 4–6,
-// § 14.1.5). Тот же внутренний экземпляр (index.mjs) — без второй модели состояния и второго пути команд: фасад только
+// Ядро: публичный экземпляр (вход pet-companion/core и pet.core legacy-фасада, PL05, PL06; docs/ARCHITECTURE.md § 4–7,
+// § 14.1.5, § 14.1.6). Тот же внутренний экземпляр (index.mjs) — без второй модели состояния и второго пути команд: фасад только
 // сужает поверхность. Наружу — ровно публичные методы § 6.4 (входы legacy-отображения setPlace, arrive, stopScene,
 // событие без key и признак выбора имени остаются внутренними), ровно документированные поля результатов (внутренние
 // решения reaction, scene, greet не выдаются) и снимок без внутреннего предпочтения места legacy (place). Снимок и
@@ -81,6 +81,8 @@ export function exposed(inner) {
     // Готовое ли имя, решает ядро (публичное правило 'preset'); второй аргумент не параметр.
     setName: (name) => pick(inner.setName(name, { pick: 'preset' }), ['reacted']),
     setPet: (id) => pick(inner.setPet(id), ['reacted']),
+    // PL06: модель поведения (зарегистрированная), ext.behavior.
+    setBehavior: (id) => pick(inner.setBehavior(id)),
     setAppearance: (look) => pick(inner.setAppearance(look)),
     setPreferences: (prefs) => pick(inner.setPreferences(prefs)),
     hide: plain('hide'),

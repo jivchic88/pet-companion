@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ROOM_TEXT } from '../pet/core/editor.mjs';
-import { arrange, HOME, nudge, roomItems, STEP } from '../pet/core/room.mjs';
+import { arrange, HOME, nudge, roomItems, STEP } from './legacy-room.mjs';
 import { badPoints, DAY, host, LEGACY_DISPLAY, life, manual } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };

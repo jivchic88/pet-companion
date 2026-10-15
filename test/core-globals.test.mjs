@@ -29,7 +29,8 @@ test('глобалы-ловушки: импорт ядра и веб-адапт�
   assert.throws(() => globalThis.localStorage, /ядро обратилось/, 'ловушка действует');
   touched.length = 0;
   const kit = await import('./core-kit.mjs');
-  const { createPetCore } = await import('../pet/core/index.mjs');
+  // Ядро со штатными определениями (PL06: pet/defs/** — тоже без браузерных глобалов).
+  const { createPetCore } = kit;
   const { createWebScenes } = await import('../pet/web/scenes.mjs');
   assert.deepEqual(touched, [], 'импорт');
 
@@ -181,14 +182,17 @@ test('глобалы-ловушки: импорт ядра и веб-адапт�
 test('глобалы-ловушки (PL05): публичный вход pet-companion/core — импорт, createStorage на Map (синхронно и асинхронно), команды, подписка, отключение — без браузерных глобалов', async () => {
   touched.length = 0;
   const { createPetCore, createStorage, localDay, VERSION } = await import('../pet/core.mjs');
-  assert.deepEqual(touched, [], 'импорт входа ядра');
+  // PL06: входы определений — только данные, без глобалов при импорте и проверке.
+  const { cat, dog } = await import('../pet/pets.mjs');
+  const { calm } = await import('../pet/behaviors.mjs');
+  assert.deepEqual(touched, [], 'импорт входа ядра и определений');
   const map = new Map();
   const storage = createStorage({ namespace: 'globals-public', backend: { get: (name) => map.get(name) ?? null, set: (name, text) => void map.set(name, text) } });
   assert.equal(storage.load(), 'ready');
   let now = Date.parse('2026-10-15T10:00:00Z');
   const clock = { now: () => now, day: () => '2026-10-15', nextDay: (at) => at + 86_400_000 };
   const scheduler = { later: () => () => {} };
-  const pet = createPetCore({ storage, progress: () => ({ marks: 3, today: 1 }), clock, scheduler, random: () => 0.5 });
+  const pet = createPetCore({ storage, pets: [cat, dog], behaviors: [calm], progress: () => ({ marks: 3, today: 1 }), clock, scheduler, random: () => 0.5 });
   const seen = [];
   pet.subscribe((update) => seen.push(update.reason));
   pet.start();
@@ -215,7 +219,7 @@ test('глобалы-ловушки (PL05): публичный вход pet-comp
     await new Promise((resolve) => setImmediate(resolve));
   }
   assert.equal(await loading, 'ready');
-  const late = createPetCore({ storage: remote, clock, scheduler, random: () => 0.5 });
+  const late = createPetCore({ storage: remote, pets: [cat, dog], behaviors: [calm], clock, scheduler, random: () => 0.5 });
   const named = late.setName('Кекс');
   late.destroy();
   while (slow.length) {

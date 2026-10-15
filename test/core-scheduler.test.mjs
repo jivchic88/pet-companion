@@ -9,7 +9,7 @@
 // ядра (scene.waiting, тестовый порт резервирования), а не сигнал отображению. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PHRASE_MS, REACTIONS } from '../pet/core/director.mjs';
+import { PHRASE_MS, REACTIONS } from './legacy-rules.mjs';
 import { calendar, DAY, host, LEGACY_DISPLAY, life, manual, reserver } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };

@@ -11,9 +11,9 @@
 // (по независимой проверке PL04.3); разреженный пол отказывает и раньше — контроль. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
-import { playTexts } from '../pet/core/play.mjs';
-import { HOME, NEAR, placeToy, SIZE, zoneOf } from '../pet/core/toys.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
+import { playTexts } from './legacy-rules.mjs';
+import { HOME, NEAR, placeToy, SIZE, zoneOf } from './legacy-toys.mjs';
 import { badPoints, DAY, host, LEGACY_DISPLAY, life } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };

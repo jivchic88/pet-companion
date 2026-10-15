@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import * as P from '../pet/pet-place.mjs';
-import * as R from '../pet/pet-rules.mjs';
-import * as Room from '../pet/pet-room.mjs';
+import * as R from './legacy-rules.mjs';
+import * as Room from './legacy-room.mjs';
 
 const source = (file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8');
 const K = R.storageKeys('site');

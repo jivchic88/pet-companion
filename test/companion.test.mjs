@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import * as R from '../pet/pet-rules.mjs';
+import * as R from './legacy-rules.mjs';
 import { CAT_VIEWBOX, catSvg, sceneCatBox, sceneSvg } from '../pet/cat-art.mjs';
 import { DOG_PORTRAIT_VIEWBOX, DOG_VIEWBOX, ballArt, ballMiniSvg, dogSvg } from '../pet/dog-art.mjs';
 
@@ -144,7 +144,7 @@ test('смена напарника во время реакции: прежня
 });
 
 test('реплики собаки: свой характер, коротко, без оценки, упрёков и кошачьих деталей; кот прежний', () => {
-  const groups = ['greet', 'joy', 'support', 'unlock', 'plaid', 'pet', 'petEnough', 'scene', 'rest', 'paw'];
+  const groups = ['greet', 'joy', 'support', 'unlock', 'tryOn', 'pet', 'petEnough', 'scene', 'rest', 'paw'];
   for (const group of groups) assert.ok(R.phraseList(group, 4, 'dog').length > 0, group);
   for (const [type, reaction] of Object.entries(R.REACTIONS)) {
     if (reaction.phrases) assert.ok(R.phraseList(reaction.phrases, 4, 'dog').length > 0, `dog ${type}`);

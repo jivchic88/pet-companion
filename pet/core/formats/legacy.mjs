@@ -1,19 +1,37 @@
-// Ядро: форматы данных 0.1.4 (v1) ключей cat, companion, look, treat — нормализация для показа и функции записи (build
-// операции ключа, docs/ARCHITECTURE.md § 8.3). Ключи cat и companion.dog по своей природе привязаны к коту и собаке.
-// Хранение по ключам — README, «Хранение».
+// Ядро: форматы данных (v1) ключей пространства имён — нормализация для показа и функции записи (build операции ключа,
+// docs/ARCHITECTURE.md § 8.3). Единственный модуль ядра, который знает штатных кота и собаку: по своей природе к ним
+// привязаны форматы 0.1.4 — ключ cat (общие настройки, имя и аксессуар кота), companion (выбор штатного питомца, имя и
+// аксессуар собаки), поле варианта сценки кота в scene. С PL06 — ключ расширений ext:v1 (§ 7.7): выбор питомца-расширения
+// поверх companion (pet: { id, over }), модель поведения, имена и аксессуары сторонних питомцев. Хранение по ключам —
+// README, «Хранение».
 
-import { ACCESSORIES, STAGES } from '../stages.mjs';
+import { STAGES } from '../stages.mjs';
 import { DAY_ONLY } from '../day.mjs';
-import { cleanName, coatOf, kindOf } from '../pets.mjs';
+import { cleanName } from '../pets.mjs';
 
-// Восемь ключей пространства имён (все загружает координатор хранения); place — предпочтение legacy-отображения.
-export const STORAGE_NAMES = ['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room'];
+// Штатные питомцы форматов 0.1.4: companion.kind знает только их; сторонний питомец выбирается в ext:v1 поверх них.
+export const LEGACY_KINDS = Object.freeze(['cat', 'dog']);
+export const legacyKind = (value) => (LEGACY_KINDS.includes(value) ? value : 'cat');
+// Ключ общих настроек (движение, реплики, «скрыт», увиденная ступень, день приветствия) — ключ кота 0.1.4.
+export const SETTINGS = 'cat';
+
+// Девять ключей пространства имён (все загружает координатор хранения); place — предпочтение legacy-отображения, ext —
+// данные расширений (PL06).
+export const STORAGE_NAMES = Object.freeze(['cat', 'companion', 'look', 'treat', 'place', 'presence', 'scene', 'room', 'ext']);
 
 // Ключи в пространстве имён ns (options.storage сайта); v1 — версия формата данных, а не модуля.
 export const storageKeys = (ns = 'pet') => ({
   ...Object.fromEntries(STORAGE_NAMES.map((key) => [key, `${ns}:${key}:v1`])),
   db: `${ns}:scene`,
 });
+
+// Где живут имя и аксессуар питомца: кот — в ключе cat, собака — companion.dog, сторонний — ext.pets[id] (§ 7.6).
+// Путь — массив сегментов: ID с точкой (example.bunny) — один сегмент.
+export function ownHome(petId) {
+  if (petId === 'cat') return { key: 'cat', path: [] };
+  if (petId === 'dog') return { key: 'companion', path: ['dog'] };
+  return { key: 'ext', path: ['pets', petId] };
+}
 
 export const CAT_VERSION = 1;
 
@@ -42,6 +60,9 @@ export const unknownStage = (raw) => isRecord(raw) && 'seenStage' in raw && !kno
 export const stageKept = (raw, patch) =>
   'seenStage' in patch && (unknownStage(raw) || (knownStage(raw?.seenStage) && raw.seenStage >= (knownStage(patch.seenStage) ? patch.seenStage : -1)));
 
+// Строка-ID (облик, аксессуар): понятность конкретному питомцу проверяет ядро по его определению; формат хранит строку.
+const idOf = (value) => (typeof value === 'string' && value ? value : '');
+
 // Любое сохранённое значение → корректные настройки. Повреждённое — по умолчанию; старая версия
 // и версия из более новой вкладки — понятные поля сохраняются, остальное по умолчанию.
 export function normalizeSettings(raw) {
@@ -50,7 +71,7 @@ export function normalizeSettings(raw) {
   return {
     v: CAT_VERSION,
     name: typeof raw.name === 'string' ? cleanName(raw.name) : '',
-    accessory: ACCESSORIES.some((item) => item.id === raw.accessory) ? raw.accessory : base.accessory,
+    accessory: idOf(raw.accessory) || base.accessory,
     motion: MOTIONS.some(([id]) => id === raw.motion) ? raw.motion : base.motion,
     phrases: typeof raw.phrases === 'boolean' ? raw.phrases : base.phrases,
     hidden: raw.hidden === true,
@@ -113,9 +134,9 @@ export function catRecord(text, patch = {}) {
   return keepRecord(text, CAT_VERSION, normalizeSettings, own);
 }
 
-// ---------- выбор напарника ----------
+// ---------- выбор штатного питомца ----------
 // Ключ cat — общие настройки (движение, реплики, скрыт, увиденная ступень, день приветствия), имя и аксессуар кота; выбор
-// животного и собака — в своём ключе companion: вкладка старого кода переписывает cat только понятными ей полями.
+// штатного животного и собака — в своём ключе companion: вкладка старого кода переписывает cat только понятными ей полями.
 
 export const COMPANION_VERSION = 1;
 
@@ -130,19 +151,22 @@ export function normalizeCompanion(raw) {
   const dog = raw.dog && typeof raw.dog === 'object' && !Array.isArray(raw.dog) ? raw.dog : {};
   return {
     v: COMPANION_VERSION,
-    kind: kindOf(raw.kind),
+    kind: legacyKind(raw.kind),
     dog: {
       name: typeof dog.name === 'string' ? cleanName(dog.name) : '',
-      accessory: ACCESSORIES.some((item) => item.id === dog.accessory) ? dog.accessory : base.dog.accessory,
+      accessory: idOf(dog.accessory) || base.dog.accessory,
     },
   };
 }
 
 export const parseCompanion = parser(normalizeCompanion);
 
-// Настройки показанного напарника: общие поля — из ключа cat, имя и аксессуар — свои.
+// Сохранённый выбор штатного питомца как есть: строка (в том числе неизвестная этой версии) или кот, если выбора нет.
+export const storedKind = (raw) => (isRecord(raw) && typeof raw.kind === 'string' && raw.kind ? raw.kind : 'cat');
+
+// Настройки показанного штатного напарника: общие поля — из ключа cat, имя и аксессуар — свои.
 export function companionView(cat, companion, kind = companion?.kind) {
-  const k = kindOf(kind);
+  const k = legacyKind(kind);
   const own = k === 'dog' ? normalizeCompanion(companion).dog : cat;
   return { ...normalizeSettings(cat), kind: k, name: own.name, accessory: own.accessory };
 }
@@ -154,7 +178,7 @@ export function splitUpdate(kind, fields = {}) {
   const companion = {};
   for (const [key, value] of Object.entries(fields)) {
     if (key === 'kind') companion.kind = value;
-    else if ((key === 'name' || key === 'accessory') && kindOf(kind) === 'dog') companion.dog = { ...companion.dog, [key]: value };
+    else if ((key === 'name' || key === 'accessory') && legacyKind(kind) === 'dog') companion.dog = { ...companion.dog, [key]: value };
     else cat[key] = value;
   }
   return { cat, companion };
@@ -172,7 +196,7 @@ export function mergeCompanion(current, patch = {}) {
 export function companionRecord(text, patch = {}) {
   const raw = readRecord(text).raw ?? {};
   const out = { v: COMPANION_VERSION, ...raw };
-  if ('kind' in patch) out.kind = kindOf(patch.kind);
+  if ('kind' in patch) out.kind = legacyKind(patch.kind);
   const dog = isRecord(patch.dog) ? patch.dog : {};
   const fields = ['name', 'accessory'].filter((key) => key in dog);
   if (fields.length) {
@@ -205,24 +229,28 @@ export const parseTreat = parser(normalizeTreat);
 export const treatRecord = (text, fedDay) => keepRecord(text, TREAT_VERSION, normalizeTreat, { fedDay });
 
 // ---------- облик ----------
-// Облик кота и собаки пишутся независимо, чужие поля ключа сохраняются.
+// Облик каждого питомца — поле верхнего уровня с его ID (look.cat, look.dog, look['example.bunny']): облики пишутся
+// независимо, чужие поля ключа сохраняются (вкладка 0.1.4 их тоже сохраняет).
 
 export const LOOK_VERSION = 1;
 
-export function defaultLook() {
-  return { v: LOOK_VERSION, cat: coatOf('cat'), dog: coatOf('dog') };
-}
-
+// Сохранённые облики как есть (строки по ID питомца); понятность облика конкретному питомцу проверяет ядро.
 export function normalizeLook(raw) {
-  const own = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  return { v: LOOK_VERSION, cat: coatOf('cat', own.cat), dog: coatOf('dog', own.dog) };
+  const own = isRecord(raw) ? raw : {};
+  return Object.fromEntries([['v', LOOK_VERSION], ...Object.entries(own).filter(([id, coat]) => id !== 'v' && typeof coat === 'string' && coat)]);
 }
 
 export const parseLook = parser(normalizeLook);
 
-// Запись: свежее сохранённое + изменённые облики ({ cat?, dog? }); облик другого животного, в том числе непонятный этой
-// версии, и облики неизвестных животных остаются как были.
-export const lookRecord = (text, patch = {}) => keepRecord(text, LOOK_VERSION, normalizeLook, patch);
+// Запись: свежее сохранённое + изменённые облики ({ [petId]: coat }); облик другого питомца, в том числе непонятный этой
+// версии, и облики неизвестных питомцев остаются как были.
+export function lookRecord(text, patch = {}) {
+  const raw = readRecord(text).raw ?? {};
+  const out = { v: LOOK_VERSION, ...raw };
+  for (const [id, coat] of Object.entries(patch)) if (id !== 'v' && typeof coat === 'string' && coat) out[id] = coat;
+  out.v = keepVersion(raw.v, LOOK_VERSION);
+  return out;
+}
 
 // ---------- предпочтение отображения (ключ place) ----------
 // Место и вид legacy-отображения у телефона и компьютера (place:v1): формат, места, вид и правила раскладки — у отображения
@@ -237,5 +265,92 @@ export function prefRecord(text, patch = {}) {
     if (!isRecord(fields) || !Object.keys(fields).length) continue;
     out[section] = { ...(isRecord(keep[section]) ? keep[section] : {}), ...fields };
   }
+  return out;
+}
+
+// ---------- вариант редкой сценки (ключ scene и запись дня резервирования) ----------
+// Прошлый вариант — чтобы fresh-модель не повторяла его: кот — поле cat формата 0.1.4, остальные питомцы (и собака) —
+// variants[petId] (PL06; вкладка 0.1.4 это поле может потерять — тогда только возможный повтор варианта).
+
+export const variantPath = (petId) => (petId === 'cat' ? ['cat'] : ['variants', petId]);
+
+// Прошлый вариант питомца petId в записи (как есть) или ''.
+export function lastVariant(raw, petId) {
+  if (!isRecord(raw)) return '';
+  const value = petId === 'cat' ? raw.cat : isRecord(raw.variants) ? raw.variants[petId] : undefined;
+  return typeof value === 'string' ? value : '';
+}
+
+// Поля варианта для записи дня: показанный — type; у кота поле cat, у остальных — variants[petId] (непонятное значение
+// variants — не объект — не заменяется: вариант тогда не запоминается). Поле cat у записи другого питомца — как 0.1.4:
+// своё сохранённое, пустое — из копии (mirror).
+export function variantFields(raw, mirror, petId, type) {
+  const own = isRecord(raw) ? raw : {};
+  const copy = isRecord(mirror) ? mirror : {};
+  if (petId === 'cat') return { cat: type };
+  const fields = { cat: own.cat === undefined || own.cat === '' ? (typeof copy.cat === 'string' ? copy.cat : '') : own.cat };
+  if (own.variants === undefined || isRecord(own.variants)) fields.variants = { ...(isRecord(copy.variants) ? copy.variants : {}), ...(isRecord(own.variants) ? own.variants : {}), [petId]: type };
+  return fields;
+}
+
+// Поля варианта из правки копии дня (патч путей variantPath): кот — cat (строка), остальные — variants, слитые с
+// сохранённым; непонятное сохранённое значение variants (не объект) не заменяется.
+export function variantPatch(raw, patch = {}) {
+  const out = {};
+  if ('cat' in patch && typeof patch.cat === 'string') out.cat = patch.cat;
+  if (isRecord(patch.variants) && (raw.variants === undefined || isRecord(raw.variants))) out.variants = { ...(isRecord(raw.variants) ? raw.variants : {}), ...patch.variants };
+  return out;
+}
+
+// ---------- расширения (ext:v1, § 7.7) ----------
+// { v: 1, pet?: { id, over }, behavior?: string, pets?: { [id]: { name, accessory } } }. pet — выбор питомца-расширения:
+// действителен, пока подтверждённый companion.kind === over (over — штатный, которого при выборе показывал companion;
+// его и видят вкладки 0.1.4). Новые данные — в новом ключе: вкладки 0.1.4 нормализуют cat и companion и отбросили бы их.
+
+export const EXT_VERSION = 1;
+
+// Очистка выбора расширения: безусловная (ext без pet) или условная — только если там всё ещё эта запись (id и over).
+const CLEAR = Symbol('очистка ext.pet');
+export const clearPet = (only = null) => Object.freeze({ [CLEAR]: true, only: only ? Object.freeze({ id: only.id, over: only.over }) : null });
+export const isClear = (value) => Boolean(value) && typeof value === 'object' && value[CLEAR] === true;
+
+// Действительная по форме запись выбора: { id, over } — непустые строки.
+export const extPet = (raw) => (isRecord(raw) && typeof raw.id === 'string' && raw.id && typeof raw.over === 'string' && raw.over ? { id: raw.id, over: raw.over } : null);
+
+// Показ: выбор расширения (по форме), модель, свои имя и аксессуар сторонних питомцев — как есть; понятность значений
+// проверяет ядро по определениям.
+export function normalizeExt(raw) {
+  const own = isRecord(raw) ? raw : {};
+  return { v: EXT_VERSION, pet: extPet(own.pet), behavior: typeof own.behavior === 'string' ? own.behavior : '', pets: isRecord(own.pets) ? own.pets : {} };
+}
+
+// Запись: свежее сохранённое как есть (неизвестные поля, ID и значения, вложенные поля pets[id], больший v) + правка:
+// patch.pet — { id, over } (выбор) или clearPet(…) (снять: безусловно или только ту же запись); patch.behavior — ID модели;
+// patch.pets — { [id]: { name?, accessory? } }: pets[id] не объект (непонятное значение) — заменяется объектом правки, как
+// companion.dog (PL02).
+export function extRecord(text, patch = {}) {
+  const raw = readRecord(text).raw ?? {};
+  const out = { v: EXT_VERSION, ...raw };
+  if ('pet' in patch) {
+    const value = patch.pet;
+    if (isClear(value)) {
+      const was = extPet(raw.pet);
+      if (!value.only || (was && was.id === value.only.id && was.over === value.only.over)) delete out.pet;
+    } else if (extPet(value)) out.pet = { ...(isRecord(raw.pet) ? raw.pet : {}), id: value.id, over: value.over };
+  }
+  if ('behavior' in patch && typeof patch.behavior === 'string' && patch.behavior) out.behavior = patch.behavior;
+  if (isRecord(patch.pets)) {
+    const pets = isRecord(raw.pets) ? { ...raw.pets } : {};
+    for (const [id, fields] of Object.entries(patch.pets)) {
+      if (!isRecord(fields)) continue;
+      const was = isRecord(pets[id]) ? pets[id] : {};
+      const next = { ...was };
+      if ('name' in fields) next.name = typeof fields.name === 'string' ? cleanName(fields.name) : '';
+      if ('accessory' in fields && idOf(fields.accessory)) next.accessory = fields.accessory;
+      pets[id] = next;
+    }
+    out.pets = pets;
+  }
+  out.v = keepVersion(raw.v, EXT_VERSION);
   return out;
 }

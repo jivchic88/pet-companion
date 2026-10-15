@@ -6,7 +6,6 @@
 // изменилось окно, сдвиг с лапы — stroke.cancel; ядро сняло жест само (play.stroke пуст) — указатель отпускается. Лимит,
 // удержание позы, итог и объявления — ядро (core/play.mjs, PL04.3). Нажатие после жеста ничего не нажимает (pet-move.mjs).
 
-import { HIT, PAW, PET_BOX } from './core/figure.mjs';
 import { swallowClick } from './pet-move.mjs';
 
 export const STROKE_PX = 24;
@@ -15,55 +14,53 @@ export const PAW_SLOP_PX = 10;
 export const TAP_MS = 500;
 export const PAW_MIN_PX = 22; // наименьший радиус области лапы (44×44)
 
-// Рисунок — viewBox 0 0 220 204 (общий у кота и собаки, земля — y = 188): голова с ушами и тело с лапами, эллипсами; лапа —
-// круг. Данные рисунка — ядро (core/figure.mjs), здесь — перевод в рамку на экране.
-export { HIT, PAW, PET_BOX };
+// Рисунок — рамка определения питомца (size: у кота и собаки viewBox 0 0 220 204, земля — y = 188): голова с ушами и тело
+// с лапами — эллипсы play.hits, лапа — круг play.paw (у поднятой в позе paw — play.paw.up; у питомца без лапы — null:
+// области и касания лапы нет). Данные — определение (PL06), здесь — перевод в рамку на экране. def — определение питомца.
 
-const hitsOf = (kind) => HIT[kind] ?? HIT.cat;
-const pawOf = (kind, pose) => (kind === 'dog' && pose === 'paw' ? PAW.dog.up : (PAW[kind] ?? PAW.cat));
+const pawOf = (def, pose) => (pose === 'paw' && def.play.paw?.up ? def.play.paw.up : def.play.paw);
 
-// Часть питомца в точке рисунка (u, v — координаты viewBox): 'paw', 'head', 'body' или ''. Лапа — первой; minR —
-// наименьший радиус её области в единицах рисунка.
-export function petPart(kind, u, v, pose = '', minR = 0) {
-  const p = pawOf(kind, pose);
-  if (Math.hypot(u - p.cx, v - p.cy) <= Math.max(p.r, minR)) return 'paw';
-  return hitsOf(kind).find((e) => ((u - e.cx) / e.rx) ** 2 + ((v - e.cy) / e.ry) ** 2 <= 1)?.part ?? '';
+// Часть питомца в точке рисунка (u, v — координаты viewBox): 'paw', 'head', 'body' (части определения) или ''. Лапа —
+// первой; minR — наименьший радиус её области в единицах рисунка.
+export function petPart(def, u, v, pose = '', minR = 0) {
+  const p = pawOf(def, pose);
+  if (p && Math.hypot(u - p.cx, v - p.cy) <= Math.max(p.r, minR)) return 'paw';
+  return def.play.hits.find((e) => ((u - e.cx) / e.rx) ** 2 + ((v - e.cy) / e.ry) ** 2 <= 1)?.part ?? '';
 }
 
 // Точка окна → часть питомца по рамке рисунка на экране (rect — getBoundingClientRect, пропорции viewBox).
-export function partAt(kind, rect, x, y, pose = '') {
+export function partAt(def, rect, x, y, pose = '') {
   if (!rect?.width || !rect?.height) return '';
-  const s = rect.width / PET_BOX.width;
-  return petPart(kind, (x - rect.left) / s, ((y - rect.top) / rect.height) * PET_BOX.height, pose, PAW_MIN_PX / s);
+  const s = rect.width / def.size.width;
+  return petPart(def, (x - rect.left) / s, ((y - rect.top) / rect.height) * def.size.height, pose, PAW_MIN_PX / s);
 }
 
-// Низ области лапы в окне (px) — предметы на полу её не закрывают (pet-toys.mjs).
-export function pawBottom(kind, rect, pose = '') {
-  const p = pawOf(kind, pose);
-  const s = rect.width / PET_BOX.width;
-  return rect.top + p.cy * s + Math.max(p.r * s, PAW_MIN_PX);
+// Низ области лапы в окне (px) — предметы на полу её не закрывают (pet-toys.mjs); без лапы — низ рисунка.
+export function pawBottom(def, rect, pose = '') {
+  const p = pawOf(def, pose);
+  const s = rect.width / def.size.width;
+  return p ? rect.top + p.cy * s + Math.max(p.r * s, PAW_MIN_PX) : rect.top + rect.height;
 }
 
 const pct = (value, total) => `${Math.round((value / total) * 10000) / 100}%`;
 
 // Области нажатия — в процентах рамки рисунка (разметка сцены; совпадают с petPart).
-export function hitStyle(e) {
-  return `left:${pct(e.cx - e.rx, PET_BOX.width)};top:${pct(e.cy - e.ry, PET_BOX.height)};width:${pct(2 * e.rx, PET_BOX.width)};height:${pct(2 * e.ry, PET_BOX.height)}`;
+export function hitStyle(e, size) {
+  return `left:${pct(e.cx - e.rx, size.width)};top:${pct(e.cy - e.ry, size.height)};width:${pct(2 * e.rx, size.width)};height:${pct(2 * e.ry, size.height)}`;
 }
 
 // Лапа — круг не меньше PAW_MIN_PX по радиусу: центр (--ux, --uy — поднятой лапы) и радиус в процентах рамки,
 // остальное — pet.css.
-export function pawStyle(p) {
-  const up = p.up ? `;--ux:${pct(p.up.cx, PET_BOX.width)};--uy:${pct(p.up.cy, PET_BOX.height)}` : '';
-  return `--x:${pct(p.cx, PET_BOX.width)};--y:${pct(p.cy, PET_BOX.height)};--rx:${pct(p.r, PET_BOX.width)};--ry:${pct(p.r, PET_BOX.height)}${up}`;
+export function pawStyle(p, size) {
+  const up = p.up ? `;--ux:${pct(p.up.cx, size.width)};--uy:${pct(p.up.cy, size.height)}` : '';
+  return `--x:${pct(p.cx, size.width)};--y:${pct(p.cy, size.height)};--rx:${pct(p.r, size.width)};--ry:${pct(p.r, size.height)}${up}`;
 }
 
-export function hitsHtml(kind) {
-  const paw = PAW[kind] ?? PAW.cat;
+export function hitsHtml(def) {
+  const paw = def.play.paw;
   return (
-    hitsOf(kind)
-      .map((e) => `<span class="cat-play-hit" data-play-hit="${e.part}" style="${hitStyle(e)}" aria-hidden="true"></span>`)
-      .join('') + `<span class="cat-play-hit cat-play-paw" data-play-hit="paw" style="${pawStyle(paw)}" aria-hidden="true"></span>`
+    def.play.hits.map((e) => `<span class="cat-play-hit" data-play-hit="${e.part}" style="${hitStyle(e, def.size)}" aria-hidden="true"></span>`).join('') +
+    (paw ? `<span class="cat-play-hit cat-play-paw" data-play-hit="paw" style="${pawStyle(paw, def.size)}" aria-hidden="true"></span>` : '')
   );
 }
 
@@ -148,12 +145,12 @@ export function release(reason = 'cancel', event = null) {
   } else if (reason !== 'pointercancel') swallowClick(id);
 }
 
-const st = { hooks: null, g: null, pet: null, kind: 'cat', rect: null, x: 0, y: 0, frame: 0, starting: false };
+const st = { hooks: null, g: null, pet: null, def: null, rect: null, x: 0, y: 0, frame: 0, starting: false };
 
 export const stroking = () => Boolean(st.g);
 
 // При подключении: hooks = { start() → id жеста ядра или null, step(id), end(id), cancel(id), paw() — касание лапы,
-// motion() }; signal снимает слушатели при отключении. Скрытая вкладка, изменение окна, уход со страницы — конец любого
+// motion(), figure(petId) → определение питомца (области и рамка) }; signal снимает слушатели при отключении. Скрытая вкладка, изменение окна, уход со страницы — конец любого
 // жеста сцены.
 export function initPlay(hooks, signal) {
   st.hooks = hooks;
@@ -184,11 +181,11 @@ function onDown(event) {
   if (!hit) return;
   const pet = hit.closest('[data-play-pet]');
   const rect = pet?.getBoundingClientRect();
-  const kind = pet?.dataset.kind ?? 'cat';
-  const part = partAt(kind, rect, event.clientX, event.clientY, poseOf(pet));
+  const def = pet ? st.hooks.figure?.(pet.dataset.kind) : null;
+  const part = def ? partAt(def, rect, event.clientX, event.clientY, poseOf(pet)) : '';
   if (!part || !grab(event, hit, { move: strokeOn, end: strokeEnd })) return;
   st.g = { ...strokeStart(event.clientX, event.clientY), paw: part === 'paw', t0: event.timeStamp, id: null };
-  Object.assign(st, { pet, kind, rect, x: event.clientX, y: event.clientY });
+  Object.assign(st, { pet, def, rect, x: event.clientX, y: event.clientY });
   pet.dataset.stroking = '';
   // Начало жеста — ядру (ручное действие: сценка отменена; отклика и удержания ещё нет). Пока ядро его начинает, снимок
   // без этого жеста указатель не отпускает.
@@ -209,7 +206,7 @@ function strokeOn(event) {
   }
   // Рамка — текущая: сцена могла сдвинуть питомца (итог вместо подсказки, реплика), окно — нет (тогда жест отменён).
   st.rect = st.pet.getBoundingClientRect();
-  if (!partAt(st.kind, st.rect, x, y)) {
+  if (!partAt(st.def, st.rect, x, y)) {
     release('leave');
     return;
   }
@@ -238,19 +235,19 @@ function touchLater() {
 // Конец жеста: подсветка снята; ядру — stroke.end (отпустили) или stroke.cancel (прерван). Касание лапы — на отпускание:
 // коротко, на месте и на лапе (рамка и поза — текущие), после конца жеста.
 function strokeEnd(reason, event) {
-  const { g, pet, kind } = st;
+  const { g, pet, def } = st;
   const tap =
     g.paw &&
     event?.type === 'pointerup' &&
     event.timeStamp - g.t0 <= TAP_MS &&
     Math.hypot(event.clientX - g.x0, event.clientY - g.y0) <= PAW_SLOP_PX &&
-    partAt(kind, pet.getBoundingClientRect(), event.clientX, event.clientY, poseOf(pet)) === 'paw';
+    partAt(def, pet.getBoundingClientRect(), event.clientX, event.clientY, poseOf(pet)) === 'paw';
   cancelAnimationFrame(st.frame);
   st.frame = 0;
   delete pet.dataset.stroking;
   const touch = pet.closest('[data-play-stage]')?.querySelector('[data-play-touch]');
   if (touch) delete touch.dataset.on;
-  Object.assign(st, { g: null, pet: null, rect: null });
+  Object.assign(st, { g: null, pet: null, def: null, rect: null });
   if (g.id !== null) (reason === 'up' ? st.hooks.end : st.hooks.cancel)?.(g.id);
   if (tap) st.hooks.paw?.();
   return g.far >= TAP_PX || g.paw;

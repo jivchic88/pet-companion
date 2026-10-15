@@ -5,9 +5,9 @@
 // миске; точность записи и повторного чтения у препятствий.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as Room from '../pet/core/room.mjs';
+import * as Room from './legacy-room.mjs';
 import * as Web from '../pet/pet-room.mjs';
-import * as R from '../pet/pet-rules.mjs';
+import * as R from './legacy-rules.mjs';
 import { ropeArt } from '../pet/dog-art.mjs';
 import { bowlArt, sceneCatBox, sceneSvg, yarnArt } from '../pet/cat-art.mjs';
 

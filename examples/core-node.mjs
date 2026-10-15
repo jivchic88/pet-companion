@@ -1,9 +1,13 @@
 // Пример: питомец без браузера — только публичный вход pet-companion/core (Node 22+; в пакет не входит, test:package
 // запускает его в чистом проекте с установленным архивом). Хранилище — своё (здесь Map; синхронное и асинхронное с ручным
 // подтверждением), время, случайность и задачи — свои порты; отображения нет: состояние читается снимком и подпиской.
-// Каждый шаг сверяется assert — пример заодно проверяет обещания README. Запуск: node core-node.mjs
+// Питомцы и модели поведения — определения (с PL06 обязательны): штатные кот и собака (pet-companion/pets) и модель calm
+// (pet-companion/behaviors); третий питомец и вторая модель — examples/extension/node.mjs. Каждый шаг сверяется assert —
+// пример заодно проверяет обещания README. Запуск: node core-node.mjs
 import assert from 'node:assert/strict';
+import { calm } from 'pet-companion/behaviors';
 import { createPetCore, createStorage, localDay, PetError, VERSION } from 'pet-companion/core';
+import { cat, dog } from 'pet-companion/pets';
 
 // ---------- порты: ручные часы, планировщик, случайность ----------
 let now = Date.parse('2026-10-15T10:00:00Z');
@@ -47,7 +51,8 @@ assert.equal(storage.load(), 'ready');
 
 // Счёт ведёт хост: сначала сохранить занятие, затем обновить счёт, затем сообщить ядру.
 const host = { marks: 0, today: 0, limit: 3 };
-const options = { storage, progress: () => host, clock, scheduler, random, log };
+const defs = { pets: [cat, dog], behaviors: [calm] };
+const options = { storage, progress: () => host, clock, scheduler, random, log, ...defs };
 const pet = createPetCore(options);
 const updates = [];
 const off = pet.subscribe(({ snapshot, effects, reason }) => updates.push({ reason, name: snapshot.name.display, effects: effects.map((effect) => effect.type) }));
@@ -162,7 +167,7 @@ const settle = async (ok = true) => {
 const loading = asyncStorage.load();
 await settle();
 assert.equal(await loading, 'ready');
-const remote = createPetCore({ storage: asyncStorage, clock, scheduler, random });
+const remote = createPetCore({ storage: asyncStorage, clock, scheduler, random, ...defs });
 const named = remote.setName('Сырник');
 assert.deepEqual([named.save.status, remote.getState().save.cat.status], ['pending', 'pending']);
 await settle();
@@ -178,6 +183,7 @@ assert.equal(await late.save.done, 'saved');
 assert.equal(remote.getState().status, 'destroyed');
 
 // Ошибки создания — исключение PetError (интегратор их видит сразу).
-assert.throws(() => createPetCore({ storage, pets: [] }), (error) => error instanceof PetError && error.code === 'invalid-options');
+assert.throws(() => createPetCore({ storage, pets: [], behaviors: [calm] }), (error) => error instanceof PetError && error.code === 'invalid-options');
+assert.throws(() => createPetCore({ storage }), (error) => error instanceof PetError && error.code === 'invalid-options', 'без определений — ошибка');
 
 console.log(JSON.stringify({ ok: true, version: VERSION, day: localDay(new Date(2026, 9, 15)), updates: updates.length, warnings: warnings.length, stored: [...disk.keys()].sort() }));

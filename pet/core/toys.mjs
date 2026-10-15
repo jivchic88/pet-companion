@@ -1,20 +1,16 @@
-// Ядро: миска и мячик в «Поиграть» — правила положения в единицах рисунка питомца 220×204 (docs/ARCHITECTURE.md § 6.4
-// interact, § 13 «Игрушки — правила»; срез PL04.3). Перенесено из pet-toys.mjs без изменения правил: прежде те же формулы
-// считались в CSS px по рамкам страницы, теперь — в единицах рисунка (рамка питомца — начало координат, масштаб 1).
+// Ядро: миска и мячик в «Поиграть» — правила положения в единицах рисунка питомца (docs/ARCHITECTURE.md § 6.4 interact,
+// § 7.1 «size», «play», § 13 «Игрушки — правила»; срезы PL04.3, PL06). Правила 0.1.4 без изменений, в единицах рисунка
+// (рамка питомца — начало координат, масштаб 1).
 //
 // Пол — полоса от линии лап до низа места под питомцем, без краёв сцены: его края и низ в единицах рисунка объявляет
-// отображение (setDisplay({ playFloor: [l, t, r, b] })), линию лап и питомца — рисунок. Питомец (тело, хвост, область
-// лапы) — запретный прямоугольник: предмет стоит сбоку или перед лапами; область лапы не меньше радиуса касания отображения
+// отображение (setDisplay({ playFloor: [l, t, r, b] })), линию лап (size.ground) и питомца — определение (play.foot — где
+// он стоит, play.paw — лапа, play.anchor — от этой точки миска ближе или дальше). Питомец (тело, хвост, область лапы) —
+// запретный прямоугольник: предмет стоит сбоку или перед лапами; область лапы не меньше радиуса касания отображения
 // (playTouch). Пороги распознавания жеста (сдвиг, бросок), CSS px и кадры — у отображения.
-
-import { PAW, PET_BOX } from './figure.mjs';
 
 export const TOYS = ['bowl', 'ball'];
 // Видимый предмет: ширина и высота (пропорции — рисунок предмета у отображения).
 export const SIZE = { bowl: [48, 23], ball: [22, 24] };
-export const FLOOR_LINE = 176; // линия пола у лап
-const FOOT = [34, 202, 197]; // питомец на полу: слева, справа, низ (не выше низа области лапы)
-export const ANCHOR = [100, 190]; // где стоит питомец: от этой точки миска ближе или дальше
 export const HOME = { bowl: [-60, 214], ball: [280, 214] };
 export const NEAR = { bowl: [60, 214] };
 const ROLL = [30, 90, 80]; // докатывается: не меньше, не больше; кнопкой — столько
@@ -27,15 +23,17 @@ const half = ([w, h]) => [w / 2, h / 2];
 const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v, lo), hi));
 
 // Пол по объявлению отображения: [l, t, r, b] — края и низ полосы пола (верх — не выше линии лап, низ — не выше низа
-// рисунка), touch — наименьший радиус области касания лапы (единицы рисунка).
-export function zoneOf([l, t, r, b], touch = 0, kind = 'cat') {
-  const paw = PAW[kind] ?? PAW.cat;
+// рисунка), touch — наименьший радиус области касания лапы (единицы рисунка), def — определение питомца (size, play).
+export function zoneOf([l, t, r, b], touch, def) {
+  const [left, right, bottom] = def.play.foot;
+  const paw = def.play.paw;
   return {
     left: l,
     right: r,
-    top: Math.max(t, FLOOR_LINE),
-    bottom: Math.max(b, PET_BOX.height),
-    foot: { left: FOOT[0], right: FOOT[1], bottom: Math.max(FOOT[2], paw.cy + Math.max(paw.r, touch)) },
+    top: Math.max(t, def.size.ground),
+    bottom: Math.max(b, def.size.height),
+    foot: { left, right, bottom: paw ? Math.max(bottom, paw.cy + Math.max(paw.r, touch)) : bottom },
+    anchor: def.play.anchor,
   };
 }
 
@@ -79,8 +77,8 @@ export function rollWay(z, size, p) {
 // Бросок на dx (знак — направление): докатится на столько.
 export const rollDist = (dx) => clamp(Math.abs(dx), ROLL[0], ROLL[1]);
 
-// Ближе ли к питомцу точка b, чем a.
-export const closer = (a, b) => Math.hypot(b[0] - ANCHOR[0], b[1] - ANCHOR[1]) < Math.hypot(a[0] - ANCHOR[0], a[1] - ANCHOR[1]);
+// Ближе ли к питомцу (anchor — где он стоит) точка b, чем a.
+export const closer = (a, b, anchor) => Math.hypot(b[0] - anchor[0], b[1] - anchor[1]) < Math.hypot(a[0] - anchor[0], a[1] - anchor[1]);
 
 // С какой стороны от питомца точка: 'left' | 'right'.
-export const sideOf = (x) => (x < ANCHOR[0] ? 'left' : 'right');
+export const sideOf = (x, anchor) => (x < anchor[0] ? 'left' : 'right');

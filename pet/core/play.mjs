@@ -1,32 +1,32 @@
 // Ядро: «Поиграть» — прямые действия, жест поглаживания и предметы (docs/ARCHITECTURE.md § 5.2 play, § 6.4 interact и
-// stroke.*, сценарии § 6.8, § 10 «Лимит», «Перемещение миски не кормит»; срез PL04.3). Перенесено из оболочки pet.mjs
+// stroke.*, сценарии § 6.8, § 10 «Лимит», «Перемещение миски не кормит»; срезы PL04.3, PL06). Перенесено из оболочки pet.mjs
 // (interact, playAct, showResult, playResults, onToy, onStroke, onStrokeEnd, resetHint) и pet-toys.mjs (moveBowl, rollBall,
 // перенос предмета): лимиты, итог под сценой и момент его сброса, удержание довольной позы, объявления без повторов
 // внутри жеста, места предметов. Отклик — единственный режиссёр сессии (host.manual: ручное действие окончательно
 // отменяет сценку, затем отклик); задачи — её планировщик. Распознавание указателя, пороги в CSS px, кадры и анимации —
-// отображение.
+// отображение. Тексты поглаживания и лапы — у определения питомца (actions), лимит — у модели поведения (limits.pet).
 //
-// Лимит: три полных отклика поглаживания и лапы за минуту, затем «пока хватит», дальше тихо; у предметов свой счёт;
-// отклик, не сыгранный из-за не менее важной реакции, лимит не расходует (прямое действие). Знаков и наград нет, миска не
-// кормит. Итог держится, пока идёт реакция, при которой он показан, и не меньше OUTCOME_MS; пока жест удерживает позу —
-// не гаснет.
+// Лимит: limit полных откликов поглаживания и лапы за минуту (модель: не больше трёх, как 0.1.4), затем «пока хватит»,
+// дальше тихо; у предметов свой счёт с тем же лимитом; отклик, не сыгранный из-за не менее важной реакции, лимит не
+// расходует (прямое действие). Знаков и наград нет, миска не кормит. Итог держится, пока идёт реакция, при которой он
+// показан, и не меньше OUTCOME_MS; пока жест удерживает позу — не гаснет.
 
 import { petMood } from './director.mjs';
-import { kindOf } from './pets.mjs';
 import { closer, HOME, NEAR, placeToy, rollDist, rollEnd, rollWay, sideOf, SIZE, TOY_STEP, TOYS, zoneOf } from './toys.mjs';
 
 export const OUTCOME_MS = 900;
 const MINUTE = 60_000;
 
-// Итоги действий с именем (один список для показа и места под ним у отображения). moved — предмет сдвинулся, а питомец
-// занят не менее важным откликом.
-export function playTexts(kind, name) {
-  const dog = kindOf(kind) === 'dog';
+// Итоги действий с именем (один список для показа и места под ним у отображения): поглаживание и лапа — тексты определения
+// питомца def (actions; {name} — имя), остальное — общие. moved — предмет сдвинулся, а питомец занят не менее важным
+// откликом. У питомца без лапы итога paw нет.
+const fill = (text, name) => text.replaceAll('{name}', name);
+export function playTexts(def, name) {
   return {
     enough: `${name}: пока хватит.`,
-    paw: dog ? `${name} даёт лапу.` : `${name} касается твоей руки лапой.`,
+    ...(def.actions.paw ? { paw: fill(def.actions.paw.text, name) } : {}),
     quiet: `${name} жмурится.`,
-    pet: dog ? `${name} виляет хвостом.` : `${name} мурлычет.`,
+    pet: fill(def.actions.pet.text, name),
     sniff: `${name} принюхивается к миске.`,
     look: `${name} смотрит на миску.`,
     ball: `${name} следит за мячиком.`,
@@ -35,14 +35,14 @@ export function playTexts(kind, name) {
   };
 }
 
-export const playText = (outcome, toy, kind, name) => (outcome ? playTexts(kind, name)[outcome === 'moved' ? `${toy}Moved` : outcome] : '');
+export const playText = (outcome, toy, def, name) => (outcome ? (playTexts(def, name)[outcome === 'moved' ? `${toy}Moved` : outcome] ?? '') : '');
 
 const recent = (times, at) => [...times.filter((time) => at - time < MINUTE), at];
 const near = (a, b, tol) => Math.hypot(a[0] - b[0], a[1] - b[1]) < tol;
 
-// host: now(), sense() (kind, name, motion — итог движения), manual(type, options) → { played, id } (ручное действие
-// режиссёра), activity(), current() → { id, until } | null (идущая реакция), later(name, ms, body), cancel(name),
-// emit(effect), cancelScene(), floor() → { floor: [l, t, r, b] | null, touch }.
+// host: now(), sense() (def — определение показанного питомца, name, motion — итог движения, limit — лимит модели),
+// manual(type, options) → { played, id } (ручное действие режиссёра), activity(), current() → { id, until } | null (идущая
+// реакция), later(name, ms, body), cancel(name), emit(effect), cancelScene(), floor() → { floor: [l, t, r, b] | null, touch }.
 export function createPlay(host) {
   let petTimes = []; // полные отклики поглаживания и лапы (сессия: до destroy)
   let toyTimes = []; // реакции на миску и мячик — свой счёт
@@ -54,7 +54,7 @@ export function createPlay(host) {
 
   const zone = () => {
     const { floor, touch } = host.floor();
-    return floor ? zoneOf(floor, touch, host.sense().kind) : null;
+    return floor ? zoneOf(floor, touch, host.sense().def) : null;
   };
   const place = (z, toy, p) => placeToy(z, SIZE[toy], p);
   const at = (z, toy) => (z ? place(z, toy, pos[toy] ?? HOME[toy]) : null);
@@ -66,7 +66,7 @@ export function createPlay(host) {
     const s = host.sense();
     outcome = { key, toy, at: host.now(), reaction: host.current()?.id ?? null };
     host.cancel('play-outcome');
-    if (tell) host.emit({ type: 'announce', text: playText(key, toy, s.kind, s.name) });
+    if (tell) host.emit({ type: 'announce', text: playText(key, toy, s.def, s.name) });
     settle();
   }
 
@@ -97,7 +97,7 @@ export function createPlay(host) {
   // (кнопки уголка) — обычный запрос, он и в лимит идёт всегда.
   function stroked(type, explicit) {
     const now = host.now();
-    const mood = petMood(petTimes, now);
+    const mood = petMood(petTimes, now, host.sense().limit);
     host.activity();
     const result = host.manual(mood === 'quiet' ? (type === 'paw' ? 'calmPaw' : 'calmPet') : type, { explicit, extra: mood === 'enough' ? { phrases: 'petEnough' } : {} });
     if (!explicit || result.played) petTimes = recent(petTimes, now);
@@ -151,7 +151,7 @@ export function createPlay(host) {
   // Предмет сдвинулся: отклик питомца (если не занят не менее важным), лимит — свой счёт; иначе итог про предмет.
   function moved(toy, near, toward) {
     const now = host.now();
-    const full = petMood(toyTimes, now) === 'pet';
+    const full = petMood(toyTimes, now, host.sense().limit) === 'pet';
     host.activity();
     const type = full && toy === 'ball' ? 'ball' : full && near ? 'sniff' : 'watch';
     const result = host.manual(type, { explicit: true, extra: { toward } });
@@ -170,7 +170,7 @@ export function createPlay(host) {
     const goal = place(z, 'bowl', to === 'near' ? NEAR.bowl : to === 'home' ? HOME.bowl : to);
     if (near(goal, from, 0.01)) return 'dropped';
     pos = { ...pos, bowl: to === 'home' ? null : goal };
-    return moved('bowl', closer(from, goal), sideOf(goal[0]));
+    return moved('bowl', closer(from, goal, z.anchor), sideOf(goal[0], z.anchor));
   }
 
   // Мячик: to — 'roll' (туда, где свободнее) или бросок на число единиц (знак — направление). Некуда — ничего ('dropped').
@@ -213,7 +213,7 @@ export function createPlay(host) {
     if (toy === 'bowl') {
       if (near(end, from, 0.01)) return 'dropped';
       pos = { ...pos, bowl: end };
-      return moved('bowl', closer(from, end), sideOf(end[0]));
+      return moved('bowl', closer(from, end, z.anchor), sideOf(end[0], z.anchor));
     }
     if (roll === undefined || roll === 0) return 'dropped';
     const dir = Math.sign(roll);
@@ -267,7 +267,7 @@ export function createPlay(host) {
     return {
       toys,
       outcome: outcome?.key ?? '',
-      text: outcome ? playText(outcome.key, outcome.toy, s.kind, s.name) : '',
+      text: outcome ? playText(outcome.key, outcome.toy, s.def, s.name) : '',
       stroke: stroke ? { ...stroke } : null,
       drag: drag ? { toy: drag.toy, at: [...drag.at], from: [...drag.from] } : null,
     };

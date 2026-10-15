@@ -14,8 +14,8 @@
 // Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PHRASE_MS, REACTIONS } from '../pet/core/director.mjs';
-import { createPetCore } from '../pet/core/index.mjs';
+import { PHRASE_MS, REACTIONS } from './legacy-rules.mjs';
+import { createPetCore } from './core-kit.mjs';
 import { SCENE_FRESH_MS } from '../pet/core/scenes.mjs';
 import { createWebScenes, sceneTurn } from '../pet/web/scenes.mjs';
 import { calendar, DAY, fakeIdb, flush, host, journal, LEGACY_DISPLAY, life, manual, planner, reserver, sceneStore, series } from './core-kit.mjs';
@@ -311,7 +311,8 @@ test('копия scene асинхронно: pending до подтвержден
   assert.deepEqual([port.steps.at(-1), core.getState().pose.reaction?.type, core.getState().save.scene.status], ['→ shown', 'fetch', 'pending']);
   core.destroy();
   await store.drain();
-  assert.deepEqual(store.json('scene'), { v: 1, day: DAY, cat: 'curl', by: days.days.get('qa').by }, 'запись до destroy выполнена, вариант кота прежний');
+  // PL06: прошлый вариант собаки — своё поле variants.dog (вариант кота не трогается).
+  assert.deepEqual(store.json('scene'), { v: 1, day: DAY, cat: 'curl', by: days.days.get('qa').by, variants: { dog: 'fetch' } }, 'запись до destroy выполнена, вариант кота прежний');
 });
 
 // ---------- Л. Граница раунда ----------

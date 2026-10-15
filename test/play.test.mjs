@@ -6,8 +6,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import * as G from '../pet/pet-play.mjs';
-import * as R from '../pet/pet-rules.mjs';
+import * as G from './legacy-play.mjs';
+import * as R from './legacy-rules.mjs';
 
 // Путь указателя от (x, y) по шагам [dx, dy]; итог — число поглаживаний и наибольшее удаление.
 function walk(points, start = [100, 100]) {

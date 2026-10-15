@@ -6,7 +6,7 @@
 // reentrant без изменений и журнала; destroy из неё — в конце фазы работы; подписка из неё — начальный снимок в доставке.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPetCore } from '../pet/core/index.mjs';
+import { createPetCore } from './core-kit.mjs';
 import { CORE_KEYS, DAY, host, idle, journal, make, manual, spy, web } from './core-kit.mjs';
 
 const MARS = { v: 1, name: 'Марс', seenStage: 0, greetDay: DAY };

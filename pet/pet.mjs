@@ -1,23 +1,31 @@
 // Питомец (кот или собака) — самостоятельный модуль: места рядом со страницей или лапка вызова, один диалог в трёх видах
 // (уголок, «Поиграть», «Обустроить уголок»), реакции и настройки. Подключение, интерфейс, хранение и ограничения — README
-// модуля. Ядро без DOM (core/index.mjs) — все восемь ключей (настройки, присутствие, копия дня сценки, расстановка комнаты,
-// предпочтение места), счёт и ступени, решения подтверждённого занятия, кормления и приветствия; с PL04.1 — реакции и время
-// (режиссёр, память событий, тишина, покой, полночь, видимость, реплики, приветствие); с PL04.2 — присутствие, «Скрыть» /
-// «Показать» / вызов, открытый вид и его источник, праздник и отметка ступени по виду, редкие сценки с резервированием дня;
-// с PL04.3 — «Поиграть» (прямые действия, жест поглаживания, предметы, лимиты, итог), «Обустроить уголок» (геометрия,
+// модуля. Ядро без DOM (core/index.mjs) — все девять ключей (настройки, присутствие, копия дня сценки, расстановка комнаты,
+// предпочтение места, расширения ext:v1), счёт и ступени, решения подтверждённого занятия, кормления и приветствия; с
+// PL04.1 — реакции и время (режиссёр, память событий, тишина, покой, полночь, видимость, реплики, приветствие); с PL04.2 —
+// присутствие, «Скрыть» / «Показать» / вызов, открытый вид и его источник, праздник и отметка ступени по виду, редкие
+// сценки с резервированием дня; с PL04.3 — «Поиграть» (прямые действия, жест поглаживания, предметы, лимиты, итог), «Обустроить уголок» (геометрия,
 // черновик, перенос, сохранение, чужая расстановка), итоговая поза каждой поверхности и «устроился». Хранение — общий
 // координатор (web/storage.mjs), день сценки — веб-адаптер IndexedDB (web/scenes.mjs). Оболочка распознаёт события
 // страницы и указатель, объявляет ядру свои возможности (setDisplay), передаёт смысловые входы и показывает его снимок и
 // эффекты. С PL05 — pet.core (публичный экземпляр ядра, core/facade.mjs) и команды ядра на pet; кнопки и прямые команды
 // показываются одним путём — подпиской onCore по снимку (reflect, syncView); pet.core.destroy() снимает весь экземпляр.
-// Рисунки — cat-art.mjs, dog-art.mjs; места и раскладка — pet-place.mjs; перенос между местами — pet-move.mjs;
-// жест сцены — pet-play.mjs; миска и мячик на странице — pet-toys.mjs; комната на странице — pet-room.mjs. Хранит только
-// предпочтения в браузере; данных сайта не меняет; ошибки здесь сайту не мешают.
+// С PL06 питомцы и модели поведения — определения (pets, behaviors; по умолчанию штатные кот, собака и модель calm): ядро
+// исполняет их, оболочка берёт из них подписи, имена, облики, аксессуары, вещи и области; рисует наборы отображения
+// (web/kits.mjs: кот и собака — прежние рисунки cat-art.mjs, dog-art.mjs; сторонний питомец — свой набор, options.kits).
+// Места и раскладка — pet-place.mjs; перенос между местами — pet-move.mjs; жест сцены — pet-play.mjs; миска и мячик на
+// странице — pet-toys.mjs; комната на странице — pet-room.mjs. Хранит только предпочтения в браузере; данных сайта не
+// меняет; ошибки здесь сайту не мешают.
 
-import { bowlArt, bowlMiniSvg, bowlToySvg, catSvg, miniItemSvg, sceneCatBox, sceneSvg, yarnArt } from './cat-art.mjs';
+import { bowlArt, bowlMiniSvg, bowlToySvg, miniItemSvg, sceneCatBox, sceneSvg } from './cat-art.mjs';
+import { register, resolvePose } from './core/define.mjs';
 import { exposed } from './core/facade.mjs';
-import { createPetCore } from './core/index.mjs';
-import { ballArt, ballMiniSvg, ballToySvg, dogSvg, ropeArt } from './dog-art.mjs';
+import { createPetCore, fieldLabel } from './core/index.mjs';
+import { roomModel } from './core/room.mjs';
+import { ballToySvg } from './dog-art.mjs';
+import { calm } from './defs/calm.mjs';
+import { cat } from './defs/cat.mjs';
+import { dog } from './defs/dog.mjs';
 import * as R from './pet-rules.mjs';
 import * as P from './pet-place.mjs';
 import * as Room from './pet-room.mjs';
@@ -26,6 +34,7 @@ import { playTexts } from './core/play.mjs';
 import { cancelMove, initMover, moving, startMoveMode, stopMover, watchDrag } from './pet-move.mjs';
 import { cancelStroke, hitsHtml, initPlay, release, strokeLost, watchStroke } from './pet-play.mjs';
 import { draw as drawToys, initToys, mountToys, toyDragging, toyLost, unmountToys, watchToys } from './pet-toys.mjs';
+import { kitProblem, STOCK_KITS } from './web/kits.mjs';
 import { createWebScenes } from './web/scenes.mjs';
 import { createWebStorage } from './web/storage.mjs';
 import { VERSION } from './core/version.mjs';
@@ -40,25 +49,17 @@ export const localDay = R.localDay;
 const REDUCED = '(prefers-reduced-motion: reduce)';
 const TEXT_INPUT = 'textarea, select, [contenteditable="true"], input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="reset"])';
 
-const ITEM_NAMES = {
-  cushion: 'подушка',
-  plaid: 'клетчатый платок',
-  mug: 'кружка',
-  notebook: 'блокнот',
-  bed: 'лежанка',
-  lamp: 'лампа',
-  plant: 'растение',
-  board: 'доска с заметками',
-  badge: 'бейдж',
-  ball: 'мячик',
-};
+// Штатные определения (PL06): без options.pets и options.behaviors — кот, собака и модель calm, как 0.1.4.
+const STOCK_PETS = [cat, dog];
+const STOCK_BEHAVIORS = [calm];
 
 // Классы кнопок и служебных элементов — сайта (options.classes) или pet-base.css.
 const CLASSES = { btn: 'pet-btn', alt: 'pet-btn pet-btn-alt', small: 'pet-btn-small', link: 'pet-link', close: 'pet-close', sr: 'pet-sr', muted: 'pet-muted' };
 // Тексты, зависящие от сайта (options.texts).
 const TEXTS = {
   wait: 'Одно занятие — и можно угостить.',
-  rules: ['Знаки дают занятия на сайте. Оценки и пропуски знаков не отнимают: открытые вещи остаются.', 'Лакомство дня открывает первое занятие за день. Одно кормление в день — общее для кота и собаки.'],
+  // Второе правило — с подписями питомцев подключения (petsGen): «общее для кота и собаки».
+  rules: null,
   origin: 'Знаки и вещи даёт сайт и совпадают везде.',
   back: '',
   call: '',
@@ -73,7 +74,7 @@ let T = TEXTS;
 const initial = () => ({
   mounted: false,
   abort: null, // снимает все слушатели при отключении
-  core: null, // ядро этого подключения (createPetCore): все восемь ключей, решения, реакции, виды, игра и комната
+  core: null, // ядро этого подключения (createPetCore): все девять ключей, решения, реакции, виды, игра и комната
   mirror: null, // снимок ядра, по которому оболочка уже показана (любое обновление — разница с ним, onCore → reflect)
   booting: false, // идёт подключение: обновления ядра до первой отрисовки мест — только эффекты, без reflect
   lost: null, // ядро отключили напрямую (pet.core.destroy()) — снять весь экземпляр, как pet.destroy()
@@ -83,10 +84,14 @@ const initial = () => ({
   starting: false, // идёт core.start(): предупреждение ядра — причина отказа подключения (startError), а не журнал
   startError: null,
   storage: 'ok', // 'failed' — при подключении хранилище не прочиталось: до отключения ничего не читается и не пишется
-  kind: 'cat', // показанный напарник; выбор другой вкладки приходит поглощением ядра (onCore)
-  look: R.defaultLook(), // показанный облик кота и собаки (снимок ядра)
+  kind: '', // показанный напарник; выбор другой вкладки приходит поглощением ядра (onCore)
+  defs: new Map(), // определения питомцев подключения (ID → определение)
+  kits: new Map(), // наборы отображения (ID → набор): штатные и options.kits
+  drawn: [], // питомцы, которых рисует отображение (с набором), в порядке pets
+  rooms: new Map(), // модели комнаты питомцев (ядро, room.mjs)
+  look: {}, // показанный облик каждого питомца (снимок ядра)
   shownHidden: false, // показано ли место «спрятан» (renderAll); сравнивается со свежим «скрыт»
-  settings: R.companionView(R.defaultSettings(), R.defaultCompanion()),
+  settings: { kind: '', name: '', accessory: '', motion: 'normal', phrases: true, hidden: false },
   reduced: null,
   dock: null,
   side: null,
@@ -147,14 +152,14 @@ const esc = (text) =>
 const on = (target, type, fn, options = {}) => target?.addEventListener?.(type, fn, { ...options, signal: ui.abort.signal });
 
 // ---------- хранение ----------
-// Все восемь ключей — ядро (снимок, команды, общий координатор web/storage.mjs): оболочка ключи не читает и не пишет. Место и
+// Все девять ключей — ядро (снимок, команды, общий координатор web/storage.mjs): оболочка ключи не читает и не пишет. Место и
 // вид legacy-раскладки (ключ place) ядро хранит и не толкует: оболочка показывает его по снимку (place) своими правилами
-// (pet-place.mjs) и меняет командой ядра setPlace. Отказ загрузки любого из восьми ключей (координатор) запрещает записи
+// (pet-place.mjs) и меняет командой ядра setPlace. Отказ загрузки любого из девяти ключей (координатор) запрещает записи
 // всего подключения. README, «Хранение».
 
 const corruptNote = (key) => `Питомец: значение ${key} повреждено — показаны значения по умолчанию; оно не перезаписывается, пока эту настройку не изменят.`;
 
-// Загрузка при подключении — координатор (все восемь ключей пространства). Ключ не прочитался (исключение хранилища) —
+// Загрузка при подключении — координатор (все девять ключей пространства). Ключ не прочитался (исключение хранилища) —
 // подключение работает в памяти: показывает умолчания и ничего не пишет; новая попытка — следующее подключение.
 // Повреждённое значение — предупреждение эффектом ядра warning (onCore); неявные записи его не трогают.
 function loadStorage(storage) {
@@ -176,7 +181,7 @@ function settingsOf(state, kind) {
 }
 
 const readSettings = (kind = ui.kind) => settingsOf(snap(), kind);
-const lookOf = (state) => ({ cat: state.pets.cat.coat, dog: state.pets.dog.coat });
+const lookOf = (state) => Object.fromEntries(Object.entries(state.pets).map(([id, own]) => [id, own.coat]));
 
 // Счёт и ступень — в прежней форме ui.info (только показ).
 function infoOf(state) {
@@ -189,26 +194,35 @@ function infoOf(state) {
 const offline = () => ui.storage === 'failed';
 const OFFLINE = 'Хранилище этого браузера недоступно: изменения действуют на этой странице до перезагрузки и не сохраняются.';
 
+// Подписи питомцев подключения в родительном падеже: «кота и собаки», «кота, собаки и кролика».
+function petsGen() {
+  const list = ui.drawn.map((id) => ui.defs.get(id).forms.gen);
+  return list.length > 1 ? `${list.slice(0, -1).join(', ')} и ${list.at(-1)}` : (list[0] ?? '');
+}
+
+// Ключи настроек питомцев: общие и кот — cat, собака — companion, сторонние и модель — ext.
+const SETTING_KEYS = ['cat', 'companion', 'ext'];
+
 // Подсказка в «Настройках»: сохранение обещается, только пока запись удаётся; повреждённые настройки — честно.
 function storeNote() {
   const save = snap().save;
   const head = offline()
     ? OFFLINE
-    : save.cat.corrupt || save.companion.corrupt
+    : SETTING_KEYS.some((key) => save[key].corrupt)
       ? 'Сохранённые настройки в этом браузере повреждены и не читаются: показаны обычные. Сами они не перезаписываются — изменение настройки здесь их заменит.'
-      : save.cat.unsaved.length > 0 || save.companion.unsaved.length > 0
+      : SETTING_KEYS.some((key) => save[key].unsaved.length > 0)
         ? 'Сохранить настройки в этом браузере сейчас не получается: они действуют на этой странице до перезагрузки, другие вкладки их не видят.'
         : 'Настройки напарника, облик, имена и лакомство хранятся в этом браузере: на другом устройстве — свои.';
-  return `${head} Имя, облик и аксессуар у кота и собаки свои, движение, реплики и «скрыть» — общие. ${T.origin}`;
+  return `${head} Имя, облик и аксессуар у ${petsGen()} свои, движение, реплики и «скрыть» — общие. ${T.origin}`;
 }
 
 // Облик: не записался — подсказка «не сохранился» (облик действует в памяти ядра до перезагрузки).
 const coatNote = () =>
-  snap().save.look.unsaved.includes(ui.kind)
+  snap().save.look.unsaved.includes(fieldLabel([ui.kind]))
     ? 'Облик не сохранился в этом браузере: он действует на этой странице до перезагрузки.'
     : offline()
       ? OFFLINE
-      : 'Облик у кота и собаки свой и хранится в этом браузере. Знаков и вещей не меняет.';
+      : `Облик у ${petsGen()} свой и хранится в этом браузере. Знаков и вещей не меняет.`;
 
 // ---------- место и вид (ключ place) — память ядра, правила раскладки — здесь ----------
 
@@ -240,14 +254,28 @@ function syncStoreNote() {
 
 // Режим движения — снимок ядра: итог выбора владельца и системного «уменьшить движение» (setReducedMotion).
 const motion = () => snap().prefs.effectiveMotion;
-const profile = () => R.profileOf(ui.kind);
-const name = () => R.companionName(ui.settings);
+// Определение и набор показанного напарника (или питомца kind); модель его комнаты.
+const defOf = (kind = ui.kind) => ui.defs.get(kind);
+const kitOf = (kind = ui.kind) => ui.kits.get(kind);
+const roomOf = (kind = ui.kind) => ui.rooms.get(kind);
+const name = () => ui.settings.name || defOf().names.default;
 const coat = () => ui.look[ui.kind];
-// Рисунок показанного напарника в его облике; id — с видом, чтобы градиенты и клипы не совпадали.
-const art = (options) => (ui.kind === 'dog' ? dogSvg({ coat: ui.look.dog, ...options }) : catSvg({ coat: ui.look.cat, ...options }));
+// Рисунок показанного напарника в его облике (набор отображения); id — с видом, чтобы градиенты и клипы не совпадали.
+const art = (options) => kitOf().art({ coat: coat(), ...options });
 // Статичный портрет для выбора (напарник, облик): без data-cat-managed, с надетым аксессуаром.
-const pickerArt = (kind, look, id, acc) =>
-  (kind === 'dog' ? dogSvg : catSvg)({ id: `${kind}-${id}`, view: 'portrait', coat: look }).replace('data-acc="scarf"', `data-acc="${acc}"`);
+const pickerArt = (kind, look, id, acc) => kitOf(kind).art({ id: `${kind}-${id}`, view: 'portrait', coat: look, accessory: acc });
+// Название вещи или аксессуара для «Новое в уголке» (строчными; у аксессуара — короткое, если есть).
+function itemName(id) {
+  const def = defOf();
+  const item = def.items.list.find((entry) => entry.id === id);
+  if (item) return item.title.toLowerCase();
+  const accessory = def.accessories.find((entry) => entry.id === id);
+  return accessory ? (accessory.short ?? accessory.title.toLowerCase()) : id;
+}
+// Сценка читается в этом показе (целиком — все, портрет — needs: 'any').
+const sceneReadable = (scene, full) => defOf().scenes.some((item) => item.id === scene && (full || item.needs === 'any'));
+// Поза, которой нет в наборе (необязательная yawn, settle), — базовая поза питомца (§ 7.5).
+const drawnPose = (pose, state) => (kitOf().poses.includes(pose) ? pose : (resolvePose(defOf(), state.pose.base) ?? 'calm'));
 
 // ---------- таймеры отображения ----------
 // Смысловые задачи (конец реакции и продолжение, облако, покой и дремота, полночь, приветствие, итог «Поиграть» и его
@@ -307,10 +335,10 @@ function paint() {
     const inPlay = Boolean(art.closest('.cat-play'));
     // В редакторе питомец спокоен: без реакций и сценок.
     const inRoom = Boolean(art.closest('.cat-room'));
-    const posed = inPlay ? pose.shown.play : inRoom ? pose.shown.room : pose.shown.page;
+    const posed = drawnPose(inPlay ? pose.shown.play : inRoom ? pose.shown.room : pose.shown.page, state);
     art.dataset.pose = posed;
     // Только там, где сценка читается: клубок — у целого питомца (уголок открыт — портрет за ним остаётся в покое).
-    if (scene && !inPlay && !inRoom && R.sceneTypes(ui.kind, art.dataset.view === 'full').includes(scene)) art.dataset.scene = scene;
+    if (scene && !inPlay && !inRoom && sceneReadable(scene, art.dataset.view === 'full')) art.dataset.scene = scene;
     else delete art.dataset.scene;
     // Куда смотрит в сцене (миска, мячик).
     if (inPlay && own && reaction.toward) art.dataset.toward = reaction.toward;
@@ -390,7 +418,7 @@ function showMini() {
   for (const slot of [ui.dock, ui.float].map((box) => box?.querySelector('.cat-dock-mini'))) {
     if (!slot) continue;
     if (miniShown.get(slot) !== item) {
-      slot.innerHTML = item === 'ball' ? ballMiniSvg() : item === 'bowl' || item === 'bowl-empty' ? bowlMiniSvg({ full: item === 'bowl' }) : item ? miniItemSvg(item) : '';
+      slot.innerHTML = item === 'bowl' || item === 'bowl-empty' ? bowlMiniSvg({ full: item === 'bowl' }) : item ? kitOf().mini?.(item) || miniItemSvg(item) : '';
       miniShown.set(slot, item);
     }
     slot.classList.toggle('is-on', Boolean(item));
@@ -398,11 +426,13 @@ function showMini() {
 }
 
 // ---------- что умеет и показывает отображение (setDisplay) ----------
-// Возможности legacy-отображения объявляются ядру явно, до start (docs/ARCHITECTURE.md § 11.1): питомцы, виды и сценки —
-// ровно рисунки 0.1.4 (без объявления сценок их не было бы, а не «были бы все»). Редкую сценку — выбор, попытку, отмену,
-// резервирование дня и показ — ведёт ядро; здесь только рисунок (data-scene по снимку) и факты раскладки: целиком или
-// портрет и идёт ли перенос между местами.
-const LEGACY_DISPLAY = { pets: ['cat', 'dog'], views: ['corner', 'play', 'room'], scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } };
+// Возможности legacy-отображения объявляются ядру явно, до start (docs/ARCHITECTURE.md § 11.1): питомцы — те, у кого есть
+// набор, виды и сценки — ровно нарисованные наборами (штатные — рисунки 0.1.4: кот — stretch, curl, собака — fetch; без
+// объявления сценок их не было бы, а не «были бы все»). Редкую сценку — выбор, попытку, отмену, резервирование дня и
+// показ — ведёт ядро; здесь только рисунок (data-scene по снимку) и факты раскладки: целиком или портрет и идёт ли перенос
+// между местами.
+const VIEWS = ['corner', 'play', 'room'];
+const legacyDisplay = () => ({ pets: [...ui.drawn], views: VIEWS, scenes: Object.fromEntries(ui.drawn.map((id) => [id, [...kitOf(id).scenes]])) });
 
 // Раскладка мест: целиком ли питомец на странице и идёт ли перенос (уголок целиком — смысл открытого вида, его учитывает
 // ядро). Объявляется, только когда факт раскладки сменился: перерисовка по снимку команду не повторяет.
@@ -438,7 +468,7 @@ function showProgress() {
     // У кнопки вызова точки нет.
     const call = button.hasAttribute('data-cat-call');
     button.querySelector('.cat-dot')?.toggleAttribute('hidden', call || !fresh);
-    button.setAttribute('aria-label', call ? callLabel() : `${name()} — уголок ${profile().gen}${fresh ? ', есть новая вещь' : ''}`);
+    button.setAttribute('aria-label', call ? callLabel() : `${name()} — уголок ${defOf().forms.gen}${fresh ? ', есть новая вещь' : ''}`);
     button.setAttribute('aria-expanded', String(ui.sheetOpen));
   }
   const stage = ui.dock?.querySelector('[data-cat-stage]');
@@ -460,7 +490,7 @@ const FOLD_ICON =
 // «Обустроить уголок» — домик.
 const ROOM_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 11.2 12 4.5l8.5 6.7"/><path d="M6 9.6V19.5h12V9.6"/><path d="M9.6 19.5v-4a2.4 2.4 0 0 1 4.8 0v4"/></g></svg>';
-const foldLabel = () => `Свернуть ${profile().acc}`;
+const foldLabel = () => `Свернуть ${defOf().forms.acc}`;
 const foldHtml = () => `<button class="cat-fold" type="button" data-cat-fold aria-label="${foldLabel()}" title="Свернуть">${FOLD_ICON}</button>`;
 // Тянуть мышью — только если сайт задал рамки мест (options.zone).
 const opener = () => `aria-haspopup="dialog" aria-expanded="false" aria-controls="cat-sheet"${O.zone ? ' data-pet-drag' : ''}`;
@@ -511,7 +541,7 @@ function renderBar() {
   ui.bar.innerHTML = surface() !== 'pet' ? '' : hostHtml('bar', view);
 }
 
-const returnLabel = () => `Показать ${profile().acc}`;
+const returnLabel = () => `Показать ${defOf().forms.acc}`;
 
 // У логотипа: портрет без лишней высоты; по зову — кнопка; спрятан — маленькая кнопка «Показать …» (на любой высоте).
 function renderSide() {
@@ -753,7 +783,7 @@ function zoneList() {
     .filter((zone) => zone.rect);
 }
 
-const moveLabel = () => `Перетащите ${profile().acc}${ui.layout?.device === 'phone' ? ' пальцем вверх или вниз' : ' на одно из мест'} — или нажмите место.`;
+const moveLabel = () => `Перетащите ${defOf().forms.acc}${ui.layout?.device === 'phone' ? ' пальцем вверх или вниз' : ' на одно из мест'} — или нажмите место.`;
 
 // «Переместить» в уголке: уголок закрывается, на странице — места; питомца можно тянуть пальцем.
 function startMove() {
@@ -801,7 +831,7 @@ function sheetSkeleton() {
   return dialog;
 }
 
-const gift = (index) => R.stageGift(index, ui.kind, name());
+const gift = (index) => R.stageGift(defOf(), index, name());
 
 function stageListHtml(info) {
   return R.STAGES.map((stage, index) => {
@@ -819,7 +849,7 @@ const openAccessories = () => snap().progress?.accessories ?? [];
 function accessoryHtml() {
   const worn = snap().pets[ui.kind].worn;
   const opened = openAccessories();
-  return R.ACCESSORIES.map((item) => {
+  return defOf().accessories.map((item) => {
     const open = opened.includes(item.id);
     return `<label class="cat-acc-option${open ? '' : ' is-locked'}">
         <input type="radio" name="cat-acc" value="${item.id}"${item.id === worn ? ' checked' : ''}${open ? '' : ' disabled'} />
@@ -833,7 +863,7 @@ function accessoryHtml() {
 function syncAccessories() {
   const worn = snap().pets[ui.kind].worn;
   const opened = openAccessories();
-  for (const item of R.ACCESSORIES) {
+  for (const item of defOf().accessories) {
     const input = ui.sheet.querySelector(`input[name="cat-acc"][value="${item.id}"]`);
     if (!input) continue;
     const open = opened.includes(item.id);
@@ -845,16 +875,23 @@ function syncAccessories() {
   }
 }
 
-// Сцена ступени: место отдыха с питомцем, миска (в уголке — когда можно угостить и после), клубок или канат, у собаки
-// со ступени «Наш ритуал» мячик. Расстановка — paintRoom после вставки. id — свой у уголка и редактора.
+// Сцена ступени: общий уголок (место отдыха с питомцем, мебель ступеней), миска (в уголке — когда можно угостить и после)
+// и свои вещи питомца из набора — игрушки комнаты открытых ступеней (клубок кота; канат и со ступени «Наш ритуал» мячик
+// собаки) и вещи ступеней вне общего уголка. Расстановка — paintRoom после вставки. id — свой у уголка и редактора.
 const scenePet = (stage, id) => managed(art({ id: `${ui.kind}-${id}-art`, box: sceneCatBox(stage) })).replace('<svg ', '<svg data-room="rest" ');
+function ownItems(stage, fresh) {
+  const def = defOf();
+  const toys = def.room.toys.filter((toy) => toy.stage <= stage).map((toy) => toy.id);
+  const items = def.items.list.filter((item) => item.stage <= stage && kitOf().items.includes(item.id) && !toys.includes(item.id)).map((item) => item.id);
+  return [...toys, ...items].map((id) => kitOf().item?.(id, { fresh: fresh.includes(id) }) ?? '').join('');
+}
 const sceneHtml = (stage, fresh, { id = 'scene', bowl = ui.treat } = {}) =>
   sceneSvg({
     id: `cat-${id}`,
     stage,
     fresh,
     cat: scenePet(stage, id),
-    extra: `${bowlArt({ state: bowl })}${ui.kind === 'dog' ? ropeArt() : yarnArt()}${R.STAGES.some((_, index) => index <= stage && R.stageItems(index, ui.kind).includes('ball')) ? ballArt({ fresh: fresh.includes('ball') }) : ''}`,
+    extra: `${bowlArt({ state: bowl })}${ownItems(stage, fresh)}`,
   });
 
 // Комната уголка — сохраняемая расстановка из снимка ядра (room.pos, сдвиг к миске — room.feedShift), на месте (фокус,
@@ -862,7 +899,7 @@ const sceneHtml = (stage, fresh, { id = 'scene', bowl = ui.treat } = {}) =>
 function paintCorner() {
   const scene = ui.sheet?.querySelector('.cat-stage-wrap > .cat-scene-art');
   const room = snap().room;
-  if (scene) Room.paintRoom(scene, { kind: ui.kind, stage: ui.sheetStage, pos: room.pos }, room.feedShift);
+  if (scene) Room.paintRoom(scene, { model: roomOf(), stage: ui.sheetStage, pos: room.pos }, room.feedShift);
 }
 
 // Лакомство дня — в ряду с «Погладить»: действие по состоянию и подсказка под рядом; тексты без имени (не склоняется).
@@ -895,7 +932,7 @@ function treatHtml(who) {
   return `<div class="cat-treat" data-cat-treat data-state="${ui.treat}">
       <div class="cat-actions">
         <button class="${C.alt} cat-pet" type="button" data-cat-pet>Погладить</button>
-        ${who.paw ? `<button class="${C.alt} cat-paw" type="button" data-cat-paw>Дай лапу</button>` : ''}
+        ${who.actions.paw?.ask ? `<button class="${C.alt} cat-paw" type="button" data-cat-paw>Дай лапу</button>` : ''}
         <span class="cat-treat-act" data-cat-treat-act>${parts.act}</span>
       </div>
       <p class="cat-treat-note" id="cat-treat-note" data-cat-treat-note>${esc(parts.note)}</p>
@@ -978,8 +1015,8 @@ function goLearn(event, link) {
 function coatHtml() {
   const acc = snap().pets[ui.kind].worn;
   return `<fieldset class="cat-coat">
-      <legend>Облик ${profile().gen}</legend>
-      <div class="cat-coat-list">${R.coatsOf(ui.kind)
+      <legend>Облик ${defOf().forms.gen}</legend>
+      <div class="cat-coat-list">${defOf().coats
         .map(
           (item) => `<label class="cat-coat-option">
           <input type="radio" name="cat-coat" value="${item.id}"${item.id === coat() ? ' checked' : ''} />
@@ -1024,9 +1061,9 @@ function applyCoat() {
 // Выбор напарника и облика открытого уголка — по сохранённому: портреты, отмеченный облик и подсказка о сохранении.
 function syncPickers() {
   if (!ui.sheet?.open) return;
-  for (const kind of R.KINDS) {
-    const face = ui.sheet.querySelector(`[data-cat-kind-face="${kind}"]`);
-    if (face && face.firstElementChild?.dataset.coat !== ui.look[kind]) face.innerHTML = pickerArt(kind, ui.look[kind], 'pick', face.firstElementChild?.dataset.acc ?? 'scarf');
+  for (const kind of ui.drawn) {
+    const face = ui.sheet.querySelector(`[data-cat-kind-face="${CSS.escape(kind)}"]`);
+    if (face && face.firstElementChild?.dataset.coat !== ui.look[kind]) face.innerHTML = pickerArt(kind, ui.look[kind], 'pick', face.firstElementChild?.dataset.acc ?? defOf(kind).accessories[0].id);
   }
   for (const input of ui.sheet.querySelectorAll('input[name="cat-coat"]')) input.checked = input.value === coat();
   const note = ui.sheet.querySelector('[data-cat-coat-note]');
@@ -1041,49 +1078,50 @@ function chooseCoat(value) {
   const result = ui.core.setAppearance({ coat: value });
   if (!result.ok) return;
   ui.core.activity();
-  announce(`Облик: ${R.coatTitle(kind, value).toLowerCase()}.${result.save.status === 'failed' ? ' Не сохранился в этом браузере — действует до перезагрузки.' : ''}`);
+  announce(`Облик: ${defOf(kind).coats.find((item) => item.id === value).title.toLowerCase()}.${result.save.status === 'failed' ? ' Не сохранился в этом браузере — действует до перезагрузки.' : ''}`);
 }
 
 // Надетый аксессуар — и на портретах выбора (напарник и облик показанного животного).
 function syncPickerAcc() {
   const acc = snap().pets[ui.kind].worn;
-  for (const svg of ui.sheet?.querySelectorAll(`.cat-coat-face .cat-art, [data-cat-kind-face="${ui.kind}"] .cat-art`) ?? []) svg.dataset.acc = acc;
+  for (const svg of ui.sheet?.querySelectorAll(`.cat-coat-face .cat-art, [data-cat-kind-face="${CSS.escape(ui.kind)}"] .cat-art`) ?? []) svg.dataset.acc = acc;
 }
 
 // Имя показанного напарника: предложение (пока имя не выбирали), готовые имена страницами, «Другие имена» и поле
 // своего имени. Выбранное отмечено галочкой и aria-pressed.
 function chipsHtml() {
   const shown = name();
-  return R.namePage(ui.kind, ui.namePage)
+  return R.namePage(defOf().names.presets, ui.namePage)
     .map((item) => `<button class="cat-chip" type="button" data-cat-name-pick="${esc(item)}" aria-pressed="${item === shown ? 'true' : 'false'}">${esc(item)}</button>`)
     .join('');
 }
 
 function nameHtml() {
-  const who = profile();
-  const offer = R.NAME_OFFER[ui.kind];
+  const who = defOf();
+  const offer = who.names.offer;
+  const fallback = who.names.default;
   return `<fieldset class="cat-name">
-      <legend>Имя ${who.gen}</legend>
+      <legend>Имя ${who.forms.gen}</legend>
       <div class="cat-name-offer" data-cat-offer${snap().pets[ui.kind].name.chosen ? ' hidden' : ''}>
-        <p>Новое имя? Предлагаем «${esc(offer)}» — или оставим «${esc(who.defaultName)}».</p>
+        <p>Новое имя? Предлагаем «${esc(offer)}» — или оставим «${esc(fallback)}».</p>
         <div class="cat-name-offer-actions">
           <button class="${C.btn} ${C.small}" type="button" data-cat-name-pick="${esc(offer)}">${esc(offer)}</button>
-          <button class="${C.alt} ${C.small}" type="button" data-cat-name-pick="${esc(who.defaultName)}">Оставить «${esc(who.defaultName)}»</button>
+          <button class="${C.alt} ${C.small}" type="button" data-cat-name-pick="${esc(fallback)}">Оставить «${esc(fallback)}»</button>
         </div>
       </div>
       <div class="cat-name-row">
         <div class="cat-name-list" id="cat-name-list" data-cat-names role="group" aria-label="Готовые имена">${chipsHtml()}</div>
         <button class="cat-chip cat-chip-more" type="button" data-cat-name-more aria-controls="cat-name-list">Другие имена</button>
       </div>
-      <label class="cat-field"><span>Своё имя</span><input type="text" name="cat-name" maxlength="${R.NAME_MAX}" autocomplete="off" value="${esc(ui.settings.name)}" placeholder="${esc(who.defaultName)}" /></label>
-      <p class="${C.muted} cat-note">До ${R.NAME_MAX} знаков. Имена у кота и собаки свои; знаков имя не даёт.</p>
+      <label class="cat-field"><span>Своё имя</span><input type="text" name="cat-name" maxlength="${R.NAME_MAX}" autocomplete="off" value="${esc(ui.settings.name)}" placeholder="${esc(fallback)}" /></label>
+      <p class="${C.muted} cat-note">До ${R.NAME_MAX} знаков. Имена у ${petsGen()} свои; знаков имя не даёт.</p>
     </fieldset>`;
 }
 
 // «Новое в уголке»: вещи и аксессуары, открытые после увиденной ступени (снимок ядра).
 function freshText(fresh) {
   const accessories = snap().progress?.unseen ? snap().progress.freshAccessories : [];
-  const names = [...fresh, ...accessories].map((item) => ITEM_NAMES[item] ?? item);
+  const names = [...fresh, ...accessories].map(itemName);
   return names.length ? `Новое в уголке: ${names.join(', ')}.` : '';
 }
 
@@ -1106,21 +1144,20 @@ function progressParts() {
 // Выбор напарника: два портрета, выбранный отмечен рамкой, галочкой и словом «рядом»; имя у каждого своё.
 function kindNames() {
   const pets = snap().pets;
-  return { cat: pets.cat.name.display, dog: pets.dog.name.display };
+  return Object.fromEntries(ui.drawn.map((id) => [id, pets[id].name.display]));
 }
 
 function kindHtml() {
   const names = kindNames();
   const pets = snap().pets;
-  const worn = { cat: pets.cat.worn, dog: pets.dog.worn };
   return `<fieldset class="cat-kind">
       <legend>Напарник</legend>
-      <div class="cat-kind-list">${R.KINDS.map((kind) => {
+      <div class="cat-kind-list">${ui.drawn.map((kind) => {
         const on = kind === ui.kind;
         return `<label class="cat-kind-option">
-          <input type="radio" name="cat-kind" value="${kind}"${on ? ' checked' : ''} />
-          <span class="cat-kind-face" data-cat-kind-face="${kind}" aria-hidden="true">${pickerArt(kind, ui.look[kind], 'pick', worn[kind])}</span>
-          <span class="cat-kind-text"><strong>${R.PROFILES[kind].title}</strong><span class="${C.muted}" data-cat-kind-name="${kind}">${esc(names[kind])}</span></span>
+          <input type="radio" name="cat-kind" value="${esc(kind)}"${on ? ' checked' : ''} />
+          <span class="cat-kind-face" data-cat-kind-face="${esc(kind)}" aria-hidden="true">${pickerArt(kind, ui.look[kind], 'pick', pets[kind].worn)}</span>
+          <span class="cat-kind-text"><strong>${esc(defOf(kind).title)}</strong><span class="${C.muted}" data-cat-kind-name="${esc(kind)}">${esc(names[kind])}</span></span>
           <span class="cat-kind-mark" aria-hidden="true">✓ рядом</span>
         </label>`;
       }).join('')}</div>
@@ -1178,7 +1215,7 @@ function presenceHtml() {
 const presenceNote = () =>
   snap().save.presence.unsaved.length > 0
     ? 'Не сохранилось в этом браузере: действует на этой странице до перезагрузки.'
-    : `${ui.presence === 'on-call' ? `Лапка «${CALL}»${T.call}. ` : ''}${offline() ? OFFLINE : 'Хранится в этом браузере; общее для кота и собаки.'}`;
+    : `${ui.presence === 'on-call' ? `Лапка «${CALL}»${T.call}. ` : ''}${offline() ? OFFLINE : `Хранится в этом браузере; общее для ${petsGen()}.`}`;
 
 // Открытый уголок — на месте, без пересоздания.
 function syncPresenceBox() {
@@ -1249,7 +1286,7 @@ function bodyHtml(fresh) {
   const progress = progressParts();
   const fresher = freshText(fresh);
   const s = ui.settings;
-  const who = profile();
+  const who = defOf();
   return `<div class="cat-stage-wrap">
       ${sceneHtml(info.stage, fresh)}
       <p class="cat-scene-say" data-cat-phrase hidden><span></span></p>
@@ -1285,7 +1322,7 @@ function bodyHtml(fresh) {
       <div class="cat-acc-list">${accessoryHtml()}</div>
     </fieldset>
     <details class="cat-settings">
-      <summary>Настройки ${who.gen}</summary>
+      <summary>Настройки ${who.forms.gen}</summary>
       <fieldset class="cat-motion">
         <legend>Движение</legend>
         ${R.MOTIONS.map(([id, label]) => `<label><input type="radio" name="cat-motion" value="${id}"${s.motion === id ? ' checked' : ''} /> ${label}</label>`).join('')}
@@ -1294,7 +1331,7 @@ function bodyHtml(fresh) {
       ${viewHtml()}
       <label class="cat-check"><input type="checkbox" name="cat-phrases"${s.phrases ? ' checked' : ''} /> Короткие реплики</label>
       <p class="${C.muted} cat-note" data-cat-store>${esc(storeNote())}</p>
-      <button class="${C.alt} cat-hide" type="button" data-cat-hide>Скрыть ${who.acc}</button>
+      <button class="${C.alt} cat-hide" type="button" data-cat-hide>Скрыть ${who.forms.acc}</button>
     </details>`;
 }
 
@@ -1303,7 +1340,7 @@ function renderSheet(fresh = []) {
   if (!ui.sheet) return;
   ui.sheet.querySelector('#cat-sheet-title').textContent = name();
   ui.sheet.querySelector('[data-cat-sub]').textContent = `Ступень «${ui.info.current.title}»`;
-  ui.namePage = R.namePageOf(ui.kind, name());
+  ui.namePage = R.namePageOf(defOf().names.presets, name());
   ui.treatLater = false;
   ui.sheet.querySelector('[data-cat-body]').innerHTML = bodyHtml(fresh);
   ui.sheetStage = ui.info.stage;
@@ -1412,7 +1449,7 @@ function pickName(value) {
   const chosen = R.cleanName(value);
   if (!chosen) return;
   ui.core.setName(chosen, { pick: 'preset' });
-  const page = R.namePageOf(ui.kind, chosen);
+  const page = R.namePageOf(defOf().names.presets, chosen);
   const turn = page !== ui.namePage;
   ui.namePage = page;
   syncNameField({ force: true });
@@ -1424,9 +1461,9 @@ function pickName(value) {
 
 // «Другие имена»: следующая страница подборки по кругу; фокус остаётся на этой кнопке.
 function moreNames() {
-  ui.namePage = (ui.namePage + 1) % R.namePageCount(ui.kind);
+  ui.namePage = (ui.namePage + 1) % R.namePageCount(defOf().names.presets);
   syncNamePick({ chips: true });
-  announce(`Другие имена: ${R.namePage(ui.kind, ui.namePage).join(', ')}.`);
+  announce(`Другие имена: ${R.namePage(defOf().names.presets, ui.namePage).join(', ')}.`);
 }
 
 // Поле имени — по сохранённому имени, если в нём не стоит курсор: поле, которое редактируют, входящие изменения не
@@ -1452,8 +1489,8 @@ function syncControls() {
 // Имена в выборе напарника (имя другого животного могли поменять в другой вкладке).
 function syncKindNames() {
   const names = kindNames();
-  for (const kind of R.KINDS) {
-    const label = ui.sheet?.querySelector(`[data-cat-kind-name="${kind}"]`);
+  for (const kind of ui.drawn) {
+    const label = ui.sheet?.querySelector(`[data-cat-kind-name="${CSS.escape(kind)}"]`);
     if (label && label.textContent !== names[kind]) label.textContent = names[kind];
   }
 }
@@ -1578,7 +1615,7 @@ function playHtml() {
   const said = snap().scenePhrase;
   return `<div class="cat-play-head">
       <h2 id="cat-play-title"><span class="${C.sr}">Поиграть: </span><span data-cat-play-name>${esc(name())}</span></h2>
-      ${openedBy() === 'call' ? `<button class="${C.close} cat-play-corner" type="button" data-cat-play-corner aria-label="Уголок ${profile().gen}">Уголок</button>` : ''}
+      ${openedBy() === 'call' ? `<button class="${C.close} cat-play-corner" type="button" data-cat-play-corner aria-label="Уголок ${defOf().forms.gen}">Уголок</button>` : ''}
       <button class="${C.close}" type="button" data-cat-play-close aria-label="Закрыть игру">Закрыть</button>
     </div>
     <div class="cat-play-note">
@@ -1586,7 +1623,7 @@ function playHtml() {
       <span class="cat-play-fit" data-cat-play-fit aria-hidden="true">${fitHtml()}</span>
     </div>
     <div class="cat-play-stage" data-play-stage>
-      <div class="cat-play-pet" data-play-pet data-kind="${ui.kind}">${managed(art({ id: `${ui.kind}-play`, view: 'full' }))}${hitsHtml(ui.kind)}</div>
+      <div class="cat-play-pet" data-play-pet data-kind="${esc(ui.kind)}">${managed(art({ id: `${ui.kind}-play`, view: 'full' }))}${hitsHtml(defOf())}</div>
       <span class="cat-play-floor" data-play-floor aria-hidden="true"></span>
       <p class="cat-scene-say cat-play-say" data-cat-phrase${said && ui.settings.phrases ? '' : ' hidden'}><span>${esc(said)}</span></p>
       <span class="cat-play-touch" data-play-touch aria-hidden="true"></span>
@@ -1597,7 +1634,7 @@ function playHtml() {
     </div>
     <div class="cat-play-actions">
       <button class="${C.alt}" type="button" data-cat-play-pet>Погладить</button>
-      <button class="${C.alt}" type="button" data-cat-play-paw>${profile().paw ? 'Дай лапу' : 'Коснуться лапы'}</button>
+      ${defOf().actions.paw ? `<button class="${C.alt}" type="button" data-cat-play-paw>${defOf().actions.paw.ask ? 'Дай лапу' : 'Коснуться лапы'}</button>` : ''}
       <button class="${C.alt}" type="button" data-cat-play-bowl>${bowlLabel()}</button>
       <button class="${C.alt}" type="button" data-cat-play-ball>Катнуть мячик</button>
     </div>`;
@@ -1671,7 +1708,7 @@ const playBack = () => (openedBy() === 'call' ? closeSheet() : leavePlay());
 // Невидимые образцы подсказки и всех итогов с этим именем (тексты ядра) — в той же ячейке, что подсказка: место по самому
 // длинному, и итог не сдвигает питомца под пальцем.
 function fitHtml() {
-  return [PLAY_HINT, ...Object.values(playTexts(ui.kind, name()))].map((text) => `<span>${esc(text)}</span>`).join('');
+  return [PLAY_HINT, ...Object.values(playTexts(defOf(), name()))].map((text) => `<span>${esc(text)}</span>`).join('');
 }
 
 // Сцена по снимку ядра: итог под сценой (play.outcome, текст с именем — play.text) вместо подсказки, пока ядро его держит;
@@ -1735,7 +1772,7 @@ function keepFocus(element) {
 // Кнопки уголка «Погладить» и у собаки «Дай лапу» — обычный запрос ядру (interact вне «Поиграть»): лимит частоты, тишина и
 // очередь — ядро, итога под сценой и объявления нет (как 0.1.4).
 const pet = () => ui.core.interact({ type: 'pet' });
-const paw = () => profile().paw && ui.core.interact({ type: 'paw' });
+const paw = () => defOf().actions.paw?.ask && ui.core.interact({ type: 'paw' });
 
 // ---------- «Обустроить уголок» ----------
 // Третий вид диалога. Черновик, перенос, выбор, шаг, обычная расстановка, сохранение, отмена и чужая расстановка — ядро
@@ -1747,13 +1784,13 @@ const ROOM_DIRS = { left: ['←', 'Влево'], right: ['→', 'Вправо'],
 const ROOM_KEYS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
 
 const draftNow = () => snap().room.draft;
-const roomTitle = (id) => Room.itemTitle(id, ui.sheetStage);
+const roomTitle = (id) => Room.itemTitle(roomOf(), id, ui.sheetStage);
 // Черновик как раскладка (live — с идущим переносом под указателем).
 function roomLayout(live = true) {
   const draft = draftNow();
   if (!draft) return null;
   const pos = live && draft.drag ? { ...draft.pos, [draft.drag.id]: draft.drag.at } : draft.pos;
-  return { kind: ui.kind, stage: ui.sheetStage, pos, pick: draft.pick };
+  return { model: roomOf(), stage: ui.sheetStage, pos, pick: draft.pick };
 }
 
 function roomHtml() {
@@ -2088,7 +2125,7 @@ function setShown(kind, next) {
 // Показать другого напарника при неизменном «скрыт»: прогресс, знаки и общие настройки те же — смена не даёт знаков и
 // праздников. Кнопки мест те же; открытый уголок перерисовывается с тем же раскрытием, прокруткой и фокусом.
 function switchKind(kind, next) {
-  if (!R.KINDS.includes(kind) || kind === ui.kind) return;
+  if (!ui.defs.has(kind) || !ui.kits.has(kind) || kind === ui.kind) return;
   cancelMove('kind');
   release('kind');
   // Редактор закрывается без сохранения черновика (ядро уже вышло из него в уголок).
@@ -2126,6 +2163,7 @@ const artFor = (place, view = 'full') => art({ id: `${ui.kind}-${place}`, view: 
 
 // Рисунки мест — по показанному напарнику, облику и виду места: заменяется только отличающийся (фокус не теряется).
 function syncHostArts() {
+  // У рисунка кота 0.1.4 атрибута data-kind нет — это кот.
   const stale = (svg, view) => !svg || svg.dataset.coat !== coat() || (svg.dataset.kind ?? 'cat') !== ui.kind || svg.dataset.view !== (view === 'full' ? 'full' : 'portrait');
   for (const [slot, place, host] of [
     [ui.dock?.querySelector('.cat-dock-art'), 'dock', 'sidebar'],
@@ -2230,7 +2268,7 @@ function views(state) {
     treat: JSON.stringify([state.treat, state.save.treat, state.progress]),
     presence: JSON.stringify([state.presence.mode, state.save.presence]),
     place: JSON.stringify([state.place, state.save.place]),
-    settings: JSON.stringify([state.pet, ...['cat', 'dog'].map((kind) => [state.pets[kind].name, state.pets[kind].accessory]), state.prefs, state.presence.hidden, state.progress?.seenStage, state.progress?.seenKnown, state.save.cat, state.save.companion]),
+    settings: JSON.stringify([state.pet, state.behavior, ...Object.values(state.pets).map((own) => [own.name, own.accessory]), state.prefs, state.presence.hidden, state.progress?.seenStage, state.progress?.seenKnown, state.save.cat, state.save.companion, state.save.ext]),
   };
 }
 
@@ -2340,6 +2378,17 @@ function host(key, place, cls) {
   O.places[place](box);
 }
 
+// Питомцы, модели и наборы подключения (PL06): options.pets и options.behaviors — определения (по умолчанию штатные кот,
+// собака и calm), options.kits — наборы сторонних питомцев (у кота и собаки — штатные, если свой не передан). Проверка —
+// invalid() до любых действий; здесь — уже проверенные. Рисуются питомцы, у которых есть набор.
+function catalogOf(options) {
+  const defs = register(options.pets ?? STOCK_PETS, options.behaviors ?? STOCK_BEHAVIORS);
+  const pets = new Map(defs.pets.map((def) => [def.id, def]));
+  const kits = new Map();
+  for (const kit of [...STOCK_KITS, ...(options.kits ?? [])]) if (pets.has(kit.pet)) kits.set(kit.pet, kit);
+  return { defs, pets, kits, drawn: defs.pets.map((def) => def.id).filter((id) => kits.has(id)) };
+}
+
 // lost — снять весь экземпляр (pet.destroy() этого подключения), если ядро отключат напрямую (pet.core.destroy()).
 function start(options, lost) {
   ui = initial();
@@ -2348,14 +2397,19 @@ function start(options, lost) {
   O = options;
   K = R.storageKeys(options.storage);
   C = { ...CLASSES, ...options.classes };
-  T = { ...TEXTS, ...options.texts };
-  // Хранение: общий координатор пространства имён (загрузка — все восемь ключей) и своё подключение ядра; день редкой
+  const catalog = catalogOf(options);
+  ui.defs = catalog.pets;
+  ui.kits = catalog.kits;
+  ui.drawn = catalog.drawn;
+  ui.rooms = new Map([...catalog.pets.values()].map((def) => [def.id, roomModel(def)]));
+  T = { ...TEXTS, rules: ['Знаки дают занятия на сайте. Оценки и пропуски знаков не отнимают: открытые вещи остаются.', `Лакомство дня открывает первое занятие за день. Одно кормление в день — общее для ${petsGen()}.`], ...options.texts };
+  // Хранение: общий координатор пространства имён (загрузка — все девять ключей) и своё подключение ядра; день редкой
   // сценки — резервирование IndexedDB того же пространства (общее для ядер). Ядро создаётся без записей; первое включение
   // и приветствие — core.start ниже.
   const storage = createWebStorage({ namespace: options.storage ?? 'pet' });
   loadStorage(storage);
   const owner = ui;
-  ui.core = createPetCore({ storage, scenes: createWebScenes({ namespace: options.storage ?? 'pet' }), progress, log: { warn: (message, error) => coreWarn(owner, message, error) } });
+  ui.core = createPetCore({ storage, scenes: createWebScenes({ namespace: options.storage ?? 'pet' }), progress, pets: catalog.defs.pets, behaviors: catalog.defs.behaviors, log: { warn: (message, error) => coreWarn(owner, message, error) } });
   ui.mirror = snap();
   // Только своё ядро и только этот экземпляр: поздний вызов прежнего подключения новый не трогает.
   ui.core.subscribe(safe((update) => ui === owner && onCore(update)), { initial: false });
@@ -2493,8 +2547,8 @@ function start(options, lost) {
   // Запоздалое close прошлой сессии не закрывает уже новую (вызвали сразу после закрытия).
   on(ui.sheet, 'close', safe(() => !ui.sheet.open && closeSheet({ restore: true })));
   // Жест сцены и предметы — смысловые входы ядра (stroke.*, interact, toy.*); пол сцены — объявление отображения.
-  initPlay({ start: safe(() => ui.core.stroke.start().id ?? null), step: safe((id) => ui.core.stroke.step(id)), end: safe((id) => ui.core.stroke.end(id)), cancel: safe((id) => ui.core.stroke.cancel(id)), paw: safe(() => playAct({ type: 'paw' })), motion }, ui.abort.signal);
-  initToys({ play: playState, drag: safe((toy, at) => ui.core.toy.drag(toy, at)), drop: safe((roll) => ui.core.toy.drop(roll === undefined ? undefined : { roll })), cancel: safe(() => ui.core.toy.cancel()), floor: safe((floor, touch) => ui.core.setDisplay({ playFloor: floor, playTouch: touch })), motion });
+  initPlay({ start: safe(() => ui.core.stroke.start().id ?? null), step: safe((id) => ui.core.stroke.step(id)), end: safe((id) => ui.core.stroke.end(id)), cancel: safe((id) => ui.core.stroke.cancel(id)), paw: safe(() => playAct({ type: 'paw' })), motion, figure: (kind) => ui.defs.get(kind) ?? null }, ui.abort.signal);
+  initToys({ play: playState, drag: safe((toy, at) => ui.core.toy.drag(toy, at)), drop: safe((roll) => ui.core.toy.drop(roll === undefined ? undefined : { roll })), cancel: safe(() => ui.core.toy.cancel()), floor: safe((floor, touch) => ui.core.setDisplay({ playFloor: floor, playTouch: touch })), motion, width: () => defOf()?.size.width ?? 220 });
   watchStroke(ui.sheet.querySelector('[data-cat-play-view]'));
   watchToys(ui.sheet.querySelector('[data-cat-play-view]'));
   Room.initRoom(roomHooks);
@@ -2521,7 +2575,7 @@ function start(options, lost) {
   // нарисованные питомцы, виды и сценки (явное объявление legacy, § 11.1). Присутствие и «на виду» — ядра (ключ presence).
   ui.core.setReducedMotion(Boolean(ui.reduced.matches));
   ui.core.setVisible(!document.hidden);
-  ui.core.setDisplay(LEGACY_DISPLAY);
+  ui.core.setDisplay(legacyDisplay());
   // Ядро: первое включение (история — молча) и приветствие дня — решение и неявная запись; покой, полночь и приветствие
   // (через 0,9 с; после паузы в два дня и больше — спокойное «рад, что ты здесь», без упрёков) — его задачи; спрятан и
   // «по зову» — без приветствия. Отказ запуска (progress() сайта бросил) — отказ подключения: mountPet откатит всё.
@@ -2619,14 +2673,34 @@ let current = null;
 const PAGE = Symbol.for('pet-module');
 const IDS = ['cat-sheet', 'cat-live', 'cat-dock', 'cat-side', 'cat-float', 'cat-bar'];
 
-// Настройки, с которыми подключаться нельзя (README, «Отказ подключения»): проверка до любых действий.
+// Настройки, с которыми подключаться нельзя (README, «Отказ подключения»): проверка до любых действий. PL06: pets и
+// behaviors — определения (ошибка определения — его код и путь), kits — наборы: без определения, неполный, повтор
+// питомца — отказ; хотя бы один питомец с набором.
 function invalid(o) {
   const p = o?.places;
   if (!p || typeof p !== 'object') return 'нет places';
   for (const key of ['logo', 'top']) if (typeof p[key] !== 'function') return `places.${key} — обязательная функция`;
   for (const key in p) if (p[key] != null && typeof p[key] !== 'function') return `places.${key} — не функция`;
   for (const key of ['progress', 'step', 'go', 'zone', 'home']) if (o[key] != null && typeof o[key] !== 'function') return `${key} — не функция`;
-  return o.storage === undefined || (typeof o.storage === 'string' && o.storage) ? '' : 'storage — непустая строка';
+  if (!(o.storage === undefined || (typeof o.storage === 'string' && o.storage))) return 'storage — непустая строка';
+  let defs;
+  try {
+    defs = register(o.pets ?? STOCK_PETS, o.behaviors ?? STOCK_BEHAVIORS);
+  } catch (error) {
+    return error?.code ? `${error.code}: ${error.message}` : error;
+  }
+  if (o.kits !== undefined && !Array.isArray(o.kits)) return 'kits — массив наборов отображения';
+  const pets = new Map(defs.pets.map((def) => [def.id, def]));
+  const seen = new Set();
+  for (let i = 0; i < (o.kits ?? []).length; i += 1) {
+    if (!Object.hasOwn(o.kits, i)) return `kits[${i}] — пропуск в массиве`;
+    const problem = kitProblem(o.kits[i], pets);
+    if (problem) return `kits[${i}]: ${problem}`;
+    if (seen.has(o.kits[i].pet)) return `kits[${i}]: второй набор питомца «${o.kits[i].pet}»`;
+    seen.add(o.kits[i].pet);
+  }
+  const drawn = defs.pets.filter((def) => seen.has(def.id) || STOCK_KITS.some((kit) => kit.pet === def.id));
+  return drawn.length ? '' : 'ни у одного питомца из pets нет набора отображения (kits)';
 }
 
 // Отказ команды у экземпляра, который так и не подключился (у отключённого — свой результат ядра, тоже destroyed).
@@ -2670,6 +2744,7 @@ export function mountPet(options = {}) {
     setContext: forward((c) => c.setContext),
     setName: forward((c) => c.setName),
     setPet: forward((c) => c.setPet),
+    setBehavior: forward((c) => c.setBehavior),
     setAppearance: forward((c) => c.setAppearance),
     setPreferences: forward((c) => c.setPreferences),
     setPresence: forward((c) => c.setPresence),

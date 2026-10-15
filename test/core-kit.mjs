@@ -3,13 +3,22 @@
 // хоста, журнал, шпион подключений координатора, набор неверных точек. Данные синтетические.
 import assert from 'node:assert/strict';
 import { storageKeys } from '../pet/core/formats/legacy.mjs';
-import { createPetCore } from '../pet/core/index.mjs';
+import { createPetCore as createInstance } from '../pet/core/index.mjs';
 import { createCoordinator } from '../pet/core/storage.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
+import { calm } from '../pet/defs/calm.mjs';
+import { cat } from '../pet/defs/cat.mjs';
+import { dog } from '../pet/defs/dog.mjs';
+
+// Штатные определения (PL06): кот, собака и модель calm — как у legacy-оболочки. Внутреннее ядро проверок получает их,
+// если проверка не задала свои (pets, behaviors).
+export const STOCK = Object.freeze({ pets: [cat, dog], behaviors: [calm] });
+const isObj = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+export const createPetCore = (options) => createInstance(isObj(options) && !('pets' in options) && !('behaviors' in options) ? { ...STOCK, ...options } : options);
 
 export const DAY = '2026-10-13';
-// Ключи ядра в порядке сверки (PL04.3: все восемь — ещё place и room).
-export const CORE_KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene', 'place', 'room'];
+// Ключи ядра в порядке сверки (PL04.3: восемь — ещё place и room; PL06: девять — ещё ext).
+export const CORE_KEYS = ['cat', 'companion', 'look', 'treat', 'presence', 'scene', 'place', 'room', 'ext'];
 // Объявление legacy-отображения (PL04.2, docs/ARCHITECTURE.md § 11.1): питомцы, виды и сценки 0.1.4.
 export const VIEWS = ['corner', 'play', 'room'];
 export const LEGACY_DISPLAY = { pets: ['cat', 'dog'], views: VIEWS, scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } };
@@ -299,12 +308,14 @@ export function make(storage, { counts = host(), time = clock(), log = journal()
 // Ядро PL04.1 с ручным временем: часы calendar, ручной планировщик, заданный random; журнал обновлений (seen) и эффектов.
 // storage — уже загруженный координатор (по умолчанию — свой веб в отдельном пространстве с initial); scheduler(plan) —
 // порт планировщика поверх ручного (например, отказывающий), по умолчанию — сам ручной. PL04.2: scenes — порт
-// резервирования сценки (по умолчанию нет), display — объявление отображения до start (по умолчанию не объявлено).
-export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal(), scheduler = (plan) => plan.port, scenes = null, display = null } = {}) {
+// резервирования сценки (по умолчанию нет), display — объявление отображения до start (по умолчанию не объявлено). PL06:
+// defs — свои определения { pets, behaviors }.
+export function life(initial = {}, { storage = null, counts = host(0, 0), time = calendar(), random = series(), log = journal(), scheduler = (plan) => plan.port, scenes = null, display = null, defs = null } = {}) {
   const site = storage ? null : web(initial);
   if (site) assert.equal(site.storage.load(), 'ready');
   const plan = planner(time);
-  const core = createPetCore({ storage: storage ?? site.storage, scenes, progress: counts.progress, clock: time.port, random: random.port, scheduler: scheduler(plan), log: log.port });
+  // PL06: defs — свои { pets, behaviors } (по умолчанию штатные кот, собака и calm).
+  const core = createPetCore({ storage: storage ?? site.storage, scenes, progress: counts.progress, clock: time.port, random: random.port, scheduler: scheduler(plan), log: log.port, ...(defs ?? {}) });
   const seen = [];
   core.subscribe((update) => seen.push(update), { initial: false });
   // Отображение подписывается, затем объявляет возможности (как legacy до start).

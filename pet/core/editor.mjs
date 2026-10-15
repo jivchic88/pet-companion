@@ -22,15 +22,16 @@ export const ROOM_TEXT = Object.freeze({
 const WORDS = { left: ['левее', 'влево'], right: ['правее', 'вправо'], up: ['выше', 'выше'], down: ['ниже', 'ниже'] };
 export const ROOM_DIRS = Object.keys(DIRS);
 
-const layoutOf = (draft, pos = draft.pos) => ({ kind: draft.kind, stage: draft.stage, pos });
-const title = (draft, id) => itemTitle(id, draft.stage);
+const layoutOf = (draft, pos = draft.pos) => ({ model: draft.model, stage: draft.stage, pos });
+const title = (draft, id) => itemTitle(draft.model, id, draft.stage);
 
-// Черновик: saved — расстановка из памяти ключа (с несохранёнными правками), baseline — подтверждённая и уже поставленная
-// в запись (для «Не сохранено» и для того, что писать); unsaved — предметы с несохранёнными полями: их пишет следующее
-// «Сохранить» (и те, что станут несохранёнными позже, — prepare). Выбран — место отдыха. Предмет черновика — только его
-// собственный ключ (Object.hasOwn), не унаследованное имя.
-export function openDraft({ kind, stage, saved, baseline, unsaved = [] }) {
-  return { kind, stage, pos: { ...saved }, baseline: { ...baseline }, pick: 'rest', touched: new Set(unsaved.filter((id) => Object.hasOwn(saved, id))), other: false, failed: false, drag: null };
+// Черновик: model — модель комнаты показанного питомца (room.mjs, его определение), saved — расстановка из памяти ключа (с
+// несохранёнными правками), baseline — подтверждённая и уже поставленная в запись (для «Не сохранено» и для того, что
+// писать); unsaved — предметы с несохранёнными полями: их пишет следующее «Сохранить» (и те, что станут несохранёнными
+// позже, — prepare). Выбран — место отдыха. Предмет черновика — только его собственный ключ (Object.hasOwn), не
+// унаследованное имя.
+export function openDraft({ model, stage, saved, baseline, unsaved = [] }) {
+  return { model, pet: model.pet, stage, pos: { ...saved }, baseline: { ...baseline }, pick: 'rest', touched: new Set(unsaved.filter((id) => Object.hasOwn(saved, id))), other: false, failed: false, drag: null };
 }
 
 // Выбор для шага кнопками (без объявления: кнопка отмечена). Во время переноса — ничего (кнопки ждут его конца).
@@ -105,7 +106,7 @@ export function step(draft, dir) {
 // Обычная расстановка — в черновик (постоянной — после «Сохранить»); перенос сначала отменяется.
 export function reset(draft) {
   draft.drag = null;
-  draft.pos = arrange(draft.kind, draft.stage, {}).pos;
+  draft.pos = arrange(draft.model, draft.stage, {}).pos;
   for (const id of Object.keys(draft.pos)) draft.touched.add(id);
   return [ROOM_TEXT.reset];
 }
@@ -116,7 +117,7 @@ export function restage(draft, stage, saved, baseline) {
   draft.drag = null;
   draft.stage = stage;
   draft.baseline = { ...baseline };
-  draft.pos = arrange(draft.kind, stage, { ...saved, ...draft.pos }).pos;
+  draft.pos = arrange(draft.model, stage, { ...saved, ...draft.pos }).pos;
   if (!Object.hasOwn(draft.pos, draft.pick)) draft.pick = 'rest';
 }
 
@@ -138,7 +139,7 @@ export function rebase(draft, baseline, foreign) {
 // отказа). Нетронутые здесь сохранённые предметы (другой вкладки) не пишутся. Возвращает moved.
 export function prepare(draft, baseline, unsaved = []) {
   draft.drag = null;
-  draft.pos = arrange(draft.kind, draft.stage, draft.pos).pos;
+  draft.pos = arrange(draft.model, draft.stage, draft.pos).pos;
   draft.baseline = { ...baseline };
   const moved = movedItems(draft.pos, baseline, [...draft.touched]);
   for (const id of unsaved) if (Object.hasOwn(draft.pos, id)) moved[id] = draft.pos[id];

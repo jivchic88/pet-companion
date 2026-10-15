@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import * as R from '../pet/pet-rules.mjs';
+import * as R from './legacy-rules.mjs';
 import { bowlArt, bowlMiniSvg } from '../pet/cat-art.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));

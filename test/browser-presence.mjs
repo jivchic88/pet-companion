@@ -10,10 +10,9 @@
 // подключение; одинаковый сценарий в Chrome и в Node (ядро, веб-координатор, IndexedDB в памяти) — один логический итог.
 // Компьютер 1280×900, телефон 390×844 и боком 844×390: горизонтальной прокрутки, ошибок страницы и внешних запросов нет,
 // чужой ключ сайта не тронут. Запуск — в составе npm run test:browser.
-import { createPetCore } from '../pet/core/index.mjs';
 import { createWebScenes } from '../pet/web/scenes.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
-import { area, calendar, fakeIdb, flush, host, journal, LEGACY_DISPLAY, planner, series, tabs } from './core-kit.mjs';
+import { area, calendar, createPetCore, fakeIdb, flush, host, journal, LEGACY_DISPLAY, planner, series, tabs } from './core-kit.mjs';
 
 const DAY = '2026-10-11';
 const FOREIGN = '{"keep":1}';

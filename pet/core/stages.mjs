@@ -1,38 +1,23 @@
-// Ядро: ступени по знакам, вещи и аксессуары ступеней, итог подтверждённого занятия, лакомство дня. Знаки считает сайт;
-// питомец не знает качества занятия, только подтверждённое событие.
-
-import { DEFAULT_NAME, PROFILES } from './pets.mjs';
+// Ядро: ступени по знакам, итог подтверждённого занятия, лакомство дня. Знаки считает сайт; питомец не знает качества
+// занятия, только подтверждённое событие. Пороги и названия ступеней — общие правила ядра; вещи, подарки и аксессуары
+// ступеней — у определения питомца (PL06: items, accessories), функции ниже получают его определение.
 
 export const STAGES = [
-  { at: 0, title: 'Познакомились', gift: 'Марс и простая подушка', items: ['cushion'] },
-  { at: 3, title: 'Освоился', gift: 'Клетчатый платок', items: [], accessory: 'plaid' },
-  { at: 9, title: 'Наш ритуал', gift: 'Кружка и блокнот', items: ['mug', 'notebook'] },
-  { at: 18, title: 'Уютный штаб', gift: 'Лежанка и лампа', items: ['bed', 'lamp'] },
-  { at: 30, title: 'Сработались', gift: 'Растение, доска с заметками и бейдж', items: ['plant', 'board'], accessory: 'badge' },
+  { at: 0, title: 'Познакомились' },
+  { at: 3, title: 'Освоился' },
+  { at: 9, title: 'Наш ритуал' },
+  { at: 18, title: 'Уютный штаб' },
+  { at: 30, title: 'Сработались' },
 ];
 
-// Вещи сцены по ступеням (номер ступени → вещи). У собаки со ступени «Наш ритуал» ещё мячик;
-// пороги и вещи кота те же.
-export function stageItems(index, kind = 'cat') {
-  const items = STAGES[index]?.items ?? [];
-  return kind === 'dog' && index === 2 ? [...items, 'ball'] : items;
-}
+// Вещи ступени index у питомца (определение pet) — в порядке items.list.
+export const stageItems = (pet, index) => pet.items.list.filter((item) => item.stage === index).map((item) => item.id);
 
-// Подарок ступени — по животному: на первой ступени имя напарника (у собаки не «Марс»),
-// у собаки на «Нашем ритуале» — ещё мячик. Названия наград кота не меняются.
-export function stageGift(index, kind = 'cat', name = '') {
-  const stage = STAGES[index];
-  if (!stage) return '';
-  if (index === 0) return `${name || PROFILES[kind]?.defaultName || DEFAULT_NAME} и простая подушка`;
-  if (kind === 'dog' && index === 2) return 'Кружка, блокнот и мячик';
-  return stage.gift;
+// Подарок ступени — по питомцу: шаблон items.gifts[index], {name} — его имя (пустое — имя по умолчанию).
+export function stageGift(pet, index, name = '') {
+  const gift = pet.items.gifts[index];
+  return gift ? gift.replaceAll('{name}', name || pet.names.default) : '';
 }
-
-export const ACCESSORIES = [
-  { id: 'scarf', title: 'Терракотовый платок', stage: 0 },
-  { id: 'plaid', title: 'Клетчатый платок', stage: 1 },
-  { id: 'badge', title: 'Платок с бейджем', stage: 4 },
-];
 
 export function stageIndex(marks) {
   let index = 0;
@@ -68,21 +53,39 @@ export function stageToCelebrate(outcome, seenStage = -1) {
   return outcome.stageAfter > outcome.stageBefore && outcome.stageAfter > seenStage ? outcome.stageAfter : null;
 }
 
-// Что открылось между ступенями (для объявления и подсветки в сцене); kind — чьи вещи.
-export function unlockedBetween(from, to, kind = 'cat') {
+// Что открылось у питомца между ступенями (для объявления и подсветки в сцене): вещи и аксессуары его определения.
+export function unlockedBetween(pet, from, to) {
   const items = [];
   const accessories = [];
   for (let i = Math.max(0, from + 1); i <= to && i < STAGES.length; i += 1) {
-    items.push(...stageItems(i, kind));
-    if (STAGES[i].accessory) accessories.push(STAGES[i].accessory);
+    items.push(...stageItems(pet, i));
+    accessories.push(...pet.accessories.filter((item) => item.stage === i).map((item) => item.id));
   }
   return { items, accessories };
 }
 
-// Надетый аксессуар: выбранный, если его ступень открыта; иначе — обычный платок.
-export function wornAccessory(settings, stage) {
-  const item = ACCESSORIES.find((accessory) => accessory.id === settings?.accessory);
-  return item && item.stage <= stage ? item.id : 'scarf';
+// Аксессуар питомца: выбранный, если он есть у питомца; иначе — первый (по умолчанию).
+export const accessoryOf = (pet, value) => (pet.accessories.some((item) => item.id === value) ? value : pet.accessories[0].id);
+
+// Надетый аксессуар: выбранный, если его ступень открыта; иначе — первый (по умолчанию, ступень 0).
+export function wornAccessory(pet, value, stage) {
+  const item = pet.accessories.find((accessory) => accessory.id === value);
+  return item && item.stage <= stage ? item.id : pet.accessories[0].id;
+}
+
+// Вещь рядом с питомцем при празднике: среди открытых — с наименьшим items.list[].mini (при равных — первая открытая);
+// без mini — не показывается.
+export function miniItem(pet, items) {
+  let best = '';
+  let rank = Infinity;
+  for (const id of items) {
+    const mini = pet.items.list.find((item) => item.id === id)?.mini;
+    if (mini !== undefined && mini < rank) {
+      best = id;
+      rank = mini;
+    }
+  }
+  return best;
 }
 
 // Состояние ритуала на день today: 'fed' — сегодня уже угостили; 'ready' — сегодня есть занятие (count — знаков за

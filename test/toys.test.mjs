@@ -7,10 +7,10 @@
 // мячик — не катание; реакция на предмет не перебивает поглаживание и сменяет прежнюю без очереди; перенос миски не кормит.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as Core from '../pet/core/toys.mjs';
-import * as G from '../pet/pet-play.mjs';
+import * as Core from './legacy-toys.mjs';
+import * as G from './legacy-play.mjs';
 import * as T from '../pet/pet-toys.mjs';
-import * as R from '../pet/pet-rules.mjs';
+import * as R from './legacy-rules.mjs';
 import { DAY, host, LEGACY_DISPLAY, life } from './core-kit.mjs';
 
 const rect = (left, top, width, height) => ({ left, top, width, height, right: left + width, bottom: top + height });

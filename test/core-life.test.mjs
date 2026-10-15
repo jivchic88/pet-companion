@@ -14,8 +14,8 @@
 // синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
-import { DOG_PHRASES, PHRASES, phraseList } from '../pet/core/phrases.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
+import { DOG_PHRASES, PHRASES, phraseList } from './legacy-rules.mjs';
 import { DAY, flush, host, LEGACY_DISPLAY, life, reserver } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY }; // приветствие сегодня уже было — запуск без него
@@ -81,7 +81,7 @@ test('радость и поддержка → новая вещь: пример
   assert.deepEqual([playing(L), L.state().pose.reaction.tryOn], ['joy', ''], 'радость — без примерки');
   L.plan.advance(REACTIONS.joy.ms);
   assert.deepEqual([playing(L), L.state().pose.reaction.tryOn, L.state().pose.reaction.mini], ['unlock', 'plaid', '']);
-  assert.ok(PHRASES.plaid.includes(L.state().phrase.text), 'реплика примерки');
+  assert.ok(PHRASES.tryOn.includes(L.state().phrase.text), 'реплика примерки (группа tryOn модели, PL06; прежде plaid)');
   L.plan.advance(REACTIONS.unlock.ms);
   assert.equal(L.state().pose.reaction, null, 'примерка снята вместе с реакцией');
   const dogCounts = host(8, 1);

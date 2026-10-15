@@ -1,7 +1,7 @@
 // Типы публичного интерфейса pet/pet.mjs (README, «Интерфейс»). Только описания: поведение — в pet.mjs. Команды, снимок и
 // подписка ядра — pet/core.d.mts (вход pet-companion/core).
 
-import type { PetCommands, PetCore, PetSnapshot } from './core.mjs';
+import type { BehaviorDefinition, PetCommands, PetCore, PetDefinition, PetSnapshot } from './core.mjs';
 
 /** Версия модуля — та же, что у пакета (package.json) и у входа `pet-companion/core`. */
 export declare const VERSION: string;
@@ -87,6 +87,31 @@ export interface PetTexts {
   call?: string;
 }
 
+/**
+ * Набор отображения legacy-веба для питомца (PL06): код рисования, отдельно от определения и модели — рисует по снимку и
+ * решений не принимает. Обязан покрыть позы определения (кроме `yawn`, `settle` и поз сценок), облики, аксессуары и свои
+ * вещи (игрушки комнаты и вещи ступеней вне общего уголка); нарисованные сценки перечисляет сам. Стили набора страница
+ * подключает сама (своим файлом CSS). У кота и собаки — штатные наборы.
+ */
+export interface PetWebKit {
+  /** ID определения питомца из `pets`. */
+  readonly pet: string;
+  readonly poses: readonly string[];
+  readonly scenes: readonly string[];
+  readonly coats: readonly string[];
+  readonly accessories: readonly string[];
+  readonly items: readonly string[];
+  /**
+   * Рисунок: строка `<svg class="cat-art" data-kind data-view data-coat data-pose="calm" data-acc …>`; `view` — целиком или
+   * портрет, `box` — место во вложенной сцене комнаты, `accessory` — надетый (портреты выбора).
+   */
+  art(options: { id: string; view: 'full' | 'portrait'; coat: string; className?: string; box?: { x: number; y: number; width: number; height: number } | null; accessory?: string }): string;
+  /** Своя вещь или игрушка комнаты: строка `<g data-room="id">…</g>` в единицах сцены 400×250. */
+  item?(id: string, options: { fresh: boolean }): string;
+  /** Маленькая своя вещь рядом с питомцем (празднование ступени); `''` — общая. */
+  mini?(id: string): string;
+}
+
 export interface PetOptions {
   /** Пространство имён хранения (непустая строка): ключи `<storage>:cat:v1` и т. д. По умолчанию `'pet'`. */
   storage?: string;
@@ -103,6 +128,12 @@ export interface PetOptions {
   home?: ((panel?: HTMLDialogElement) => HTMLElement | null | undefined) | null;
   classes?: PetClasses;
   texts?: PetTexts;
+  /** Питомцы (PL06): определения формата 1; по умолчанию — штатные кот и собака (`pet-companion/pets`). */
+  pets?: readonly PetDefinition[];
+  /** Модели поведения (PL06); по умолчанию — штатная `calm` (`pet-companion/behaviors`). */
+  behaviors?: readonly BehaviorDefinition[];
+  /** Наборы отображения сторонних питомцев (у кота и собаки — штатные). Без набора питомец не рисуется (показ — запасной). */
+  kits?: readonly PetWebKit[];
 }
 
 /** Состояние страницы: экран занятия и тишина. */

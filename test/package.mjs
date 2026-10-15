@@ -13,7 +13,11 @@
 // отказ подключения без остатков; телефон — «Скрыть» → перезагрузка → «Показать», «Приходит по зову»); (2) пакет из
 // node_modules без сборщика — examples/importmap.html (карта импортов, localDay, занятие, праздник ступени);
 // (3) examples/commands.html — кнопки сайта вызывают pet.* и pet.core: имя, занятие, кормление, собака, облик, уголок,
-// расстановка, «Скрыть» / «Показать», перезагрузка, отключение pet.core.destroy() и новое подключение.
+// расстановка, «Скрыть» / «Показать», перезагрузка, отключение pet.core.destroy() и новое подключение. PL06: входы
+// pet-companion/pets и /behaviors (штатные определения), definePet и defineBehavior во входе ядра; определения (defs/**) и
+// входы штатных импортируют только defs/** и core/**; внешний пример расширения examples/extension/ на установленном
+// архиве — в Node (node.mjs: кролик и живая модель, ext:v1, запасной показ, ошибочные ссылки) и в браузере (index.html:
+// кролик своим набором, «Поиграть» без лапы, «Без кролика» / «С кроликом»); типы определений — позитивные и негативные.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -32,9 +36,13 @@ const VERSION = pkg.version;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.json': 'application/json' };
 const START = new Date('2026-10-12T10:00:00');
 // Файлы pet/ — явный список, с внутренними папками ядра и веб-адаптера (входом пакета они не открыты).
-const CORE = ['core/day.mjs', 'core/director.mjs', 'core/editor.mjs', 'core/errors.mjs', 'core/facade.mjs', 'core/figure.mjs', 'core/formats/legacy.mjs', 'core/index.mjs', 'core/pets.mjs', 'core/phrases.mjs', 'core/play.mjs', 'core/ports.mjs', 'core/presence.mjs', 'core/room.mjs', 'core/round.mjs', 'core/scenes.mjs', 'core/session.mjs', 'core/stages.mjs', 'core/storage.mjs', 'core/toys.mjs', 'core/version.mjs'];
-// Вход ядра pet-companion/core (PL05) — pet/core.mjs и его типы pet/core.d.mts.
-const RUNTIME = ['cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', 'dog-art.mjs', 'dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'web/scenes.mjs', 'web/storage.mjs'];
+const CORE = ['core/catalog.mjs', 'core/day.mjs', 'core/define.mjs', 'core/director.mjs', 'core/editor.mjs', 'core/errors.mjs', 'core/facade.mjs', 'core/formats/legacy.mjs', 'core/index.mjs', 'core/pets.mjs', 'core/phrases.mjs', 'core/play.mjs', 'core/ports.mjs', 'core/presence.mjs', 'core/room.mjs', 'core/round.mjs', 'core/scenes.mjs', 'core/session.mjs', 'core/stages.mjs', 'core/storage.mjs', 'core/toys.mjs', 'core/version.mjs'];
+// Вход ядра pet-companion/core (PL05) — pet/core.mjs и его типы pet/core.d.mts. PL06: штатные определения (defs/), входы
+// pet-companion/pets и /behaviors с типами, наборы отображения веба (web/kits.mjs).
+const DEFS = ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs'];
+const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web/kits.mjs', 'web/scenes.mjs', 'web/storage.mjs'];
+// Пример расширения (вне архива): файлы для Node и для браузера.
+const EXTENSION = ['bunny.mjs', 'bunny-web.mjs', 'bunny.css', 'index.html', 'lively.mjs', 'node.mjs'];
 const EXPECTED = ['CHANGELOG.md', 'LICENSE', 'README.md', 'example.html', 'package.json', ...RUNTIME.map((file) => `pet/${file}`)].sort();
 // Ничего из этого не должно попасть в архив.
 const FORBIDDEN = /(^|\/)(test|tests|fixtures|scripts|examples|node_modules|\.github|\.git)(\/|$)|\.env|secret|token|password|progress|\.tgz$|lock/i;
@@ -335,6 +343,54 @@ async function commands(browser, project) {
   }
 }
 
+// Пример расширения (PL06) в браузере: examples/extension/index.html в папке extension/ проекта — карта импортов на
+// node_modules установленного архива (входы pet-companion, /core, /pets, /behaviors), кролик своим набором и стилями.
+async function extension(browser, project) {
+  const label = 'пример расширения';
+  const prefix = '/apps/ext/';
+  const server = await serve(project, prefix);
+  const { context, page, external } = await open(browser, server.origin, { viewport: { width: 1280, height: 900 } });
+  // «Без кролика»: модель «живая» ссылается на реплики кролика — слабая ссылка, журнал (§ 7.3), не ошибка.
+  const WEAK = 'Питомец: behaviors[1].phrases.byPet["example.bunny"]: питомца «example.bunny» нет в этом экземпляре — замены реплик не используются';
+  try {
+    await page.goto(`${server.origin}${prefix}extension/index.html`);
+    await page.waitForFunction(() => Boolean(window.demoPet?.getState()));
+    const base = `${prefix}node_modules/${NAME}/pet/`;
+    check(`${label}: карта импортов — входы и определения из node_modules/${NAME}/pet/ (pets, behaviors, defs, наборы), свои файлы примера`, ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'defs/cat.mjs', 'defs/calm.mjs', 'core/define.mjs', 'web/kits.mjs'].every((file) => server.served.includes(`${base}${file}`)) && ['bunny.mjs', 'bunny-web.mjs', 'bunny.css', 'lively.mjs'].every((file) => server.served.includes(`${prefix}extension/${file}`)), server.served.join(', '));
+    await page.locator('#bunny').click();
+    await page.clock.runFor(100);
+    const chosen = await page.evaluate(() => ({ shown: window.demoPet.getState().pet.shown, art: Boolean(document.querySelector('#head .bunny-art')), ext: JSON.parse(localStorage.getItem('extension-demo:ext:v1')), companion: localStorage.getItem('extension-demo:companion:v1') }));
+    check(`${label}: «Кролик» — рисунок набора в шапке, выбор в ext:v1, companion не записан`, chosen.shown === 'example.bunny' && chosen.art && chosen.ext?.pet?.id === 'example.bunny' && chosen.companion === null, JSON.stringify(chosen));
+    await page.clock.runFor(5000);
+    await page.locator('#play').click();
+    await page.clock.runFor(500);
+    const play = await page.evaluate(() => ({ view: document.getElementById('cat-sheet')?.dataset.view, art: Boolean(document.querySelector('.cat-play .bunny-art')), paw: Boolean(document.querySelector('[data-cat-play-paw], [data-play-hit="paw"]')) }));
+    await page.locator('[data-cat-play-pet]').click();
+    const hint = await page.evaluate(() => document.querySelector('[data-cat-play-hint]')?.textContent);
+    check(`${label}: «Поиграть» — кролик, ни кнопки, ни области лапы; «Погладить» — «Пух шевелит носом.»`, play.view === 'play' && play.art && !play.paw && hint === 'Пух шевелит носом.', JSON.stringify({ play, hint }));
+    for (let i = 0; i < 3 && (await sheetOpen(page)); i += 1) {
+      await page.keyboard.press('Escape');
+      await page.clock.runFor(100);
+    }
+    await page.locator('#without').click();
+    await page.clock.runFor(100);
+    const without = await page.evaluate(() => ({ pet: window.demoPet.getState().pet, art: document.querySelector('#head .cat-art')?.classList.contains('bunny-art') }));
+    await page.locator('#with').click();
+    await page.clock.runFor(100);
+    const back = await page.evaluate(() => ({ shown: window.demoPet.getState().pet.shown, art: Boolean(document.querySelector('#head .bunny-art')), sheets: document.querySelectorAll('#cat-sheet').length }));
+    check(`${label}: «Без кролика» — запасной показ (кот), выбор недоступен; «С кроликом» — снова кролик, одно подключение`, without.pet.id === 'example.bunny' && without.pet.shown === 'cat' && !without.pet.available && without.art === false && back.shown === 'example.bunny' && back.art && back.sheets <= 1, JSON.stringify({ without, back }));
+    const keys = await page.evaluate(() => Object.keys(localStorage).sort());
+    const errors = page.qaErrors.filter((text) => text !== WEAK);
+    check(`${label}: хранение только в пространстве extension-demo; внешних запросов и запросов вне проекта нет, ошибок нет (слабая ссылка — одно предупреждение журнала)`, keys.length > 0 && keys.every((key) => key.startsWith('extension-demo:')) && external.length === 0 && server.outside.length === 0 && errors.length === 0 && page.qaErrors.filter((text) => text === WEAK).length === 1, JSON.stringify({ keys, external, outside: server.outside, errors: page.qaErrors }));
+    await layout(page, label);
+  } catch (error) {
+    check(`${label}: сценарий выполнен`, false, error.stack);
+  } finally {
+    await context.close();
+    await server.close();
+  }
+}
+
 const tmp = await mkdtemp(path.join(tmpdir(), `${NAME}-package-`));
 let browser;
 try {
@@ -356,16 +412,18 @@ try {
   check('архив: распакован системным tar — папка package/ с теми же файлами', JSON.stringify(inside) === JSON.stringify(EXPECTED) && (await readdir(unpacked)).join() === 'package', inside.join(', '));
   const same = await Promise.all(RUNTIME.map(async (file) => sha256(await readFile(path.join(unpacked, 'package', 'pet', file))) === sha256(await readFile(path.join(root, 'pet', file)))));
   check('архив: pet/ — байт в байт файлы репозитория', same.every(Boolean));
-  // Граф импортов из архива: каждый относительный импорт — файл архива внутри pet/; ядро (core/**) — только core/**.
+  // Граф импортов из архива: каждый относительный импорт — файл архива внутри pet/; ядро (core/**) — только core/**;
+  // штатные определения (defs/**) и их входы (pets.mjs, behaviors.mjs) — только defs/** и core/** (без браузера).
   const graph = [];
+  const defsSide = (file) => file.startsWith('defs/') || file === 'pets.mjs' || file === 'behaviors.mjs';
   for (const file of RUNTIME.filter((name) => name.endsWith('.mjs'))) {
     const source = await readFile(path.join(unpacked, 'package', 'pet', file), 'utf8');
     for (const [, from, bare] of source.matchAll(/^(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/gm)) {
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), from ?? bare));
-      if (!RUNTIME.includes(target) || ((file.startsWith('core/') || file === 'core.mjs') && !target.startsWith('core/'))) graph.push(`${file} → ${from ?? bare}`);
+      if (!RUNTIME.includes(target) || ((file.startsWith('core/') || file === 'core.mjs') && !target.startsWith('core/')) || (defsSide(file) && !target.startsWith('core/') && !target.startsWith('defs/'))) graph.push(`${file} → ${from ?? bare}`);
     }
   }
-  check('архив: импорты — файлы архива внутри pet/; вход ядра core.mjs и ядро core/** импортируют только core/**', graph.length === 0, graph.join(', '));
+  check('архив: импорты — файлы архива внутри pet/; вход ядра core.mjs и ядро core/** импортируют только core/**; определения defs/** и входы pets.mjs, behaviors.mjs — только defs/** и core/**', graph.length === 0, graph.join(', '));
 
   // Чистый проект: установка архива без сети.
   const project = path.join(tmp, 'project');
@@ -380,16 +438,19 @@ try {
   const probe = `
     const pet = await import('${NAME}');
     const core = await import('${NAME}/core');
+    const pets = await import('${NAME}/pets');
+    const behaviors = await import('${NAME}/behaviors');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'core/index.mjs', 'pets', 'behaviors', 'web', 'react', 'native', 'native-sqlite', 'manifest.json'].map((name) => resolve('${NAME}/' + name));
-    console.log(JSON.stringify({ keys: Object.keys(pet).sort(), coreKeys: Object.keys(core).sort(), coreAt: resolve('${NAME}/core').replace(/^.*node_modules\\//, ''), sameDay: core.localDay === pet.localDay, sameVersion: core.VERSION === pet.VERSION, version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'web', 'react', 'native', 'native-sqlite', 'manifest.json'].map((name) => resolve('${NAME}/' + name));
+    console.log(JSON.stringify({ keys: Object.keys(pet).sort(), coreKeys: Object.keys(core).sort(), petsKeys: Object.keys(pets).sort(), behaviorsKeys: Object.keys(behaviors).sort(), petsAt: resolve('${NAME}/pets').replace(/^.*node_modules\\//, ''), behaviorsAt: resolve('${NAME}/behaviors').replace(/^.*node_modules\\//, ''), frozen: Object.isFrozen(pets.cat) && Object.isFrozen(pets.cat.room) && Object.isFrozen(behaviors.calm.reactions.joy), ids: [pets.cat.id, pets.dog.id, behaviors.calm.id], coreAt: resolve('${NAME}/core').replace(/^.*node_modules\\//, ''), sameDay: core.localDay === pet.localDay, sameVersion: core.VERSION === pet.VERSION, version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: project });
   const node = JSON.parse(stdout);
   check('Node: вход — mountPet, localDay, VERSION; версия пакета', JSON.stringify(node.keys) === '["VERSION","localDay","mountPet"]' && node.version === VERSION && node.day === '2026-10-12', stdout);
-  check('Node: вход ядра pet-companion/core (PL05) — ровно createPetCore, createStorage, PetError, localDay, VERSION из pet/core.mjs; та же граница дня и версия', JSON.stringify(node.coreKeys) === '["PetError","VERSION","createPetCore","createStorage","localDay"]' && node.coreAt === `${NAME}/pet/core.mjs` && node.sameDay && node.sameVersion, stdout);
+  check('Node: вход ядра pet-companion/core — ровно createPetCore, createStorage, defineBehavior, definePet (PL06), PetError, localDay, VERSION из pet/core.mjs; та же граница дня и версия', JSON.stringify(node.coreKeys) === '["PetError","VERSION","createPetCore","createStorage","defineBehavior","definePet","localDay"]' && node.coreAt === `${NAME}/pet/core.mjs` && node.sameDay && node.sameVersion, stdout);
+  check('Node: входы pet-companion/pets (cat, dog, corner, cornerItems) и pet-companion/behaviors (calm) — pet/pets.mjs и pet/behaviors.mjs; определения глубоко заморожены', JSON.stringify(node.petsKeys) === '["cat","corner","cornerItems","dog"]' && JSON.stringify(node.behaviorsKeys) === '["calm"]' && node.petsAt === `${NAME}/pet/pets.mjs` && node.behaviorsAt === `${NAME}/pet/behaviors.mjs` && node.frozen && node.ids.join() === 'cat,dog,calm', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
-  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, данные рисунка), веб-адаптеры и будущие входы (pets, behaviors, web, react, native, native-sqlite, manifest.json) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 27 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), веб-адаптеры и наборы, будущие входы (defs, kits, web, react, native, native-sqlite, manifest.json) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 35 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
 
   // Импорт без браузера (безопасность серверного рендера без React): оба входа загружаются, не трогая браузерные глобалы
   // (ловушки бросают); mountPet вне браузера — отказ без исключения (console.error), pet.core — null.
@@ -398,32 +459,43 @@ try {
     for (const name of names) Object.defineProperty(globalThis, name, { configurable: true, get() { throw new Error('обращение к ' + name + ' при импорте'); } });
     const core = await import('${NAME}/core');
     const legacy = await import('${NAME}');
+    const pets = await import('${NAME}/pets');
+    const behaviors = await import('${NAME}/behaviors');
     for (const name of names) delete globalThis[name];
     const errors = [];
     const original = console.error;
     console.error = (...args) => errors.push(args.map(String).join(' '));
     let pet;
     try { pet = legacy.mountPet({ places: { logo: () => {}, top: () => {} } }); } finally { console.error = original; }
-    console.log(JSON.stringify({ core: Object.keys(core).length, legacy: Object.keys(legacy).length, mounted: pet.mounted, petCore: pet.core, state: pet.getState(), command: pet.setName('x').error?.code, errors }));`;
+    console.log(JSON.stringify({ core: Object.keys(core).length, legacy: Object.keys(legacy).length, defs: Object.keys(pets).length + Object.keys(behaviors).length, mounted: pet.mounted, petCore: pet.core, state: pet.getState(), command: pet.setName('x').error?.code, errors }));`;
   const server = await run(process.execPath, ['--input-type=module', '-e', ssr], { cwd: project }).then(({ stdout }) => JSON.parse(stdout), (error) => ({ failed: error.stderr || error.message }));
-  check('Node без браузера: импорт pet-companion и pet-companion/core не трогает браузерные глобалы; mountPet — отказ без исключения, pet.core и снимок null, команды — destroyed', server.core === 5 && server.legacy === 3 && server.mounted === false && server.petCore === null && server.state === null && server.command === 'destroyed' && server.errors.length === 1 && server.errors[0].includes('mountPet подключается только в браузере'), JSON.stringify(server));
+  check('Node без браузера: импорт pet-companion, pet-companion/core, /pets и /behaviors не трогает браузерные глобалы; mountPet — отказ без исключения, pet.core и снимок null, команды — destroyed', server.core === 7 && server.legacy === 3 && server.defs === 5 && server.mounted === false && server.petCore === null && server.state === null && server.command === 'destroyed' && server.errors.length === 1 && server.errors[0].includes('mountPet подключается только в браузере'), JSON.stringify(server));
 
   // Внешний пример — только публичный вход pet-companion/core установленного архива.
   await cp(path.join(root, 'examples', 'core-node.mjs'), path.join(project, 'core-node.mjs'));
   const example = await run(process.execPath, ['core-node.mjs'], { cwd: project }).then(({ stdout }) => JSON.parse(stdout.trim().split('\n').at(-1)), (error) => ({ failed: error.stderr || error.message }));
   check('Node: внешний пример examples/core-node.mjs на установленном архиве — хранилище, порты, имя, событие, кормление, питомец, облик, отказ записи, виды, жест, комната, присутствие, снимок, destroy, новое ядро, асинхронное хранилище и done после destroy', example.ok === true && example.version === VERSION && example.stored?.every((key) => key.startsWith('demo:')), JSON.stringify(example));
+  // Пример расширения (PL06) — только публичные входы установленного архива: кролик и живая модель.
+  await mkdir(path.join(project, 'extension'));
+  for (const file of EXTENSION) await cp(path.join(root, 'examples', 'extension', file), path.join(project, 'extension', file));
+  const extensionNode = await run(process.execPath, [path.join('extension', 'node.mjs')], { cwd: project }).then(({ stdout }) => JSON.parse(stdout.trim().split('\n').at(-1)), (error) => ({ failed: error.stderr || error.message }));
+  check('Node: внешний пример расширения examples/extension/node.mjs на установленном архиве — кролик и живая модель через definePet/defineBehavior, ext:v1, лапы нет, лимит модели, сценка hop, запасной показ без определения, ошибочные ссылки отклонены', extensionNode.ok === true && extensionNode.pets?.join() === 'cat,dog,example.bunny' && extensionNode.ext?.pet?.id === 'example.bunny' && extensionNode.ext?.behavior === 'example.lively' && extensionNode.stored?.every((key) => key.startsWith('demo-ext:')) && extensionNode.warnings === 1, JSON.stringify(extensionNode));
 
   // TypeScript: полное подключение, как в README, — вход и три стиля. У проекта нет общих деклараций CSS (declare module
   // '*.css', vite/client): стили находит сам пакет, иначе noUncheckedSideEffectImports даёт TS2307.
   await writeFile(
     path.join(project, 'site.mts'),
     `import { localDay, mountPet, VERSION, type Pet, type PetOptions } from '${NAME}';
+import { calm } from '${NAME}/behaviors';
+import { cat, dog } from '${NAME}/pets';
 import '${NAME}/pet-base.css';
 import '${NAME}/pet.css';
 import '${NAME}/dog.css';
 const head = document.createElement('header');
 const options: PetOptions = { storage: 'site', places: { logo: (el) => head.append(el), top: (el) => head.prepend(el) }, progress: () => ({ marks: 1, today: 0, limit: 3 }), step: () => null, zone: (device, id) => (device === 'phone' && id === 'top' ? { left: 0, top: 0, width: 10, height: 10 } : null) };
 const pet: Pet = mountPet(options);
+const own: Pet = mountPet({ ...options, pets: [cat, dog], behaviors: [calm], kits: [] });
+own.setBehavior('calm');
 pet.update();
 pet.update({ focus: true, timer: false });
 pet.notify('saved', { key: 'a', counted: true, first: localDay() === '2026-10-12' });
@@ -452,12 +524,15 @@ export { version, flags };
     path.join(project, 'core.mts'),
     `import { createPetCore, createStorage, localDay, PetError, VERSION, type PetAsyncStorage, type PetCore, type PetErrorKind, type PetResult, type PetSaveReport, type PetSnapshot, type PetSyncStorage, type PetUpdate } from '${NAME}/core';
 import { mountPet, type Pet } from '${NAME}';
+import { calm } from '${NAME}/behaviors';
+import { cat, dog } from '${NAME}/pets';
+import type { PetId } from '${NAME}/core';
 const map = new Map<string, string>();
 const storage: PetSyncStorage = createStorage({ namespace: 'site', backend: { get: (name) => map.get(name) ?? null, set: (name, text) => void map.set(name, text) } });
 const loaded: 'ready' | 'failed' = storage.load();
 const remote: PetAsyncStorage = createStorage({ backend: { async: true, get: async (name) => map.get(name) ?? null, set: async (name, text) => void map.set(name, text) } });
 const later: Promise<'ready' | 'failed'> = remote.load();
-const pet: PetCore = createPetCore({ storage, progress: () => ({ marks: 1, today: 1, limit: 3 }), clock: { now: () => 0, day: () => localDay(), nextDay: (at) => at + 1 }, random: () => 0.5, scheduler: { later: () => () => {} }, log: { warn: () => {} }, scenes: null });
+const pet: PetCore = createPetCore({ storage, pets: [cat, dog], behaviors: [calm], progress: () => ({ marks: 1, today: 1, limit: 3 }), clock: { now: () => 0, day: () => localDay(), nextDay: (at) => at + 1 }, random: () => 0.5, scheduler: { later: () => () => {} }, log: { warn: () => {} }, scenes: null });
 const started = pet.start();
 let code: PetErrorKind | '' = '';
 if (started.ok) {
@@ -512,7 +587,7 @@ const closed: boolean = roomSaved.ok && roomSaved.closed;
 pet.room.cancel();
 pet.close();
 const snap: PetSnapshot = pet.getState();
-const kind: 'cat' | 'dog' = snap.pet.shown;
+const kind: PetId = snap.pet.shown;
 const view: null | 'corner' | 'play' | 'room' = snap.view.open;
 const off: () => void = pet.subscribe((update: PetUpdate) => {
   for (const effect of update.effects) if (effect.type === 'announce') console.log(effect.text);
@@ -528,14 +603,15 @@ const nothing: void = legacy.notify('saved', { key: '' });
 const state: PetSnapshot | null = legacy.getState();
 legacy.room.save();
 try {
+  // @ts-expect-error без определений — ошибка компилятора и invalid-options
   createPetCore({ storage });
 } catch (error) {
   if (error instanceof PetError) code = error.code === 'invalid-options' ? 'internal' : '';
 }
 // @ts-expect-error неизвестный питомец
 pet.setPet('fox');
-// @ts-expect-error неизвестный облик
-pet.setAppearance({ coat: 'zebra' });
+// @ts-expect-error облик — строка
+pet.setAppearance({ coat: 5 });
 // @ts-expect-error событие — saved или failed
 pet.notify('done');
 // @ts-expect-error saved без key
@@ -560,8 +636,8 @@ pet.stroke.step('1');
 pet.toy.drag('chair', [1, 2]);
 // @ts-expect-error действия jump нет
 pet.interact({ type: 'jump' });
-// @ts-expect-error регистрация определений — не в этой версии
-createPetCore({ storage, pets: [] });
+// @ts-expect-error модели поведения обязательны (PL06)
+createPetCore({ storage, pets: [cat] });
 // @ts-expect-error внутренний вход legacy-отображения
 pet.setPlace({});
 // @ts-expect-error внутренний вход legacy-отображения
@@ -587,10 +663,67 @@ export { loaded, later, celebrate, duplicate, seen, told, reacted, namedReacted,
   await writeFile(
     path.join(project, 'core-only.mts'),
     `import { createPetCore, createStorage, type PetSnapshot } from '${NAME}/core';
+import { calm } from '${NAME}/behaviors';
+import { cat, dog } from '${NAME}/pets';
 const storage = createStorage({ backend: { get: () => null, set: () => {} } });
 storage.load();
-const snapshot: PetSnapshot = createPetCore({ storage }).getState();
+const snapshot: PetSnapshot = createPetCore({ storage, pets: [cat, dog], behaviors: [calm] }).getState();
 export { snapshot };
+`,
+  );
+  // Определения (PL06): своё определение из штатного (spread) и своя модель, регистрация, setPet/setBehavior с ID расширения,
+  // снимок pet/behavior/pets, PetError.path; неверный формат, ID без точки, запасной не штатный, лапа, порядок и skip сценок,
+  // поза реакции не из словаря, регистрация без моделей, неверные ID команд — ошибки компилятора (10 @ts-expect-error).
+  await writeFile(
+    path.join(project, 'ext.mts'),
+    `import { createPetCore, createStorage, defineBehavior, definePet, PetError, type BehaviorDefinition, type BehaviorId, type PetDefinition, type PetErrorCode, type PetId, type PetSnapshot } from '${NAME}/core';
+import { calm } from '${NAME}/behaviors';
+import { cat, corner, cornerItems, dog } from '${NAME}/pets';
+const kitten: PetDefinition = definePet({ ...cat, id: 'example.kitten', title: 'Котёнок', items: { list: cornerItems, gifts: cat.items.gifts }, room: { ...corner, pet: cat.room.pet, feed: cat.room.feed, toys: [] } });
+const zen: BehaviorDefinition = defineBehavior({ ...calm, id: 'example.zen', title: 'Дзен', limits: { pet: 1 }, scenes: { chance: 0.1, order: 'random', skip: ['cat/curl', 'example.kitten/stretch'] }, phrases: { default: calm.phrases.default, byPet: { 'example.kitten': { pet: ['Мур.', { text: 'Мур-мур.', stage: 2 }] } } } });
+const map = new Map<string, string>();
+const storage = createStorage({ backend: { get: (name) => map.get(name) ?? null, set: (name, text) => void map.set(name, text) } });
+storage.load();
+const pet = createPetCore({ storage, pets: [cat, dog, kitten], behaviors: [calm, zen] });
+pet.setPet('example.kitten');
+const changed = pet.setBehavior('example.zen');
+const ok: boolean = changed.ok;
+const snap: PetSnapshot = pet.getState();
+const shown: PetId = snap.pet.shown;
+const model: BehaviorId = snap.behavior.shown;
+const available: boolean = snap.pet.available && snap.behavior.available;
+const kittenName: string | undefined = snap.pets['example.kitten']?.name.display;
+let where: string | undefined;
+let code: PetErrorCode | '' = '';
+try {
+  definePet(JSON.parse('{}'));
+} catch (error) {
+  if (error instanceof PetError) {
+    where = error.path;
+    code = error.code;
+  }
+}
+// @ts-expect-error формат — 1
+definePet({ ...cat, format: 2 });
+// @ts-expect-error ID стороннего питомца — с точкой
+definePet({ ...cat, id: 'kitten' });
+// @ts-expect-error запасной — штатный питомец
+definePet({ ...cat, id: 'example.cub', fallback: 'example.kitten' });
+// @ts-expect-error лапа — null или { text, ask }
+definePet({ ...cat, id: 'example.cub', actions: { pet: cat.actions.pet, paw: true } });
+// @ts-expect-error порядок сценок — fresh или random
+defineBehavior({ ...calm, id: 'example.often', scenes: { chance: 0.1, order: 'often' } });
+// @ts-expect-error skip — ссылка petId/sceneId
+defineBehavior({ ...calm, id: 'example.skip', scenes: { chance: 0.1, order: 'fresh', skip: ['Bunny jump'] } });
+// @ts-expect-error поза реакции — из словаря
+defineBehavior({ ...calm, id: 'example.jump', reactions: { ...calm.reactions, joy: { ...calm.reactions.joy, pose: 'jump' } } });
+// @ts-expect-error модели поведения обязательны
+createPetCore({ storage, pets: [cat] });
+// @ts-expect-error модель — 'calm' или ID с точкой
+pet.setBehavior('lively');
+// @ts-expect-error ID питомца — штатный или с точкой
+pet.setPet('kitten');
+export { kitten, zen, ok, shown, model, available, kittenName, where, code };
 `,
   );
   // Закрытые пути: строка — ожидаемая ошибка. Импорт значения из стиля — ошибка: декларация не обещает CSS Modules.
@@ -602,12 +735,15 @@ import '${NAME}/pet/css.d.mts';
 import '${NAME}/pet/pet-rules.mjs';
 import '${NAME}/pet/core.mjs';
 import '${NAME}/pet/core/index.mjs';
-import '${NAME}/pets';
+import '${NAME}/pet/pets.mjs';
+import '${NAME}/pet/defs/cat.mjs';
+import '${NAME}/pet/web/kits.mjs';
+import '${NAME}/kits';
 import styles from '${NAME}/pet.css';
 export { styles };
 `,
   );
-  const PATH_ERRORS = ['1 TS2307', '2 TS2307', '3 TS2307', '4 TS2307', '5 TS2307', '6 TS2307', '7 TS2307', '8 TS1192'];
+  const PATH_ERRORS = ['1 TS2307', '2 TS2307', '3 TS2307', '4 TS2307', '5 TS2307', '6 TS2307', '7 TS2307', '8 TS2307', '9 TS2307', '10 TS2307', '11 TS1192'];
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
   for (const [module, resolution] of [
     ['nodenext', 'nodenext'],
@@ -621,12 +757,14 @@ export { styles };
     const result = await types('site.mts');
     check(`TypeScript (${resolution}, noUncheckedSideEffectImports): вход и три стиля подключаются, неверные вызовы — ошибки`, result === '', result);
     const core = await types('core.mts');
-    check(`TypeScript (${resolution}): pet-companion/core — точные результаты, отчёт сохранения, снимок, эффекты и подписка; legacy pet.core и команды pet.*; неверные ID и аргументы, событие без key, внутренние входы и признаки, запись в снимок — ошибки (26 @ts-expect-error)`, core === '', core);
+    check(`TypeScript (${resolution}): pet-companion/core — точные результаты, отчёт сохранения, снимок, эффекты и подписка; legacy pet.core и команды pet.*; неверные ID и аргументы, событие без key, внутренние входы и признаки, запись в снимок — ошибки (25 @ts-expect-error)`, core === '', core);
     const plain = await types('core-only.mts', 'es2022');
-    check(`TypeScript (${resolution}): ядро без lib dom`, plain === '', plain);
+    check(`TypeScript (${resolution}): ядро и входы штатных определений без lib dom`, plain === '', plain);
+    const ext = await types('ext.mts', 'es2022');
+    check(`TypeScript (${resolution}, без lib dom): определения PL06 — своё из штатного, своя модель, регистрация, ID расширения в командах и снимке, PetError.path; неверные определения, регистрация без моделей и ID — ошибки (10 @ts-expect-error)`, ext === '', ext);
     const closed = await types('paths.mts');
     const errors = [...closed.matchAll(/^paths\.mts\((\d+),\d+\): error (TS\d+)/gm)].map(([, line, code]) => `${line} ${code}`);
-    check(`TypeScript (${resolution}): несуществующий стиль, внутренние пути (в том числе файлы ядра) и будущий вход pets — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);
+    check(`TypeScript (${resolution}): несуществующий стиль, внутренние пути (в том числе файлы ядра, входов штатных, определений и наборов) и будущий вход kits — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);
   }
 
   // Браузер.
@@ -636,6 +774,7 @@ export { styles };
   await importmap(browser, project);
   await cp(path.join(root, 'examples', 'commands.html'), path.join(project, 'commands.html'));
   await commands(browser, project);
+  await extension(browser, project);
 } catch (error) {
   check('пакет: сценарий выполнен', false, error.stack);
 } finally {

@@ -1,0 +1,137 @@
+/* Пример расширения (вне пакета): стили набора кролика bunny-web.mjs — позы (data-pose), сценка hop (data-scene), одиночные
+   движения (data-micro), надетый аксессуар (data-acc) и образцы аксессуаров в уголке. Только transform, opacity и display;
+   «уменьшить движение» и пауза — общими правилами pet.css (html[data-cat-motion='none'], .cat-paused). Без внешних файлов. */
+
+.bunny-art :is(.bunny-ear, .bunny-head, .bunny-body, .bunny-all) {
+  transform-box: fill-box;
+  transition: transform 0.5s cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+.bunny-art .bunny-ear-l {
+  transform-origin: 50% 95%;
+}
+.bunny-art .bunny-ear-r {
+  transform-origin: 50% 95%;
+}
+.bunny-art .bunny-head {
+  transform-origin: 50% 85%;
+}
+.bunny-art .bunny-eyes-shut {
+  display: none;
+}
+
+/* Аксессуары: виден надетый. */
+.bunny-art[data-acc='ribbon'] [data-acc-part='ribbon'],
+.bunny-art[data-acc='bow'] [data-acc-part='bow'],
+.bunny-art[data-acc='clover'] [data-acc-part='clover'] {
+  display: inline;
+}
+
+/* Внимание: уши торчком. */
+.bunny-art[data-pose='attentive'] .bunny-ear-l {
+  transform: rotate(-4deg);
+}
+.bunny-art[data-pose='attentive'] .bunny-ear-r {
+  transform: rotate(4deg);
+}
+
+/* Радость: уши врозь, голова чуть выше. */
+.bunny-art[data-pose='joy'] .bunny-ear-l {
+  transform: rotate(-18deg);
+}
+.bunny-art[data-pose='joy'] .bunny-ear-r {
+  transform: rotate(18deg);
+}
+.bunny-art[data-pose='joy'] .bunny-head {
+  transform: translateY(-3px);
+}
+
+/* Отдых, довольный, поглаживание: глаза закрыты; при отдыхе уши лежат. */
+.bunny-art:is([data-pose='rest'], [data-pose='content'], [data-pose='pet']) .bunny-eyes-open {
+  display: none;
+}
+.bunny-art:is([data-pose='rest'], [data-pose='content'], [data-pose='pet']) .bunny-eyes-shut {
+  display: inline;
+}
+.bunny-art[data-pose='rest'] .bunny-ear-l {
+  transform: rotate(-38deg);
+}
+.bunny-art[data-pose='rest'] .bunny-ear-r {
+  transform: rotate(38deg);
+}
+.bunny-art[data-pose='rest'] .bunny-head {
+  transform: translateY(6px);
+}
+.bunny-art[data-pose='pet'] .bunny-head {
+  transform: rotate(-6deg);
+}
+
+/* Ест и принюхивается: голова к полу. */
+.bunny-art[data-pose='feed'] .bunny-head {
+  transform: translate(-8px, 18px) rotate(-8deg);
+}
+.bunny-art[data-pose='sniff'] .bunny-head {
+  transform: translate(-4px, 8px);
+}
+.bunny-art[data-motion='normal'][data-pose='sniff'] .bunny-nose {
+  animation: bunny-nose 0.4s ease-in-out infinite;
+}
+
+/* Сценка «прыгает на месте» (hop): два прыжка; без анимации — статичная поза радости. */
+.bunny-art[data-motion='normal'][data-scene='hop'] .bunny-all,
+.bunny-art[data-motion='calm'][data-scene='hop'] .bunny-all {
+  animation: bunny-hop 1.2s ease-in-out 2;
+}
+
+/* Одиночные движения покоя. */
+.bunny-art[data-micro='ear'] .bunny-ear-r {
+  animation: bunny-ear 0.62s ease-in-out;
+}
+.bunny-art[data-micro='nose'] .bunny-nose,
+.bunny-art[data-micro='blink'] .bunny-eyes-open {
+  animation: bunny-nose 0.3s ease-in-out 2;
+}
+.bunny-art[data-micro='look'] .bunny-head {
+  animation: bunny-look 1.6s ease-in-out;
+}
+
+@keyframes bunny-hop {
+  25% {
+    transform: translateY(-22px);
+  }
+  50% {
+    transform: translateY(0);
+  }
+  70% {
+    transform: translateY(-12px);
+  }
+}
+@keyframes bunny-ear {
+  50% {
+    transform: rotate(14deg);
+  }
+}
+@keyframes bunny-nose {
+  50% {
+    transform: translateY(-1px) scaleY(0.85);
+  }
+}
+@keyframes bunny-look {
+  30%,
+  70% {
+    transform: translateX(-4px);
+  }
+}
+
+/* Образцы аксессуаров в уголке (кнопки выбора). */
+.cat-swatch-ribbon {
+  background: #6aa7d8;
+  border-color: #3f6f99;
+}
+.cat-swatch-bow {
+  background: radial-gradient(circle, #d86a8c 0 4px, transparent 5px), #e88aa6;
+  border-color: #99415c;
+}
+.cat-swatch-clover {
+  background: radial-gradient(circle, #4f9a55 0 4px, transparent 5px), #6fae73;
+  border-color: #3f7444;
+}

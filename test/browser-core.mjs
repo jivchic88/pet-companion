@@ -23,10 +23,12 @@ const observe = (page, ns) =>
   page.evaluate(async (space) => {
     const { createPetCore } = await import('/pet/core/index.mjs');
     const { createWebStorage } = await import('/pet/web/storage.mjs');
+    const { cat, dog } = await import('/pet/pets.mjs');
+    const { calm } = await import('/pet/behaviors.mjs');
     const storage = createWebStorage({ namespace: space });
     const status = storage.status;
     window.qaSeen = [];
-    window.qaCore = createPetCore({ storage, progress: () => window.stand.options().progress() });
+    window.qaCore = createPetCore({ storage, pets: [cat, dog], behaviors: [calm], progress: () => window.stand.options().progress() });
     window.qaCore.subscribe((update) => window.qaSeen.push(`${update.reason} ${update.snapshot.name.display}`), { initial: false });
     window.qaCore.start({ around: true });
     return status;
@@ -47,7 +49,7 @@ export async function coreQa(browser, base, check, open) {
     const pet = await page.evaluate(() => Object.keys(window.stand.pet).sort().join(','));
     // PL05: прежние свойства и legacy-методы на месте; добавлены pet.core и команды ядра (без входов отображения setVisible,
     // setReducedMotion, activity, setDisplay и без start — их ведёт legacy-отображение).
-    check(`${label}: у экземпляра прежние свойства и методы плюс pet.core и команды ядра PL05 — ровно этот набор`, pet === 'close,core,destroy,feed,getState,hide,interact,mounted,notify,open,opened,refresh,room,setAppearance,setContext,setName,setPet,setPreferences,setPresence,show,stroke,subscribe,toy,update,version', pet);
+    check(`${label}: у экземпляра прежние свойства и методы плюс pet.core и команды ядра PL05–PL06 — ровно этот набор`, pet === 'close,core,destroy,feed,getState,hide,interact,mounted,notify,open,opened,refresh,room,setAppearance,setBehavior,setContext,setName,setPet,setPreferences,setPresence,show,stroke,subscribe,toy,update,version', pet);
     const status = await observe(page, 'core1');
     check(`${label}: второе ядро получает тот же координатор пространства — уже загруженный фасадом`, status === 'ready', status);
 
@@ -152,7 +154,9 @@ async function mountFresh(page, base, ns, seed, marks, today) {
       window.stand.mount({ storage: space, progress: () => window.qaCounts });
       const { createPetCore } = await import('/pet/core/index.mjs');
       const { createWebStorage } = await import('/pet/web/storage.mjs');
-      window.qaOther = createPetCore({ storage: createWebStorage({ namespace: space }), progress: () => window.qaCounts });
+      const { cat, dog } = await import('/pet/pets.mjs');
+      const { calm } = await import('/pet/behaviors.mjs');
+      window.qaOther = createPetCore({ storage: createWebStorage({ namespace: space }), pets: [cat, dog], behaviors: [calm], progress: () => window.qaCounts });
       window.qaOther.start({ around: true });
     },
     { space: ns, values: seed, counts: { marks, today } },

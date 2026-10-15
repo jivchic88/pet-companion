@@ -120,7 +120,7 @@ test('праздник, контроль: без внешней записи н�
   const s = pair({ cat: CAT }, counts);
   counts.set(3, 1);
   const result = s.A.notify('saved', { key: 'one', counted: true });
-  assert.deepEqual([result.celebrate, result.reaction.extra.follow, s.json('cat').seenStage], [1, { type: 'unlock', extra: { tryOn: 'plaid', mini: '', phrases: 'plaid' } }, 1]);
+  assert.deepEqual([result.celebrate, result.reaction.extra.follow, s.json('cat').seenStage], [1, { type: 'unlock', extra: { tryOn: 'plaid', mini: '', phrases: 'tryOn' } }, 1]);
   assert.equal(s.got.a.length, 1);
   assert.match(s.got.a[0], /^notify ready 1 saved saved celebrate announce Марс: открыта ступень «Освоился»/);
   assert.deepEqual(s.got.b, ['storage ready 1 saved saved']);

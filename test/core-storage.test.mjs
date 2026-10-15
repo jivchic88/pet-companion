@@ -9,7 +9,7 @@
 // записи, поглощения и settle.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPetCore } from '../pet/core/index.mjs';
+import { createPetCore } from './core-kit.mjs';
 import { createWebStorage } from '../pet/web/storage.mjs';
 import { CORE_KEYS, DAY, host, journal, make, manual, spy, web } from './core-kit.mjs';
 

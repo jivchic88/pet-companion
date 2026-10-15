@@ -5,7 +5,8 @@
 // раунд доставки — test/core-round.test.mjs.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPetCore, PetError } from '../pet/core/index.mjs';
+import { PetError } from '../pet/core/index.mjs';
+import { createPetCore } from './core-kit.mjs';
 import { clock, corner, DAY, host, idle, journal, make, spy, VIEWS, web } from './core-kit.mjs';
 
 const started = (initial = {}, parts = {}) => {
@@ -227,7 +228,7 @@ test('подтверждённое занятие: «Освоился» — пр
   core.start();
   counts.set(3, 1);
   const plaid = core.notify('saved', { key: 'p', counted: true, first: true });
-  assert.deepEqual(plaid.reaction.extra, { phrases: 'joyTreat', follow: { type: 'unlock', extra: { tryOn: 'plaid', mini: '', phrases: 'plaid' } } });
+  assert.deepEqual(plaid.reaction.extra, { phrases: 'joyTreat', follow: { type: 'unlock', extra: { tryOn: 'plaid', mini: '', phrases: 'tryOn' } } });
   const dogCounts = host(8, 0);
   const dog = started({ companion: { v: 1, kind: 'dog' } }, { counts: dogCounts });
   dog.core.start();

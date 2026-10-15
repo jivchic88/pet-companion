@@ -4,7 +4,7 @@
 // пороги распознавания и кадры.
 //
 // Пол — полоса сцены от линии лап до низа места под питомцем ([data-play-floor]) без краёв сцены: отображение меряет края и
-// низ, переводит в единицы рисунка питомца (viewBox 220×204) и объявляет ядру (setDisplay({ playFloor, playTouch })); после
+// низ, переводит в единицы рисунка питомца (рамка size определения, у кота и собаки — viewBox 220×204) и объявляет ядру (setDisplay({ playFloor, playTouch })); после
 // изменения окна места те же относительно питомца. Миска едет за указателем после сдвига на MOVE_PX — с той же точкой
 // захвата, место под указателем выбирает ядро (toy.drag); отпущенная после заметного сдвига — на новом месте (toy.drop),
 // иначе — на месте до жеста (toy.cancel). Мячик так же, а отпущенный после сдвига на ROLL_PX влево или вправо — бросок:
@@ -14,7 +14,7 @@
 import { HOME, SIZE } from './core/toys.mjs';
 import { grab, release } from './pet-play.mjs';
 
-export { ANCHOR, HOME, NEAR, SIZE, TOY_STEP, closer, placeToy, rollDist, rollEnd, rollWay, sideOf, zoneOf } from './core/toys.mjs';
+export { HOME, NEAR, SIZE, TOY_STEP, closer, placeToy, rollDist, rollEnd, rollWay, sideOf, zoneOf } from './core/toys.mjs';
 
 export const MOVE_PX = 6;
 export const ROLL_PX = 16;
@@ -22,11 +22,11 @@ export const TOY_MIN_PX = 44;
 const EDGE = 8; // поле до края сцены, px
 const PAW_MIN_PX = 22; // наименьший радиус области касания лапы (pet-play.mjs)
 
-// Рамки страницы → пол в единицах рисунка: stage, pet, floor — рамки сцены, питомца и места под ним (координаты сцены).
-// Возвращает { s, pet, floor: [l, t, r, b], touch } (s — CSS px на единицу рисунка; touch — 22 CSS px области касания
-// лапы в единицах рисунка: предметы её не закрывают).
-export function floorUnits(stage, pet, floor) {
-  const s = pet.width / 220;
+// Рамки страницы → пол в единицах рисунка: stage, pet, floor — рамки сцены, питомца и места под ним (координаты сцены),
+// width — ширина рамки рисунка питомца (size.width определения). Возвращает { s, pet, floor: [l, t, r, b], touch } (s — CSS
+// px на единицу рисунка; touch — 22 CSS px области касания лапы в единицах рисунка: предметы её не закрывают).
+export function floorUnits(stage, pet, floor, width = 220) {
+  const s = pet.width / width;
   const u = (x, origin) => (x - origin) / s;
   const bottom = Math.max(pet.bottom, floor?.bottom ?? 0);
   return { s, pet: { left: pet.left, top: pet.top }, floor: [u(stage.left + EDGE, pet.left), u(stage.top, pet.top), u(stage.right - EDGE, pet.left), u(bottom, pet.top)], touch: PAW_MIN_PX / s };
@@ -38,7 +38,7 @@ export const toUnits = (z, [x, y]) => [(x - z.pet.left) / z.s, (y - z.pet.top) /
 // ---------- предметы на странице ----------
 
 // hooks = { play() → снимок play ядра | null, drag(toy, [u, v]), drop(roll?), cancel(), floor(floor, touch), motion() →
-// 'normal' | 'calm' | 'none' }.
+// 'normal' | 'calm' | 'none', width() → ширина рамки рисунка показанного питомца (size.width) }.
 const st = { hooks: null, box: null, toys: {}, drag: null, ro: null, key: '', z: null, relayout: false, roll: '' };
 
 export function initToys(hooks) {
@@ -83,7 +83,7 @@ function zone() {
   if (!stage || !rect?.width) return null;
   const rel = (r) => r && { left: r.left - stage.left, top: r.top - stage.top, right: r.right - stage.left, bottom: r.bottom - stage.top, width: r.width };
   const floor = st.box.querySelector('[data-play-floor]')?.getBoundingClientRect();
-  return floorUnits(rel(stage), rel(rect), rel(floor));
+  return floorUnits(rel(stage), rel(rect), rel(floor), st.hooks.width?.() ?? 220);
 }
 
 const keyOf = (z = zone()) => (z ? [...z.floor, z.s, z.pet.left, z.pet.top].map((value) => Math.round(value * 10)).join() : '');

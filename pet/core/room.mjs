@@ -1,52 +1,48 @@
-// Ядро: комната уголка — геометрия и формат ключа room:v1 (docs/ARCHITECTURE.md § 6.4, § 13 «Геометрия комнаты»,
-// «Формат комнаты», «Кормление у переставленной миски»; срез PL04.3). Перенесено из pet-room.mjs без изменения правил:
-// место отдыха с питомцем, миска и игрушки — по животному и ступени; подушка и лежанка — одно логическое место (лежанка —
-// с поправкой на размер, без записи). Координаты — единицы сцены 400×250, не CSS px: расстановка одна для любого экрана;
-// точность 0,1 — одна в расчёте, показе, записи и чтении (сохранение не сдвигает). Предмет на полу, целиком в сцене и не
-// закрывает больше четверти другого; недопустимое место — ближайшее допустимое (порядок поиска постоянный). Без DOM и без
-// импорта рисунков: масштаб питомца — данные рисунка (figure.mjs). Редактор (черновик, перенос, сохранение) — editor.mjs;
-// рисование и указатель — веб (pet-room.mjs).
-
-import { PET_BOX, SCENE_PET } from './figure.mjs';
+// Ядро: комната уголка — геометрия и формат ключа room:v1 (docs/ARCHITECTURE.md § 6.4, § 7.1 «room», § 13 «Геометрия
+// комнаты», «Формат комнаты», «Кормление у переставленной миски»; срезы PL04.3, PL06). Правила 0.1.4 без изменений: место
+// отдыха с питомцем, миска и игрушки — по питомцу и ступени; место отдыха — одно логическое место (с ступени места
+// побольше — оно, с поправкой по высоте, без записи). Данные — у определения питомца (room: общая мебель уголка,
+// pet/defs/room.mjs, и его рамки и игрушки; масштаб — по size): здесь только правила над ними (model — roomModel).
+// Координаты — единицы сцены 400×250, не CSS px: расстановка одна для любого экрана; точность 0,1 — одна в расчёте,
+// показе, записи и чтении (сохранение не сдвигает). Предмет на полу, целиком в сцене и не закрывает больше четверти
+// другого; недопустимое место — ближайшее допустимое (порядок поиска постоянный). Без DOM и без импорта рисунков.
+// Редактор (черновик, перенос, сохранение) — editor.mjs; рисование и указатель — веб (pet-room.mjs).
 
 export const ROOM_VERSION = 1;
 export const STEP = 10; // шаг кнопок и стрелок
 export const OVERLAP = 0.25; // наибольшая доля меньшей рамки под другой
 export const SCENE = [400, 250];
-const FLOOR = 176; // линия пола
 const EDGE = 4; // поле до края сцены сбоку; снизу — 2
-const BED = 3; // ступень «Уютный штаб»: вместо подушки — лежанка, питомец на ней на 4 ниже
-const BALL = 2; // «Наш ритуал»: мячик собаки
-
-export const HOME = { rest: [200, 206], bowl: [170, 205], yarn: [36, 231], rope: [36, 233], ball: [283, 234] };
-// Видимая рамка от точки предмета: [слева, сверху, справа, снизу] (замер рисунков).
-const BOX = { bowl: [-25, -13, 25, 12], yarn: [-13, -11, 17, 14], rope: [-26, -8, 26, 10], ball: [-12, -12, 12, 14] };
-const SEAT = { cushion: [-82, -24, 82, 26], bed: [-98, -30, 98, 34] };
-// Питомец на подушке: весь рисунок и лицо с телом (без хвоста и низа лап — перед лапами можно ставить вещи).
-const PET = { cat: { all: [-63, -154, 67, -9], core: [-60, -154, 32, -16] }, dog: { all: [-66, -145, 71, -6], core: [-64, -145, 28, -14] } };
-// Поза «ест» без сдвига к миске: весь рисунок вместе с покачиванием головы, хвостом и кадрами перехода (замер в Chrome).
-export const FEED = { cat: [-88, -114, 49, 0], dog: [-90, -102, 50, 0] };
-// Масштаб питомца в сцене: рисунок 220×204 вписан в свою рамку сцены (176×160) целиком — по высоте (160 / 204).
-export const PET_SCALE = Math.min(SCENE_PET.width / PET_BOX.width, SCENE_PET.height / PET_BOX.height);
-// Неподвижные вещи ступеней: блокнот, кружка, лампа на столике, растение.
-const FIXED = [
-  [2, [58, 204, 129, 241]],
-  [2, [306, 196, 346, 238]],
-  [3, [304, 92, 386, 194]],
-  [4, [26, 96, 94, 196]],
-];
-const TITLES = { bowl: 'Миска', yarn: 'Клубок', rope: 'Канат', ball: 'Мячик' };
 export const DIRS = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
 
-export const seatOf = (stage) => (stage >= BED ? 'bed' : 'cushion');
-export const itemTitle = (id, stage) => (id === 'rest' ? (stage >= BED ? 'Лежанка' : 'Подушка') : TITLES[id]);
-
-// Предметы по животному и ступени — снизу вверх по слоям.
-export function roomItems(kind, stage) {
-  return kind === 'dog' ? ['rest', 'bowl', 'rope', ...(stage >= BALL ? ['ball'] : [])] : ['rest', 'bowl', 'yarn'];
+// Модель комнаты питомца из определения (def — PetDefinition): общая мебель, рамки питомца и позы «ест», свои игрушки,
+// масштаб рисунка в сцене (рамка room.frame вмещает size целиком) и исходные места предметов.
+export function roomModel(def) {
+  const room = def.room;
+  const scale = Math.min(room.frame[0] / def.size.width, room.frame[1] / def.size.height);
+  const toys = room.toys;
+  return Object.freeze({
+    pet: def.id,
+    room,
+    scale,
+    toys,
+    home: Object.freeze({ rest: room.rest, bowl: room.bowl.home, ...Object.fromEntries(toys.map((toy) => [toy.id, toy.home])) }),
+    box: Object.freeze({ bowl: room.bowl.box, ...Object.fromEntries(toys.map((toy) => [toy.id, toy.box])) }),
+  });
 }
 
-// ---------- хранение: { v, cat: { rest: { x, y }, … }, dog: { … } } ----------
+// Место отдыха на ступени: последнее из room.seats, открытое ступенью.
+export const seatOf = (model, stage) => [...model.room.seats].reverse().find((seat) => seat.stage <= stage) ?? model.room.seats[0];
+export function itemTitle(model, id, stage) {
+  if (id === 'rest') return seatOf(model, stage).title;
+  if (id === 'bowl') return model.room.bowl.title;
+  return model.toys.find((toy) => toy.id === id)?.title ?? '';
+}
+
+// Предметы питомца на ступени — снизу вверх по слоям: место отдыха, миска, свои игрушки открытых ступеней.
+export const roomItems = (model, stage) => ['rest', 'bowl', ...model.toys.filter((toy) => toy.stage <= stage).map((toy) => toy.id)];
+
+// ---------- хранение: { v, [petId]: { rest: { x, y }, … } } ----------
 
 const isObj = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const round = (v) => Math.round(v * 10) / 10;
@@ -68,61 +64,67 @@ export function readPoint(raw) {
   return grid([Math.min(Math.max(raw.x, -1e4), 1e4), Math.min(Math.max(raw.y, -1e4), 1e4)]);
 }
 
-// Точки кота и собаки — только известные предметы (при любой версии ключа); остальное запись сохраняет как было.
-export function parseRoom(text) {
+// Точки питомцев models ({ [petId]: roomModel }) — только известные им предметы (при любой версии ключа); остальное запись
+// сохраняет как было. Поле питомца — собственное поле объекта (ID с точкой — одно поле).
+export function parseRoom(text, models) {
   const raw = readJson(text);
-  const room = { cat: {}, dog: {} };
-  for (const kind of Object.keys(room)) {
-    const own = isObj(raw?.[kind]) ? raw[kind] : {};
-    for (const id of Object.keys(HOME)) {
-      const p = readPoint(own[id]);
-      if (p) room[kind][id] = p;
+  const room = {};
+  for (const [pet, model] of Object.entries(models)) {
+    room[pet] = {};
+    const own = isObj(raw) && Object.hasOwn(raw, pet) && isObj(raw[pet]) ? raw[pet] : {};
+    for (const id of Object.keys(model.home)) {
+      const p = Object.hasOwn(own, id) ? readPoint(own[id]) : null;
+      if (p) room[pet][id] = p;
     }
   }
   return room;
 }
 
-// Запись: свежее сохранённое как есть (другое животное, чужие поля, вещи не открытых ступеней, неизвестные предметы,
-// больший v) + новые места передвинутых предметов этого животного (moved — { id: [x, y] }). У точки меняются только x и y,
-// остальные её поля остаются; на исходном месте у точки нет координат (только прочие поля, а пустая — удаляется). Точка не
-// объект или kind не объект (непонятное значение) — передвинутый предмет заменяет его объектом.
-export function roomRecord(text, kind, moved) {
+// Запись: свежее сохранённое как есть (другие питомцы, чужие поля, вещи не открытых ступеней, неизвестные предметы,
+// больший v) + новые места передвинутых предметов питомца pet (moved — { id: [x, y] }); home — его исходные места. У точки
+// меняются только x и y, остальные её поля остаются; на исходном месте у точки нет координат (только прочие поля, а пустая
+// — удаляется). Точка не объект или поле питомца не объект (непонятное значение) — передвинутый предмет заменяет его
+// объектом.
+export function roomRecord(text, pet, moved, home) {
   const raw = readJson(text);
   const keep = isObj(raw) ? raw : {};
-  const own = isObj(keep[kind]) ? { ...keep[kind] } : {};
+  const own = Object.hasOwn(keep, pet) && isObj(keep[pet]) ? { ...keep[pet] } : {};
   for (const [id, p] of Object.entries(moved)) {
     const [x, y] = grid(p);
-    const rest = isObj(own[id]) ? { ...own[id] } : {};
+    const rest = Object.hasOwn(own, id) && isObj(own[id]) ? { ...own[id] } : {};
     delete rest.x;
     delete rest.y;
-    if (!same([x, y], HOME[id])) own[id] = { ...rest, x, y };
+    if (!(Object.hasOwn(home, id) && same([x, y], home[id]))) own[id] = { ...rest, x, y };
     else if (Object.keys(rest).length) own[id] = rest;
     else delete own[id];
   }
-  const out = { v: ROOM_VERSION, ...keep, [kind]: own };
+  const out = { v: ROOM_VERSION, ...keep };
+  Object.defineProperty(out, pet, { value: own, enumerable: true, writable: true, configurable: true });
   out.v = Number.isInteger(keep.v) && keep.v > ROOM_VERSION ? keep.v : ROOM_VERSION;
   return out;
 }
 
-// Функция записи ключа room в памяти ключа ядра (build операции, § 8.3): patch — { [kind]: { [id]: [x, y] } } (поля
-// правки — пути 'cat.yarn'). Предмет, чьё место совпадает с сохранённым (та же точка сетки; без точки — исходное место),
-// запись не трогает; животное без изменений — тоже. Остальное — roomRecord по каждому животному: неизвестные предметы,
-// поля точек, другие животные и больший v остаются.
-export function roomWrite(text, patch = {}) {
+// Функция записи ключа room в памяти ключа ядра (build операции, § 8.3): patch — { [petId]: { [id]: [x, y] } } (поля
+// правки — пути [petId, id]); homes — { [petId]: исходные места } зарегистрированных питомцев. Предмет, чьё место
+// совпадает с сохранённым (та же точка сетки; без точки — исходное место), запись не трогает; питомец без изменений —
+// тоже. Остальное — roomRecord по каждому питомцу: неизвестные предметы, поля точек, другие питомцы и больший v остаются.
+export function roomWrite(text, patch, homes) {
   const base = readJson(text);
   let current = text;
   let out = null;
-  for (const [kind, moved] of Object.entries(isObj(patch) ? patch : {})) {
-    const stored = isObj(base) && isObj(base[kind]) ? base[kind] : {};
+  for (const [pet, moved] of Object.entries(isObj(patch) ? patch : {})) {
+    const home = Object.hasOwn(homes, pet) ? homes[pet] : null;
+    if (!home) continue;
+    const stored = isObj(base) && Object.hasOwn(base, pet) && isObj(base[pet]) ? base[pet] : {};
     const changed = Object.fromEntries(
       Object.entries(isObj(moved) ? moved : {}).filter(([id, p]) => {
-        if (!Object.hasOwn(HOME, id) || !Array.isArray(p)) return false;
-        const was = readPoint(stored[id]);
-        return was ? !same(grid(p), was) : !same(grid(p), HOME[id]) || stored[id] !== undefined;
+        if (!Object.hasOwn(home, id) || !Array.isArray(p)) return false;
+        const was = Object.hasOwn(stored, id) ? readPoint(stored[id]) : null;
+        return was ? !same(grid(p), was) : !same(grid(p), home[id]) || (Object.hasOwn(stored, id) && stored[id] !== undefined);
       }),
     );
     if (!Object.keys(changed).length) continue;
-    out = roomRecord(current, kind, changed);
+    out = roomRecord(current, pet, changed, home);
     current = JSON.stringify(out);
   }
   if (out) return out;
@@ -139,6 +141,7 @@ export function movedItems(pos, saved, ids = Object.keys(pos)) {
 }
 
 // ---------- геометрия ----------
+// layout — { model, stage, pos }: модель комнаты питомца, ступень и места предметов.
 
 const shift = ([l, t, r, b], [x, y]) => [l + x, t + y, r + x, b + y];
 const area = ([l, t, r, b]) => Math.max(0, r - l) * Math.max(0, b - t);
@@ -147,22 +150,23 @@ const clampTo = (v, [lo, hi]) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(v,
 
 // Рамки предмета в точке p: видимая (box) и незакрываемая (core; у места отдыха — лицо и тело питомца).
 export function frames(layout, id, p) {
+  const { model } = layout;
   if (id !== 'rest') {
-    const box = shift(BOX[id], p);
+    const box = shift(model.box[id], p);
     return { box, core: box };
   }
-  const pet = PET[layout.kind] ?? PET.cat;
-  const q = [p[0], p[1] + (layout.stage >= BED ? 4 : 0)];
-  const seat = shift(SEAT[seatOf(layout.stage)], p);
-  const all = shift(pet.all, q);
-  return { seat, all, box: [Math.min(seat[0], all[0]), all[1], Math.max(seat[2], all[2]), seat[3]], core: shift(pet.core, q) };
+  const seat = seatOf(model, layout.stage);
+  const q = [p[0], p[1] + seat.lift];
+  const place = shift(seat.box, p);
+  const all = shift(model.room.pet.all, q);
+  return { seat: place, all, box: [Math.min(place[0], all[0]), all[1], Math.max(place[2], all[2]), place[3]], core: shift(model.room.pet.core, q) };
 }
 
-// Пределы точки: целиком в сцене, на полу (у места отдыха — подушка или лежанка).
+// Пределы точки: целиком в сцене, на полу (у места отдыха — его место).
 export function range(layout, id) {
   const [l, , r] = frames(layout, id, [0, 0]).box;
-  const [, t, , b] = id === 'rest' ? SEAT[seatOf(layout.stage)] : BOX[id];
-  return { x: [EDGE - l, SCENE[0] - EDGE - r], y: [FLOOR - t, SCENE[1] - 2 - b] };
+  const [, t, , b] = id === 'rest' ? seatOf(layout.model, layout.stage).box : layout.model.box[id];
+  return { x: [EDGE - l, SCENE[0] - EDGE - r], y: [layout.model.room.floor - t, SCENE[1] - 2 - b] };
 }
 
 // Допустимо ли место p предмета id среди остальных.
@@ -170,7 +174,7 @@ export function fits(layout, id, p) {
   const { x, y } = range(layout, id);
   if (p[0] < x[0] - 0.01 || p[0] > x[1] + 0.01 || p[1] < y[0] - 0.01 || p[1] > y[1] + 0.01) return false;
   const { core } = frames(layout, id, p);
-  if (FIXED.some(([stage, box]) => layout.stage >= stage && covers(core, box))) return false;
+  if (layout.model.room.fixed.some((item) => layout.stage >= item.stage && covers(core, item.box))) return false;
   return Object.entries(layout.pos).every(([other, q]) => other === id || !covers(core, frames(layout, other, q).core));
 }
 
@@ -210,9 +214,9 @@ function around(layout, id, p, step, rings) {
 }
 
 // Раскладка: сохранённые точки (или исходные) по слоям, каждая — на допустимом месте среди уже расставленных.
-export function arrange(kind, stage, saved = {}) {
-  const layout = { kind, stage, pos: {} };
-  for (const id of roomItems(kind, stage)) layout.pos[id] = settle(layout, id, saved[id] ?? HOME[id]);
+export function arrange(model, stage, saved = {}) {
+  const layout = { model, stage, pos: {} };
+  for (const id of roomItems(model, stage)) layout.pos[id] = settle(layout, id, (Object.hasOwn(saved, id) ? saved[id] : null) ?? model.home[id]);
   return layout;
 }
 
@@ -258,15 +262,16 @@ export function pickAt(layout, p, selected = '', min = 0) {
   return hits.sort((a, b) => dist(a) - dist(b))[0] ?? '';
 }
 
-// Сдвиг позы «ест» к миске (единицы рисунка питомца, PET_SCALE): голова — над миской, как на исходных местах (там сдвиг
-// 0); весь рисунок позы (FEED) остаётся в сцене с полем EDGE — у самого края питомец подходит, насколько позволяет сцена;
-// почти не сходит с пола. Расстановку не меняет.
+// Сдвиг позы «ест» к миске (единицы рисунка питомца, model.scale): голова — над миской, как на исходных местах (там сдвиг
+// 0); весь рисунок позы (room.feed) остаётся в сцене с полем EDGE — у самого края питомец подходит, насколько позволяет
+// сцена; почти не сходит с пола. Расстановку не меняет.
 export function feedShift(layout) {
-  const bowl = layout.pos.bowl ?? HOME.bowl;
-  const rest = layout.pos.rest ?? HOME.rest;
-  const [l, t, r, b] = FEED[layout.kind] ?? FEED.cat;
-  const lift = layout.stage >= BED ? 4 : 0;
-  const x = clampTo(bowl[0] - HOME.bowl[0] + HOME.rest[0], [EDGE - l, SCENE[0] - EDGE - r]);
-  const y = clampTo(bowl[1] - HOME.bowl[1] + HOME.rest[1], [Math.max(rest[1] - 20, EDGE - t - lift), Math.min(rest[1] + 36, SCENE[1] - 2 - b - lift)]);
-  return [round((x - rest[0]) / PET_SCALE), round((y - rest[1]) / PET_SCALE)];
+  const { model } = layout;
+  const bowl = layout.pos.bowl ?? model.home.bowl;
+  const rest = layout.pos.rest ?? model.home.rest;
+  const [l, t, r, b] = model.room.feed;
+  const lift = seatOf(model, layout.stage).lift;
+  const x = clampTo(bowl[0] - model.home.bowl[0] + model.home.rest[0], [EDGE - l, SCENE[0] - EDGE - r]);
+  const y = clampTo(bowl[1] - model.home.bowl[1] + model.home.rest[1], [Math.max(rest[1] - 20, EDGE - t - lift), Math.min(rest[1] + 36, SCENE[1] - 2 - b - lift)]);
+  return [round((x - rest[0]) / model.scale), round((y - rest[1]) / model.scale)];
 }

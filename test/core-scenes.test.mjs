@@ -10,7 +10,7 @@
 // движением, full, scenes, переносом и сменой места — отменяют, а не откладывают. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
 import { SCENE_FRESH_MS, SCENE_GRACE_MS } from '../pet/core/scenes.mjs';
 import { calendar, DAY, flush, host, LEGACY_DISPLAY, life, reserver, sceneStore } from './core-kit.mjs';
 

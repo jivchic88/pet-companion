@@ -11,9 +11,9 @@
 // Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REACTIONS } from '../pet/core/director.mjs';
-import { createPetCore } from '../pet/core/index.mjs';
-import { PHRASES } from '../pet/core/phrases.mjs';
+import { REACTIONS } from './legacy-rules.mjs';
+import { createPetCore } from './core-kit.mjs';
+import { PHRASES } from './legacy-rules.mjs';
 import { calendar, DAY, host, journal, LEGACY_DISPLAY, life, manual, planner } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
