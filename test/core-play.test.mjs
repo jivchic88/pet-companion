@@ -6,14 +6,15 @@
 // принюхивается, дальше — смотрит, «Вернуть миску», не кормит; мячик: бросок числом и «катнуть», упор в край — dropped.
 // Пол: строгая проверка объявления целиком, непереданное сохраняется, копия без внешней мутации, новый пол ограничивает
 // места. Перенос предмета (toy.drag/drop/cancel): место под указателем — ядро, катившийся мячик — где взяли, отмена — на
-// месте до жеста, мячик без броска не катится, без анимации — где отпустили. Знаков и наград игра не даёт. Данные
-// синтетические.
+// месте до жеста, мячик без броска не катится, без анимации — где отпустили. Знаков и наград игра не даёт. Точка предмета
+// — ровно два конечных числа: разреженная (пустой индекс), неконечная или неверной длины — invalid-argument до изменения
+// (по независимой проверке PL04.3); разреженный пол отказывает и раньше — контроль. Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { REACTIONS } from '../pet/core/director.mjs';
 import { playTexts } from '../pet/core/play.mjs';
 import { HOME, NEAR, placeToy, SIZE, zoneOf } from '../pet/core/toys.mjs';
-import { DAY, host, LEGACY_DISPLAY, life } from './core-kit.mjs';
+import { badPoints, DAY, host, LEGACY_DISPLAY, life } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
 const DOG = { v: 1, kind: 'dog' };
@@ -238,4 +239,31 @@ test('снова «Поиграть» — предметы на исходных
   L.core.open('corner');
   L.core.open('play');
   assert.deepEqual([toys(L).bowl.home, toys(L).ball.home, L.state().play.outcome], [true, true, ''], 'снова — исходные места');
+});
+
+test('точки предметов — ровно два конечных числа: неверные — invalid-argument до изменения; перенос и места целы; разреженный пол — тоже отказ (контроль)', () => {
+  const L = inPlay();
+  assert.equal(L.core.interact({ type: 'bowl', to: [40, 214] }).ok, true);
+  L.plan.advance(2000);
+  assert.equal(L.core.toy.drag('ball', toys(L).ball.at).ok, true);
+  const before = L.state();
+  const updates = L.seen.length;
+  for (const [label, bad] of badPoints()) {
+    for (const [name, call] of [['interact bowl', () => L.core.interact({ type: 'bowl', to: bad })], ['toy.drag bowl', () => L.core.toy.drag('bowl', bad)], ['toy.drag ball', () => L.core.toy.drag('ball', bad)]]) {
+      const r = call();
+      assert.deepEqual([r.ok, r.error?.code, L.state() === before, L.seen.length], [false, 'invalid-argument', true, updates], `${name}: ${label}`);
+    }
+  }
+  for (const [label, floor] of [['new Array(4)', new Array(4)], ['[-40, пусто, 300, 230]', Object.assign(new Array(4), { 0: -40, 2: 300, 3: 230 })], ['[пусто, -10, 300, 230]', Object.assign(new Array(4), { 1: -10, 2: 300, 3: 230 })], ['[-40, -10, 300, пусто]', Object.assign(new Array(4), { 0: -40, 1: -10, 2: 300 })], ['[-40, -10, NaN, 230]', [-40, -10, NaN, 230]]]) {
+    const r = L.core.setDisplay({ playFloor: floor });
+    assert.deepEqual([r.ok, r.error?.code, L.state() === before], [false, 'invalid-argument', true], `playFloor ${label}`);
+  }
+  assert.deepEqual([L.state().play.drag.toy, toys(L).bowl.home, L.state().display.playFloor], ['ball', false, FLOOR], 'перенос мячика, место миски и пол — прежние');
+  for (const toy of ['bowl', 'ball']) assert.ok(toys(L)[toy].at.every(Number.isFinite), toy);
+  // Конечные точки — работают (контроль).
+  L.core.toy.cancel();
+  assert.deepEqual([L.core.toy.drag('bowl', toys(L).bowl.at).ok, L.core.toy.drag('bowl', [60, 214]).ok, L.core.toy.drop().ok], [true, true, true]);
+  L.plan.advance(2000);
+  assert.equal(L.core.interact({ type: 'bowl', to: [80, 214] }).ok, true);
+  for (const toy of ['bowl', 'ball']) assert.ok(toys(L)[toy].at.every(Number.isFinite), `${toy}: после конечных точек`);
 });

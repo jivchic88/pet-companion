@@ -48,7 +48,15 @@ const OPTIONS = ['storage', 'scenes', 'progress', 'clock', 'random', 'scheduler'
 // Объявление отображения (setDisplay, § 6.4); playFloor и playTouch — «Поиграть» (PL04.3).
 const DISPLAY = ['full', 'moving', 'pets', 'scenes', 'views', 'playFloor', 'playTouch'];
 const ACTIONS = ['pet', 'paw', 'bowl', 'ball'];
-const point = (value) => Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
+// Ровно n конечных чисел в собственных индексах 0…n−1. Не every: он пропускает пустые индексы разреженного массива
+// (new Array(2) прошёл бы и дал NaN в местах, а запись — x, y: null; по независимой проверке PL04.3).
+function numbers(value, n) {
+  if (!Array.isArray(value) || value.length !== n) return false;
+  for (let i = 0; i < n; i += 1) if (!Object.hasOwn(value, i) || !Number.isFinite(value[i])) return false;
+  return true;
+}
+// Точка [x, y] (единицы сцены или рисунка): room.move/drag, interact({ type: 'bowl', to }), toy.drag.
+const point = (value) => numbers(value, 2);
 // Неявная запись (первое включение, отметка ступени, праздник, приветствие) повреждённое значение не заменяет (§ 8.2).
 const KEEP = Symbol('повреждённое значение неявная запись не заменяет');
 
@@ -1102,7 +1110,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
     // Пол «Поиграть» — четыре конечных числа в единицах рисунка, l < r и t < b; радиус касания лапы — конечное число ≥ 0.
     if ('playFloor' in value) {
       const floor = value.playFloor;
-      if (!(Array.isArray(floor) && floor.length === 4 && floor.every(Number.isFinite) && floor[0] < floor[2] && floor[1] < floor[3])) return { error: 'playFloor — [l, t, r, b]: четыре конечных числа единиц рисунка, l < r, t < b.' };
+      if (!(numbers(floor, 4) && floor[0] < floor[2] && floor[1] < floor[3])) return { error: 'playFloor — [l, t, r, b]: четыре конечных числа единиц рисунка, l < r, t < b.' };
       patch.playFloor = [...floor];
     }
     if ('playTouch' in value) {
@@ -1250,7 +1258,8 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
   // ---------- «Обустроить уголок» (§ 6.4, сценарий § 6.8; editor.mjs) ----------
 
   // Только в открытом редакторе (not-open); предмет — доступный показанному питомцу на этой ступени (unknown-id); точка —
-  // [x, y] единиц сцены 400×250.
+  // [x, y] единиц сцены 400×250. Предмет — собственный ключ черновика, а не in: унаследованные constructor, toString,
+  // __proto__ — unknown-id до изменения выбора, черновика и переноса (по независимой проверке PL04.3).
   const roomAct = (name, body, { sync = false } = {}) =>
     act(
       `room.${name}`,
@@ -1262,7 +1271,7 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
       },
       { sync },
     );
-  const itemOf = (id) => (typeof id !== 'string' ? fail('invalid-argument', 'Предмет — строка ID.') : id in draft.pos ? null : fail('unknown-id', `Предмета «${id}» нет в этой комнате.`));
+  const itemOf = (id) => (typeof id !== 'string' ? fail('invalid-argument', 'Предмет — строка ID.') : Object.hasOwn(draft.pos, id) ? null : fail('unknown-id', `Предмета «${id}» нет в этой комнате.`));
   const told = (list) => {
     for (const text of list) effects.push({ type: 'announce', text });
   };
@@ -1328,16 +1337,18 @@ function core({ storage, scenes, progress, clock, random, scheduler, log }) {
         return Editor.dragCancel(draft) ? {} : { changed: false };
       }),
     // «Сохранить»: идущий перенос отменяется, а не дописывается; пишутся только передвинутые здесь предметы показанного
-    // питомца, отличные от подтверждённого (сверено перед решением). Без изменений — выход без записи. Синхронно: успех —
-    // выход; отказ — редактор открыт, черновик цел, failed, поля несохранённые (память ключа, § 8.4). Асинхронно — выход
-    // сразу, расстановка действует в памяти (pending), итог — поздним объявлением. Скрытых повторов нет.
+    // питомца, отличные от подтверждённого (сверено перед решением), и его предметы, несохранённые сейчас — после отказа
+    // записи, в том числе позднего, пришедшего уже при открытом редакторе (по независимой проверке PL04.3: иначе такой
+    // предмет «Не сохранено» в черновике, а save — «не изменилась» без записи). Без изменений — выход без записи.
+    // Синхронно: успех — выход; отказ — редактор открыт, черновик цел, failed, поля несохранённые (память ключа, § 8.4).
+    // Асинхронно — выход сразу, расстановка действует в памяти (pending), итог — поздним объявлением. Скрытых повторов нет.
     save: () =>
       roomAct(
         'save',
         (step) => {
           step.applied = true;
           const { kind, stage } = draft;
-          const moved = Editor.prepare(draft, roomPos(kind, stage, { committed: true }));
+          const moved = Editor.prepare(draft, roomPos(kind, stage, { committed: true }), roomUnsaved(kind));
           if (!Object.keys(moved).length) {
             const fresh = toCorner(step);
             told([Editor.ROOM_TEXT.same]);

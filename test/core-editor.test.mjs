@@ -6,12 +6,15 @@
 // переносе; чужая расстановка без потери черновика; запись только передвинутых здесь предметов с неизвестными точками,
 // полями, животными и большим v; синхронный отказ (несохранённое, честные сообщения, повтор следующей правкой, без скрытых
 // повторов); асинхронно — выход сразу, pending, поздний успех и отказ, поздний исход не трогает новый редактор и новое ядро.
-// Данные синтетические.
+// По независимой проверке PL04.3: поздний отказ при снова открытом редакторе — «Сохранить» пишет несохранённый предмет (и
+// после «Вернуть обычную расстановку» — место черновика, а не прежнее несохранённое), не трогая нетронутое другой вкладки;
+// ID предмета — только свой (унаследованные constructor, toString, __proto__ — unknown-id без порчи черновика); точка —
+// ровно два конечных числа (разреженный массив — invalid-argument, а не NaN и запись null). Данные синтетические.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ROOM_TEXT } from '../pet/core/editor.mjs';
 import { arrange, HOME, nudge, roomItems, STEP } from '../pet/core/room.mjs';
-import { DAY, host, LEGACY_DISPLAY, life, manual } from './core-kit.mjs';
+import { badPoints, DAY, host, LEGACY_DISPLAY, life, manual } from './core-kit.mjs';
 
 const CAT = { v: 1, seenStage: 0, greetDay: DAY };
 const saved = (L, key, extra = {}) => L.core.notify('saved', { key, counted: true, ...extra });
@@ -262,4 +265,174 @@ test('асинхронно: выход сразу, pending, поздний ус�
   await store.drain();
   assert.deepEqual([await third.save.done, told(L).length, next.state().room.draft.other], ['saved', announced, true], 'прежнему — только done; новое ядро поглотило чужую запись');
   assert.equal(next.state().room.pos.yarn[0], 120);
+});
+
+// Асинхронный координатор: клубок передвинут, «Сохранить» — pending (выход в уголок), редактор снова открыт, пока запись
+// идёт: несохранённого ещё нет, клубок — из памяти ключа.
+async function pendingAgain(initial = { cat: CAT }) {
+  const store = manual(initial);
+  assert.equal(await store.load(), 'ready');
+  const L = life({}, { storage: store.storage, counts: host(1, 1), display: LEGACY_DISPLAY });
+  L.core.start();
+  await store.drain();
+  L.core.open('room');
+  L.core.room.move('yarn', [250, 234]);
+  const first = L.core.room.save();
+  assert.deepEqual([first.save.status, L.state().view.open], ['pending', 'corner']);
+  assert.equal(L.core.open('room').ok, true);
+  assert.deepEqual([draft(L).saving, draft(L).changed, draft(L).pos.yarn, L.state().save.room.unsaved], [true, [], [250, 234], []]);
+  return { store, L, first };
+}
+async function lateFail(store, first) {
+  await store.next('get', 'room');
+  await store.next('set', 'room', 'fail');
+  assert.equal(await first.save.done, 'failed');
+}
+
+test('поздний отказ при снова открытом редакторе: «Сохранить» ставит несохранённый клубок — честный pending, затем saved; повторов нет; destroy — только done', async () => {
+  for (const end of ['доставка', 'destroy']) {
+    const { store, L, first } = await pendingAgain();
+    await lateFail(store, first);
+    assert.deepEqual([draft(L).changed, L.state().save.room.status, L.state().save.room.unsaved, store.waiting.length, told(L).at(-1)], [['yarn'], 'failed', ['cat.yarn'], 0, ROOM_TEXT.late], 'отказ: «Не сохранено», несохранённое, без скрытого повтора');
+    const retry = L.core.room.save();
+    assert.deepEqual([retry.ok, retry.closed, retry.text, retry.save.status, retry.save.keys, L.state().view.open, L.state().save.room.status, L.state().room.pos.yarn], [true, true, '', 'pending', ['room'], 'corner', 'pending', [250, 234]], `${end}: явное «Сохранить» — операция room, выход сразу`);
+    if (end === 'destroy') {
+      const announced = told(L).length;
+      L.core.destroy();
+      await store.drain();
+      assert.deepEqual([await retry.save.done, told(L).length, store.json('room')], ['saved', announced, { v: 1, cat: { yarn: { x: 250, y: 234 } } }], 'после destroy — только done; запись выполнена');
+      continue;
+    }
+    await store.drain();
+    assert.deepEqual([await retry.save.done, store.json('room'), L.state().save.room, told(L).at(-1)], ['saved', { v: 1, cat: { yarn: { x: 250, y: 234 } } }, { status: 'saved', pending: [], unsaved: [], corrupt: false }, ROOM_TEXT.saved]);
+    L.core.destroy();
+  }
+});
+
+test('поздний отказ при снова открытом редакторе и правке другого предмета: пишутся клубок и миска; миска возвращена на место — клубок всё равно', async () => {
+  for (const variant of ['миска передвинута', 'миска возвращена на место']) {
+    const { store, L, first } = await pendingAgain();
+    const H = draft(L).pos.bowl;
+    L.core.room.move('bowl', [300, 230]);
+    if (variant === 'миска возвращена на место') L.core.room.move('bowl', H);
+    await lateFail(store, first);
+    const retry = L.core.room.save();
+    assert.equal(retry.save.status, 'pending', variant);
+    await store.drain();
+    const cat = variant === 'миска передвинута' ? { yarn: { x: 250, y: 234 }, bowl: { x: 300, y: 230 } } : { yarn: { x: 250, y: 234 } };
+    assert.deepEqual([await retry.save.done, store.json('room'), L.state().save.room.unsaved, store.waiting.length], ['saved', { v: 1, cat }, [], 0], variant);
+    L.core.destroy();
+  }
+});
+
+test('поздний успех при снова открытом редакторе: «Сохранить» без правок — выход без лишней записи', async () => {
+  const { store, L, first } = await pendingAgain();
+  await store.drain();
+  assert.equal(await first.save.done, 'saved');
+  assert.deepEqual([draft(L).changed, draft(L).saving, L.state().save.room.unsaved], [[], false, []]);
+  const same = L.core.room.save();
+  assert.deepEqual([same.save.status, same.closed, same.text, store.waiting.length, told(L).at(-1)], ['none', true, ROOM_TEXT.same, 0, ROOM_TEXT.same]);
+  L.core.destroy();
+});
+
+test('поздний отказ и чужая расстановка: «Сохранить» пишет только свой несохранённый клубок — подушка другой вкладки, миска, собака, неизвестное и больший v целы', async () => {
+  const stored = { v: 3, theme: 'night', cat: { rest: { x: 150, y: 210, tilt: 3 }, bowl: { x: 300, y: 230, keep: 'unknown' } }, dog: { rope: { x: 330, y: 240 } }, 'example.bunny': { carrot: { x: 5, y: 6 } } };
+  const { store, L, first } = await pendingAgain({ cat: CAT, room: stored });
+  // Другая вкладка — до чтения операции: подушка кота и канат собаки (свежее чтение участка — чужое, § 8.3, шаг 4а).
+  const other = { ...stored, cat: { ...stored.cat, rest: { x: 160, y: 210, tilt: 3 } }, dog: { rope: { x: 40, y: 233 } } };
+  store.data.set('room', JSON.stringify(other));
+  await lateFail(store, first);
+  const d = draft(L);
+  assert.deepEqual([d.other, d.pos.rest, d.changed, L.state().save.room.unsaved], [true, [150, 210], ['rest', 'yarn'], ['cat.yarn']], 'черновик не затёрт, other; несохранённый — только клубок');
+  const retry = L.core.room.save();
+  assert.equal(retry.save.status, 'pending');
+  await store.drain();
+  assert.deepEqual([await retry.save.done, store.json('room')], ['saved', { ...other, cat: { ...other.cat, yarn: { x: 250, y: 234 } } }], 'только клубок: подушка другой вкладки, миска, собака, неизвестное и v 3 — как были');
+  L.core.destroy();
+});
+
+test('после отказа записи «Вернуть обычную расстановку» или клубок на прежнее место — «Сохранить» пишет место черновика, а не прежнее несохранённое', () => {
+  for (const variant of ['reset', 'клубок на прежнее место']) {
+    const L = editor({ cat: CAT, room: { v: 1, cat: { bowl: { x: 300, y: 230 } } } });
+    L.store.denySet = /room/;
+    L.core.room.move('yarn', [120, 234]);
+    assert.equal(L.core.room.save().save.status, 'failed');
+    assert.equal(L.core.room.cancel().text, ROOM_TEXT.kept);
+    L.store.denySet = null;
+    L.core.open('room');
+    assert.deepEqual([draft(L).pos.yarn, draft(L).changed, L.state().room.pos.yarn], [[120, 234], ['yarn'], [120, 234]]);
+    if (variant === 'reset') L.core.room.reset();
+    else L.core.room.move('yarn', HOME.yarn);
+    const r = L.core.room.save();
+    const cat = variant === 'reset' ? {} : { bowl: { x: 300, y: 230 } };
+    assert.deepEqual([r.save.status, r.closed, r.text, L.json('room'), L.state().save.room.unsaved, L.state().room.pos.yarn, L.state().room.pos.bowl], ['saved', true, ROOM_TEXT.saved, { v: 1, cat }, [], HOME.yarn, variant === 'reset' ? HOME.bowl : [300, 230]], `${variant}: уголок — как в черновике`);
+  }
+});
+
+test('ID предмета — только свой предмет черновика: унаследованные имена — unknown-id без изменений; дальше обычные команды работают', () => {
+  const calls = { select: (L, id) => L.core.room.select(id), move: (L, id) => L.core.room.move(id, [300, 230]), drag: (L, id) => L.core.room.drag(id, [300, 230]) };
+  let round = 0;
+  for (const [method, call] of Object.entries(calls)) {
+    for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
+      for (const dragging of [false, true]) {
+        const label = `${method}('${id}')${dragging ? ' при переносе' : ''}`;
+        const L = editor({ cat: CAT, room: { v: 1, cat: { yarn: { x: 60, y: 230 } } } });
+        L.core.room.select('yarn');
+        L.core.room.nudge('right');
+        if (dragging) L.core.room.drag('bowl', [260, 230]);
+        const before = L.state();
+        const updates = L.seen.length;
+        const r = call(L, id);
+        assert.deepEqual([r.ok, r.error?.code, L.state() === before, L.seen.length, roomWrites(L)], [false, 'unknown-id', true, updates, 0], `${label}: отказ до изменения — снимок, черновик и перенос прежние, без обновления и записи`);
+        if (dragging) assert.equal(L.core.room.dragCancel().changed, true, label);
+        assert.deepEqual([L.core.room.select('rest').changed, L.core.room.select('bowl').changed, L.core.room.nudge('left').changed, draft(L).pick], [true, true, true, 'bowl'], `${label}: select и nudge работают`);
+        const bowl = draft(L).pos.bowl;
+        if (round++ % 2) {
+          assert.deepEqual([L.core.room.cancel().text, L.state().room.pos.yarn, roomWrites(L)], [ROOM_TEXT.cancelled, [60, 230], 0], `${label}: cancel`);
+        } else {
+          const saved = L.core.room.save();
+          assert.deepEqual([saved.save.status, L.json('room')], ['saved', { v: 1, cat: { yarn: { x: 70, y: 230 }, bowl: { x: bowl[0], y: bowl[1] } } }], `${label}: save`);
+        }
+      }
+    }
+  }
+  // Контроли: обычный неизвестный, предмет собаки, предмет другой ступени, не строка; свои предметы — работают.
+  const L = editor();
+  for (const [id, code] of [['future-item', 'unknown-id'], ['rope', 'unknown-id'], ['ball', 'unknown-id'], [5, 'invalid-argument'], [null, 'invalid-argument']]) {
+    for (const [method, call] of Object.entries(calls)) assert.equal(call(L, id).error.code, code, `${method}(${id})`);
+  }
+  for (const id of ['rest', 'bowl', 'yarn']) assert.equal(L.core.room.select(id).ok, true, id);
+});
+
+test('точка — ровно два конечных числа: разреженные, неконечные, неверной длины — invalid-argument до изменения; перенос и данные целы; save не пишет null', () => {
+  const stored = { v: 3, cat: { bowl: { x: 300, y: 230, keep: 'unknown' } } };
+  // Сценарий проверки: move('bowl', new Array(2)), затем save — без изменений и записи.
+  const S = editor({ cat: CAT, room: stored });
+  const refused = S.core.room.move('bowl', new Array(2));
+  assert.deepEqual([refused.ok, refused.error?.code, S.state().room.draft.pos.bowl], [false, 'invalid-argument', [300, 230]]);
+  const same = S.core.room.save();
+  assert.deepEqual([same.save.status, same.text, S.json('room'), roomWrites(S)], ['none', ROOM_TEXT.same, stored, 0]);
+  // Каждая неверная точка в move и drag: ни черновик, ни идущий перенос не меняются.
+  const L = editor({ cat: CAT, room: stored });
+  L.core.room.move('yarn', [120, 234]);
+  L.core.room.drag('bowl', [310, 228]);
+  const before = L.state();
+  const updates = L.seen.length;
+  for (const [label, bad] of badPoints()) {
+    for (const method of ['move', 'drag']) {
+      const r = L.core.room[method]('bowl', bad);
+      assert.deepEqual([r.ok, r.error?.code, L.state() === before, L.seen.length, roomWrites(L)], [false, 'invalid-argument', true, updates, 0], `${method}(bowl, ${label})`);
+    }
+  }
+  assert.deepEqual([draft(L).drag.id, draft(L).pos.bowl, draft(L).pos.yarn], ['bowl', [300, 230], [120, 234]], 'идущий перенос и черновик — прежние');
+  // После отказов — обычное сохранение: без null и NaN, прежние координаты и неизвестное поле миски целы.
+  assert.equal(L.core.room.dragCancel().changed, true);
+  assert.equal(L.core.room.save().save.status, 'saved');
+  assert.deepEqual(L.json('room'), { v: 3, cat: { bowl: { x: 300, y: 230, keep: 'unknown' }, yarn: { x: 120, y: 234 } } });
+  // Конечные точки — работают (контроль).
+  L.core.open('room');
+  assert.deepEqual([L.core.room.drag('bowl', [320, 232]).ok, L.core.room.drop().ok, L.core.room.move('yarn', [140, 234]).ok], [true, true, true]);
+  assert.equal(L.core.room.save().save.status, 'saved');
+  const out = L.json('room');
+  assert.deepEqual([out.v, out.cat.bowl.keep, [out.cat.bowl.x, out.cat.bowl.y].every(Number.isFinite), out.cat.yarn, L.raw('room').includes('null')], [3, 'unknown', true, { x: 140, y: 234 }, false]);
 });

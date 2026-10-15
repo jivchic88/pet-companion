@@ -27,9 +27,10 @@ const title = (draft, id) => itemTitle(id, draft.stage);
 
 // Черновик: saved — расстановка из памяти ключа (с несохранёнными правками), baseline — подтверждённая и уже поставленная
 // в запись (для «Не сохранено» и для того, что писать); unsaved — предметы с несохранёнными полями: их пишет следующее
-// «Сохранить». Выбран — место отдыха.
+// «Сохранить» (и те, что станут несохранёнными позже, — prepare). Выбран — место отдыха. Предмет черновика — только его
+// собственный ключ (Object.hasOwn), не унаследованное имя.
 export function openDraft({ kind, stage, saved, baseline, unsaved = [] }) {
-  return { kind, stage, pos: { ...saved }, baseline: { ...baseline }, pick: 'rest', touched: new Set(unsaved.filter((id) => id in saved)), other: false, failed: false, drag: null };
+  return { kind, stage, pos: { ...saved }, baseline: { ...baseline }, pick: 'rest', touched: new Set(unsaved.filter((id) => Object.hasOwn(saved, id))), other: false, failed: false, drag: null };
 }
 
 // Выбор для шага кнопками (без объявления: кнопка отмечена). Во время переноса — ничего (кнопки ждут его конца).
@@ -116,7 +117,7 @@ export function restage(draft, stage, saved, baseline) {
   draft.stage = stage;
   draft.baseline = { ...baseline };
   draft.pos = arrange(draft.kind, stage, { ...saved, ...draft.pos }).pos;
-  if (!(draft.pick in draft.pos)) draft.pick = 'rest';
+  if (!Object.hasOwn(draft.pos, draft.pick)) draft.pick = 'rest';
 }
 
 // Расстановка изменилась помимо редактора. foreign — чужая запись (другая вкладка, другое ядро): если сменилась
@@ -130,12 +131,18 @@ export function rebase(draft, baseline, foreign) {
 }
 
 // «Сохранить»: перенос отменяется, а не дописывается; черновик — по правилам текущей ступени; пишутся передвинутые здесь
-// предметы, чьё место отличается от подтверждённого (baseline — свежая расстановка после сверки). Возвращает moved.
-export function prepare(draft, baseline) {
+// предметы, чьё место отличается от подтверждённого (baseline — свежая расстановка после сверки), и unsaved — предметы
+// питомца, несохранённые сейчас (после сверки перед решением; в том числе поздний отказ записи, пришедший при открытом
+// редакторе, — его при открытии ещё не было). Несохранённый пишется местом черновика, даже совпавшим с подтверждённым:
+// иначе в памяти ключа осталось бы несохранённое место, которого в черновике нет («Вернуть обычную расстановку» после
+// отказа). Нетронутые здесь сохранённые предметы (другой вкладки) не пишутся. Возвращает moved.
+export function prepare(draft, baseline, unsaved = []) {
   draft.drag = null;
   draft.pos = arrange(draft.kind, draft.stage, draft.pos).pos;
   draft.baseline = { ...baseline };
-  return movedItems(draft.pos, baseline, [...draft.touched]);
+  const moved = movedItems(draft.pos, baseline, [...draft.touched]);
+  for (const id of unsaved) if (Object.hasOwn(draft.pos, id)) moved[id] = draft.pos[id];
+  return moved;
 }
 
 // Снимок черновика (простые данные): места, выбор, не сохранённые предметы, другая вкладка, отказ, идёт ли запись, перенос

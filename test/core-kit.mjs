@@ -1,6 +1,6 @@
 // Только проверки ядра (test/core*.test.mjs): поддельные хранилища — localStorage-подобное синхронное (веб-координатор с
 // подменённым area и целью событий storage) и асинхронное с ручным подтверждением каждого чтения и записи; часы, счёт
-// хоста, журнал, шпион подключений координатора. Данные синтетические.
+// хоста, журнал, шпион подключений координатора, набор неверных точек. Данные синтетические.
 import assert from 'node:assert/strict';
 import { storageKeys } from '../pet/core/formats/legacy.mjs';
 import { createPetCore } from '../pet/core/index.mjs';
@@ -127,6 +127,29 @@ export function manual(initial = {}, journal = null) {
     },
   };
   return self;
+}
+
+// Неверные точки [x, y] для room.move/drag, interact({ type: 'bowl', to }), toy.drag (по независимой проверке PL04.3):
+// разреженные (пустой индекс — every его пропускает), undefined, NaN, ±Infinity, неверная длина, не массив. Каждый вызов —
+// новые массивы. Пары [подпись, значение].
+export function badPoints() {
+  return [
+    ['new Array(2)', new Array(2)],
+    ['[пусто, 230]', Object.assign(new Array(2), { 1: 230 })],
+    ['[300, пусто]', Object.assign(new Array(2), { 0: 300 })],
+    ['[undefined, 230]', [undefined, 230]],
+    ['[300, undefined]', [300, undefined]],
+    ['[NaN, 230]', [NaN, 230]],
+    ['[300, Infinity]', [300, Infinity]],
+    ['[-Infinity, 230]', [-Infinity, 230]],
+    ['[300]', [300]],
+    ['[300, 230, 1]', [300, 230, 1]],
+    ['[]', []],
+    ['массивоподобный объект', { 0: 300, 1: 230, length: 2 }],
+    ['строки', ['300', '230']],
+    ['строка', '300,230'],
+    ['null', null],
+  ];
 }
 
 // Часы ядра: ручное время и день.
