@@ -1391,6 +1391,343 @@ async function csp(browser, base, check, open) {
   }
 }
 
+// Вход диалога вида id: доступное имя, раскрытие, связь с диалогом, точка «новое», облик, питомец и вид рисунка, фокус в
+// своём дереве; old — та же кнопка, что помечена markEntry (не пересоздана).
+const entryOf = (page, id) =>
+  shade(page, id, 'const b = shadow?.querySelector(".cat-view-btn"); const art = b?.querySelector(".cat-art"); return b ? { label: b.getAttribute("aria-label"), expanded: b.getAttribute("aria-expanded"), controls: b.getAttribute("aria-controls"), dot: b.querySelector(".cat-dot")?.hidden === false, coat: art?.dataset.coat ?? null, kind: art?.dataset.kind ?? (art ? "cat" : null), view: art?.dataset.view ?? null, focused: shadow.activeElement === b, old: b.hasAttribute("data-qa-old") } : null;');
+const markEntry = (page, id) => shade(page, id, 'shadow.querySelector(".cat-view-btn")?.setAttribute("data-qa-old", ""); return true;');
+// Кнопки контейнера с этим вычисленным доступным именем (роль и имя — дерево доступности Playwright; теневое дерево открыто).
+const byName = (page, id, name) => page.locator(`#${id}`).getByRole('button', { name, exact: true }).count();
+// Стили вида загружены: место питомца видно.
+const readyIn = (page, id) => page.waitForFunction((where) => document.querySelector(`#${where} > [data-pet-view]`)?.shadowRoot?.querySelector('.pet-view')?.hidden === false, id, { timeout: 5000 });
+// Подключить вид со счётом сайта window.qaCounts и журналами: onOpenChange — window.qaOpen, начатые реакции ядра —
+// window.qaPlayed[name] (тип, у сценки — «:scene»). styles — свой набор кота с CSS по этому адресу стенда (и штатная собака).
+const mountCounted = (page, name, id, namespace, styles = null) =>
+  page.evaluate(
+    ([n, where, ns, css]) => {
+      window.qaViews ??= {};
+      window.qaOpen ??= [];
+      window.qaPlayed ??= {};
+      const { catWeb, dogWeb } = window.web;
+      const kits = css ? { kits: [{ ...catWeb, styles: [new URL(css, location.href).href] }, dogWeb] } : {};
+      const view = window.web.mountPetIn(document.getElementById(where), { namespace: ns, progress: () => window.qaCounts, onOpenChange: (open) => window.qaOpen.push(`${n}:${open}`), ...kits });
+      window.qaViews[n] = view;
+      const played = (window.qaPlayed[n] = []);
+      let last = null;
+      view.core?.subscribe(
+        (update) => {
+          const reaction = update.snapshot.pose.reaction;
+          if (reaction && reaction.id !== last) played.push(`${reaction.type}${reaction.scene ? ':scene' : ''}`);
+          last = reaction?.id ?? null;
+        },
+        { initial: false },
+      );
+      return { mounted: view.mounted, core: view.core !== null };
+    },
+    [name, id, namespace, styles],
+  );
+// Управляемый шлюз ответов адреса (page.route): запросы ждут решения проверки — open() пропускает, fail() отвечает 404;
+// held() — дождаться первого удержанного запроса (не дольше 5 с — тогда итог проверки покажет, что запроса не было).
+// Запрос отключённого вида браузер мог уже отменить — тогда ответ ему не нужен.
+async function gate(page, pattern) {
+  let decide;
+  let arrived;
+  const decided = new Promise((resolve) => (decide = resolve));
+  const first = new Promise((resolve) => (arrived = resolve));
+  await page.route(pattern, async (route) => {
+    arrived();
+    if ((await decided) === 'fail') await route.fulfill({ status: 404, body: '' }).catch(() => {});
+    else await route.continue().catch(() => {});
+  });
+  return { open: () => decide('open'), fail: () => decide('fail'), held: () => Promise.race([first, new Promise((resolve) => setTimeout(resolve, 5000))]) };
+}
+// Шаги часов с продолжениями IndexedDB и задач страницы между ними (настоящая база идёт своим временем).
+async function steps(page, n, ms) {
+  for (let i = 0; i < n; i += 1) {
+    await page.clock.runFor(ms);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  }
+}
+const sceneDbs = (page) => page.evaluate(async () => (await indexedDB.databases()).map((db) => db.name).filter((name) => name.endsWith(':scene')));
+
+// Доступное имя входа после пересоздания кнопки (независимая проверка PL07): смена облика пересоздаёт кнопку питомца в
+// контейнере — прямой командой, кнопкой уголка при открытом диалоге и тихой правкой соседнего ядра того же namespace; кот и
+// собака, целиком и портретом. Новая кнопка — с доступным именем (и по дереву доступности), aria-expanded, aria-controls,
+// точкой «новое»; фокус остаётся на питомце; соседний контейнер не меняется.
+async function labels(browser, base, check, open) {
+  for (const viewport of [
+    { width: 1280, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    const label = `доступное имя входа ${viewport.width}×${viewport.height}`;
+    const { context, page } = await open(browser, { viewport }, viewInit);
+    try {
+      await page.goto(`${base}container`);
+      await page.waitForFunction(() => window.qaReady);
+      await page.evaluate(() => {
+        // Знаков на ступень «Освоился», увидена — «Познакомились»: точка «новое» у входа. Приветствие дня уже было.
+        localStorage.setItem('lab:cat:v1', JSON.stringify({ v: 1, seenStage: 0, greetDay: '2026-10-11' }));
+        localStorage.setItem('lab-b:cat:v1', JSON.stringify({ v: 1, seenStage: 0, greetDay: '2026-10-11' }));
+        window.qaCounts = { marks: 3, today: 1 };
+      });
+      await mountCounted(page, 'a', 'a', 'lab');
+      await mountCounted(page, 'b', 'b', 'lab-b');
+      await readyIn(page, 'a');
+      await readyIn(page, 'b');
+      await call(page, 'b', 'core.setPet', 'dog');
+      await call(page, 'a', 'core.setName', 'Альфа');
+      const NAME = 'Альфа — уголок кота, есть новая вещь';
+      const DOG = 'Тоби — уголок собаки, есть новая вещь';
+      const before = await entryOf(page, 'a');
+      check(`${label}: до смены облика — имя входа «${NAME}», точка «новое»`, before.label === NAME && before.dot && (await byName(page, 'a', NAME)) === 1, JSON.stringify(before));
+      // Прямая команда при фокусе на питомце.
+      await page.locator('#a .cat-view-btn').focus();
+      await markEntry(page, 'a');
+      const neighbour = await entryOf(page, 'b');
+      const command = await call(page, 'a', 'core.setAppearance', { coat: 'ginger' });
+      const direct = await entryOf(page, 'a');
+      check(`${label}: core.setAppearance — кнопка пересоздана с доступным именем «${NAME}» (и в дереве доступности), aria-expanded false, aria-controls cat-sheet, точка «новое»; фокус на новой кнопке`, command.ok && command.save.status === 'saved' && !direct.old && direct.coat === 'ginger' && direct.label === NAME && direct.expanded === 'false' && direct.controls === 'cat-sheet' && direct.dot && direct.focused && (await byName(page, 'a', NAME)) === 1, JSON.stringify({ command, direct }));
+      check(`${label}: соседний контейнер (собака, портрет) не изменился`, JSON.stringify(await entryOf(page, 'b')) === JSON.stringify(neighbour) && neighbour.label === DOG && neighbour.kind === 'dog' && neighbour.view === 'portrait', JSON.stringify(neighbour));
+      // Собака портретом, фокус — у первого контейнера.
+      await markEntry(page, 'b');
+      await call(page, 'b', 'core.setAppearance', { coat: 'spotted' });
+      const dog = await entryOf(page, 'b');
+      check(`${label}: собака портретом — облик командой: новая кнопка «${DOG}», aria-expanded false, aria-controls, точка «новое»; фокус остался у первого контейнера`, !dog.old && dog.coat === 'spotted' && dog.kind === 'dog' && dog.view === 'portrait' && dog.label === DOG && dog.expanded === 'false' && dog.controls === 'cat-sheet' && dog.dot && (await byName(page, 'b', DOG)) === 1 && (await entryOf(page, 'a')).focused && (await page.evaluate(() => document.activeElement === document.querySelector('#a > [data-pet-view]'))), JSON.stringify(dog));
+      // Кот портретом: узкий контейнер, затем облик.
+      await page.evaluate(() => (document.getElementById('a').style.width = '120px'));
+      await until(page, () => document.querySelector('#a > [data-pet-view]').shadowRoot.querySelector('.cat-art')?.dataset.view === 'portrait');
+      await markEntry(page, 'a');
+      await call(page, 'a', 'core.setAppearance', { coat: 'smoke' });
+      const portrait = await entryOf(page, 'a');
+      check(`${label}: кот портретом — облик командой: новая кнопка «${NAME}», aria-expanded, aria-controls, точка «новое»`, !portrait.old && portrait.view === 'portrait' && portrait.coat === 'smoke' && portrait.label === NAME && portrait.expanded === 'false' && portrait.controls === 'cat-sheet' && portrait.dot && (await byName(page, 'a', NAME)) === 1, JSON.stringify(portrait));
+      await page.evaluate(() => (document.getElementById('a').style.width = ''));
+      await until(page, () => document.querySelector('#a > [data-pet-view]').shadowRoot.querySelector('.cat-art')?.dataset.view === 'full');
+      // Встроенный выбор облика при открытом уголке, затем Esc. Открытый уголок отмечает ступень увиденной — дальше имя
+      // без «есть новая вещь» и без точки (снимок ядра: progress.unseen).
+      const SEEN = 'Альфа — уголок кота';
+      const DOG_SEEN = 'Тоби — уголок собаки';
+      await page.locator('#a .cat-view-btn').click();
+      await finishOpen(page, 'a');
+      await markEntry(page, 'a');
+      await page.locator('#a .cat-settings > summary').click();
+      await page.locator('#a .cat-coat-option:has(input[value="tuxedo"])').click();
+      const during = { entry: await entryOf(page, 'a'), unseen: (await state(page, 'a')).progress.unseen };
+      await page.keyboard.press('Escape');
+      await closedIn(page, 'a');
+      const closed = await entryOf(page, 'a');
+      check(`${label}: облик кнопкой уголка при открытом диалоге — новая кнопка с именем «${SEEN}» (ступень увидена — без точки) и aria-expanded true; Esc — фокус на питомце, aria-expanded false`, !during.entry.old && during.unseen === false && during.entry.coat === 'tuxedo' && during.entry.label === SEEN && !during.entry.dot && during.entry.expanded === 'true' && during.entry.controls === 'cat-sheet' && closed.focused && closed.expanded === 'false' && closed.label === SEEN && !closed.dot && (await byName(page, 'a', SEEN)) === 1 && (await openLog(page)).join() === 'a:true,a:false', JSON.stringify({ during, closed }));
+      // Тихая правка соседнего ядра того же namespace: облик, затем питомец. Объявление выбора в уголке уже прозвучало.
+      await page.clock.runFor(200);
+      await mountCounted(page, 'c', 'c', 'lab');
+      await readyIn(page, 'c');
+      await page.locator('#a .cat-view-btn').focus();
+      await markEntry(page, 'a');
+      await shade(page, 'a', 'shadow.querySelector("#cat-live").textContent = ""; return true;');
+      await call(page, 'c', 'core.setAppearance', { coat: 'ginger' });
+      await until(page, () => document.querySelector('#a > [data-pet-view]').shadowRoot.querySelector('.cat-view-btn .cat-art')?.dataset.coat === 'ginger');
+      await page.clock.runFor(200);
+      const quiet = { entry: await entryOf(page, 'a'), live: await liveOf(page, 'a') };
+      check(`${label}: облик правкой соседнего вида того же namespace — тихо (без объявлений): новая кнопка «${SEEN}», aria-*, фокус на питомце`, !quiet.entry.old && quiet.entry.coat === 'ginger' && quiet.entry.label === SEEN && !quiet.entry.dot && quiet.entry.expanded === 'false' && quiet.entry.controls === 'cat-sheet' && quiet.entry.focused && quiet.live.join('|') === '|' && (await byName(page, 'a', SEEN)) === 1, JSON.stringify(quiet));
+      await call(page, 'c', 'core.setPet', 'dog');
+      await until(page, () => document.querySelector('#a > [data-pet-view]').shadowRoot.querySelector('.cat-view-btn .cat-art')?.dataset.kind === 'dog');
+      const kind = await entryOf(page, 'a');
+      check(`${label}: питомец правкой соседа — собака у первого: кнопка «${DOG_SEEN}», aria-*, фокус на питомце`, kind.kind === 'dog' && kind.label === DOG_SEEN && !kind.dot && kind.expanded === 'false' && kind.controls === 'cat-sheet' && kind.focused && (await byName(page, 'a', DOG_SEEN)) === 1, JSON.stringify(kind));
+      await page.evaluate(() => Object.values(window.qaViews).forEach((view) => view.destroy()));
+      check(`${label}: без ошибок страницы и необработанных отклонений`, page.qaErrors.length === 0 && (await page.evaluate(() => window.qaRejections.length)) === 0, JSON.stringify(page.qaErrors));
+    } catch (error) {
+      check(`${label}: сценарий выполнен`, false, error.stack);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
+// Стили ещё грузятся (независимая проверка PL07): пока обязательный CSS вида (пакета или своего набора) удержан шлюзом,
+// место скрыто и для ядра питомец не на виду — занятие не играет реакцию, не резервирует день сценки (ни базы, ни копии),
+// диалог не открывается; загрузка при том же размере делает вид видимым, отменённое не доигрывается, новое занятие —
+// обычным путём ядра. Ещё: готовность при нулевом контейнере, независимость соседа, поздний отказ CSS, отключение и
+// повторное подключение до конца прежней загрузки, приветствие дня при запуске не на виду. Часы — page.clock, случайность
+// 0,05 (сценка выпадает).
+async function loading(browser, base, check, open) {
+  const label = 'стили ещё грузятся 1280×900';
+  const today = (keys) => (page) =>
+    page.evaluate((list) => {
+      for (const key of list) localStorage.setItem(`${key}:cat:v1`, JSON.stringify({ v: 1, seenStage: 0, greetDay: '2026-10-11' }));
+      window.qaCounts = { marks: 1, today: 1 };
+    }, keys);
+  const played = (page, name) => page.evaluate((n) => [...window.qaPlayed[n]], name);
+  const scened = (page, name) => until(page, (n) => window.qaPlayed[n].some((type) => type.endsWith(':scene')), name);
+  {
+    const { context, page } = await open(browser, { viewport: { width: 1280, height: 900 } }, viewInit);
+    await context.addInitScript(() => {
+      Math.random = () => 0.05;
+    });
+    try {
+      const css = await gate(page, '**/pet/web/view.css');
+      await page.goto(`${base}container`);
+      await page.waitForFunction(() => window.qaReady);
+      await today(['slow'])(page);
+      const mounted = await mountCounted(page, 'a', 'a', 'slow');
+      const early = await page.evaluate(() => {
+        const view = window.qaViews.a;
+        const opened = view.open();
+        const direct = view.core.open('corner');
+        return { opened, direct: direct.ok, after: view.core.getState().view.open, notify: view.core.notify('saved', { key: 'lesson-1', counted: true }).ok };
+      });
+      await steps(page, 8, 1000);
+      const held = { stage: await stageOf(page, 'a'), visible: (await state(page, 'a')).visible, played: await played(page, 'a'), copy: await page.evaluate(() => localStorage.getItem('slow:scene:v1')), dbs: await sceneDbs(page), sheet: (await sheetOf(page, 'a')).open, log: await openLog(page) };
+      check(`${label}: подключение синхронно (mounted, core) при удержанном CSS вида`, mounted.mounted && mounted.core && early.notify, JSON.stringify({ mounted, early }));
+      check(`${label}: пока CSS удержан — место скрыто (вид full по размеру), для ядра не на виду; занятие — ни реакции, ни сценки, ни дня (нет копии slow:scene:v1 и базы slow:scene)`, held.stage.hidden === true && held.stage.view === 'full' && held.visible === false && held.played.length === 0 && held.copy === null && held.dbs.length === 0, JSON.stringify(held));
+      check(`${label}: до готовности view.open() — unsupported; core.open закрыт отображением; диалога и onOpenChange нет`, early.opened.ok === false && early.opened.error.code === 'unsupported' && early.after === null && !held.sheet && held.log.length === 0, JSON.stringify({ early, held }));
+      css.open();
+      await readyIn(page, 'a');
+      const ready = { stage: await stageOf(page, 'a'), visible: (await state(page, 'a')).visible };
+      await steps(page, 4, 1000);
+      const after = { played: await played(page, 'a'), copy: await page.evaluate(() => localStorage.getItem('slow:scene:v1')), dbs: await sceneDbs(page) };
+      check(`${label}: CSS загрузился при том же размере (full до и после) — место видно, для ядра на виду; отменённое занятие не доигрывается (ни реакции, ни сценки, ни дня)`, ready.stage.hidden === false && ready.stage.view === 'full' && ready.visible === true && after.played.length === 0 && after.copy === null && after.dbs.length === 0, JSON.stringify({ ready, after }));
+      const opened = await call(page, 'a', 'open');
+      await finishOpen(page, 'a');
+      const sheet = (await sheetOf(page, 'a')).open;
+      await page.keyboard.press('Escape');
+      await closedIn(page, 'a');
+      check(`${label}: после готовности view.open() — уголок открыт, onOpenChange — настоящие переходы`, opened.ok && sheet && (await openLog(page)).join() === 'a:true,a:false', JSON.stringify(opened));
+      await page.clock.runFor(1000);
+      await call(page, 'a', 'core.notify', 'saved', { key: 'lesson-2', counted: true });
+      await page.clock.runFor(1600);
+      await scened(page, 'a');
+      const fresh = { played: await played(page, 'a'), day: await sceneRecord(page, 'slow:scene'), copy: JSON.parse((await page.evaluate(() => localStorage.getItem('slow:scene:v1'))) ?? 'null') };
+      check(`${label}: после готовности новое занятие — реакция и сценка обычным путём ядра; день записан (IndexedDB slow:scene и копия)`, fresh.played[0] === 'joy' && fresh.played.some((type) => type.endsWith(':scene')) && fresh.day?.day === '2026-10-11' && fresh.copy?.day === '2026-10-11', JSON.stringify(fresh));
+      // Приветствие дня: при подключении стили ещё не загружены — питомец не на виду, как вкладка, открытая в фоне.
+      await mountCounted(page, 'g', 'c', 'hello');
+      await readyIn(page, 'c');
+      await steps(page, 3, 1000);
+      const greet = { played: await played(page, 'g'), day: await page.evaluate(() => JSON.parse(localStorage.getItem('hello:cat:v1'))?.greetDay ?? null), visible: (await state(page, 'g')).visible };
+      check(`${label}: приветствие дня — при запуске стили не загружены, питомец не на виду: решение и день — при запуске (ядро, как вкладка в фоне), невидимо не проигрывается и после загрузки не доигрывается`, greet.visible && greet.played.length === 0 && greet.day === '2026-10-11', JSON.stringify(greet));
+      await page.evaluate(() => Object.values(window.qaViews).forEach((view) => view.destroy()));
+      check(`${label}: без ошибок страницы и необработанных отклонений`, page.qaErrors.length === 0 && (await page.evaluate(() => window.qaRejections.length)) === 0, JSON.stringify(page.qaErrors));
+    } catch (error) {
+      check(`${label}: сценарий выполнен`, false, error.stack);
+    } finally {
+      await context.close();
+    }
+  }
+  {
+    // Свой набор: его CSS удержан — только этот вид скрыт; сосед со штатными стилями показывает своё. Готовность при
+    // нулевом контейнере — не на виду, размеры вернулись — на виду.
+    const { context, page } = await open(browser, { viewport: { width: 1280, height: 900 } }, viewInit);
+    await context.addInitScript(() => {
+      Math.random = () => 0.05;
+    });
+    try {
+      const css = await gate(page, '**/extension/bunny.css');
+      await page.goto(`${base}container`);
+      await page.waitForFunction(() => window.qaReady);
+      await today(['kit', 'kit-b'])(page);
+      await mountCounted(page, 'b', 'b', 'kit-b');
+      await readyIn(page, 'b');
+      await mountCounted(page, 'a', 'a', 'kit', '/extension/bunny.css');
+      await css.held();
+      await call(page, 'a', 'core.notify', 'saved', { key: 'kit-1', counted: true });
+      await call(page, 'b', 'core.notify', 'saved', { key: 'kit-b-1', counted: true });
+      await page.clock.runFor(1600);
+      await scened(page, 'b');
+      await steps(page, 4, 1000);
+      const split = { a: { stage: await stageOf(page, 'a'), visible: (await state(page, 'a')).visible, played: await played(page, 'a') }, b: { visible: (await state(page, 'b')).visible, played: await played(page, 'b') }, dbs: await sceneDbs(page), copies: await page.evaluate(() => [localStorage.getItem('kit:scene:v1'), JSON.parse(localStorage.getItem('kit-b:scene:v1') ?? 'null')?.day]) };
+      check(`${label}: CSS своего набора удержан — этот вид скрыт и не на виду (ни реакции, ни дня); сосед со штатными стилями — радость и сценка, его день (kit-b:scene)`, split.a.stage.hidden === true && split.a.visible === false && split.a.played.length === 0 && split.b.visible && split.b.played[0] === 'joy' && split.b.played.some((type) => type.endsWith(':scene')) && split.dbs.join() === 'kit-b:scene' && split.copies[0] === null && split.copies[1] === '2026-10-11', JSON.stringify(split));
+      await page.evaluate(() => (document.getElementById('a').style.width = '0px'));
+      await until(page, () => document.querySelector('#a > [data-pet-view]').shadowRoot.querySelector('.pet-view').dataset.view === 'none');
+      css.open();
+      await readyIn(page, 'a');
+      const zero = { stage: await stageOf(page, 'a'), visible: (await state(page, 'a')).visible, opened: await call(page, 'a', 'open') };
+      check(`${label}: стили загрузились при нулевом контейнере — не на виду, view.open() — unsupported`, zero.stage.view === 'none' && zero.visible === false && zero.opened.error?.code === 'unsupported', JSON.stringify(zero));
+      await page.evaluate(() => (document.getElementById('a').style.width = ''));
+      await until(page, () => window.qaViews.a.core.getState().visible === true);
+      await steps(page, 3, 1000);
+      const back = { stage: await stageOf(page, 'a'), visible: (await state(page, 'a')).visible, played: await played(page, 'a'), copy: await page.evaluate(() => localStorage.getItem('kit:scene:v1')) };
+      check(`${label}: размеры вернулись — на виду, целиком; отменённое занятие не доигрывается`, back.stage.view === 'full' && back.visible && back.played.length === 0 && back.copy === null, JSON.stringify(back));
+      await call(page, 'a', 'core.notify', 'saved', { key: 'kit-2', counted: true });
+      await page.clock.runFor(1600);
+      await scened(page, 'a');
+      const fresh = { played: await played(page, 'a'), day: await sceneRecord(page, 'kit:scene') };
+      check(`${label}: новое занятие после готовности — сценка своим набором обычным путём ядра, день kit:scene`, fresh.played[0] === 'joy' && fresh.played.some((type) => type.endsWith(':scene')) && fresh.day?.day === '2026-10-11', JSON.stringify(fresh));
+      await page.evaluate(() => Object.values(window.qaViews).forEach((view) => view.destroy()));
+      check(`${label}: свой набор — без ошибок страницы и необработанных отклонений`, page.qaErrors.length === 0 && (await page.evaluate(() => window.qaRejections.length)) === 0, JSON.stringify(page.qaErrors));
+    } catch (error) {
+      check(`${label}: свой набор — сценарий выполнен`, false, error.stack);
+    } finally {
+      await context.close();
+    }
+  }
+  {
+    // Поздний отказ CSS своего набора, пока вид скрыт.
+    const { context, page } = await open(browser, { viewport: { width: 1280, height: 900 } }, viewInit);
+    await context.addInitScript(() => {
+      Math.random = () => 0.05;
+    });
+    try {
+      const kit = await gate(page, '**/extension/bunny.css');
+      await page.goto(`${base}container`);
+      await page.waitForFunction(() => window.qaReady);
+      await today(['late', 'late-b'])(page);
+      await mountCounted(page, 'b', 'b', 'late-b');
+      await readyIn(page, 'b');
+      await mountCounted(page, 'a', 'a', 'late', '/extension/bunny.css');
+      await kit.held();
+      await call(page, 'a', 'core.notify', 'saved', { key: 'late-1', counted: true });
+      await steps(page, 4, 1000);
+      kit.fail();
+      await page.waitForFunction(() => !window.qaViews.a.mounted, null, { timeout: 5000 }).catch(() => {});
+      const failed = { mounted: await page.evaluate(() => window.qaViews.a.mounted), status: await page.evaluate(() => window.qaViews.a.core.status), host: await page.evaluate(() => document.querySelectorAll('#a > [data-pet-view]').length), played: await played(page, 'a'), dbs: await sceneDbs(page), copy: await page.evaluate(() => localStorage.getItem('late:scene:v1')), b: await page.evaluate(() => window.qaViews.b.mounted && window.qaViews.b.core.getState().visible), told: page.qaErrors.filter((text) => text.startsWith('Питомец: стили не загрузились')) };
+      check(`${label}: поздний отказ CSS своего набора, пока вид скрыт, — одно console.error, вид отключён (mounted false, ядро destroyed, элемента нет); реакции и дня сценки не было; сосед на виду`, !failed.mounted && failed.status === 'destroyed' && failed.host === 0 && failed.played.length === 0 && failed.dbs.length === 0 && failed.copy === null && failed.b && failed.told.length === 1 && /bunny\.css/.test(failed.told[0]), JSON.stringify(failed));
+      await page.evaluate(() => Object.values(window.qaViews).forEach((view) => view.destroy()));
+      // Ожидаемые сообщения: отказ стилей и 404 браузера для удержанного CSS набора.
+      const rest = page.qaErrors.filter((text) => !text.startsWith('Питомец: стили не загрузились') && !/Failed to load resource: .*404/.test(text));
+      check(`${label}: поздний отказ — других ошибок страницы и необработанных отклонений нет`, rest.length === 0 && (await page.evaluate(() => window.qaRejections.length)) === 0, JSON.stringify(page.qaErrors));
+    } catch (error) {
+      check(`${label}: поздний отказ — сценарий выполнен`, false, error.stack);
+    } finally {
+      await context.close();
+    }
+  }
+  {
+    // CSS пакета удержан: вид подключён, отключён и подключён заново в тот же контейнер до конца первой загрузки.
+    const { context, page } = await open(browser, { viewport: { width: 1280, height: 900 } }, viewInit);
+    await context.addInitScript(() => {
+      Math.random = () => 0.05;
+    });
+    try {
+      const css = await gate(page, '**/pet/web/view.css');
+      await page.goto(`${base}container`);
+      await page.waitForFunction(() => window.qaReady);
+      await today(['again'])(page);
+      await mountCounted(page, 'a1', 'a', 'again');
+      await css.held();
+      await call(page, 'a1', 'core.notify', 'saved', { key: 'again-1', counted: true });
+      await call(page, 'a1', 'destroy');
+      await mountCounted(page, 'a2', 'a', 'again');
+      await steps(page, 3, 1000);
+      css.open();
+      await readyIn(page, 'a');
+      await steps(page, 3, 1000);
+      const again = { old: await page.evaluate(() => [window.qaViews.a1.mounted, window.qaViews.a1.core.status]), now: await page.evaluate(() => [window.qaViews.a2.mounted, window.qaViews.a2.core.getState().visible, document.querySelectorAll('#a > [data-pet-view]').length]), played: [await played(page, 'a1'), await played(page, 'a2')], copy: await page.evaluate(() => localStorage.getItem('again:scene:v1')) };
+      check(`${label}: destroy и новое подключение до конца прежней загрузки — новый вид на виду (один элемент), прежний отключён; занятие прежнего не доигрывается ни в одном`, again.old.join() === 'false,destroyed' && again.now.join() === 'true,true,1' && again.played.every((list) => list.length === 0) && again.copy === null, JSON.stringify(again));
+      await call(page, 'a2', 'core.notify', 'saved', { key: 'again-2', counted: true });
+      await page.clock.runFor(1600);
+      await scened(page, 'a2');
+      check(`${label}: новое занятие нового вида — сценка обычным путём ядра, день again:scene`, (await played(page, 'a2')).some((type) => type.endsWith(':scene')) && (await sceneRecord(page, 'again:scene'))?.day === '2026-10-11', JSON.stringify(await played(page, 'a2')));
+      await page.evaluate(() => Object.values(window.qaViews).forEach((view) => view.destroy()));
+      await page.clock.runFor(1000);
+      const left = await resources(page);
+      check(`${label}: после отключения всех — ждущих таймеров, кадров и наблюдателей модуля нет`, left.timers === 0 && left.frames === 0 && left.observers === 0, JSON.stringify(left));
+      check(`${label}: повторное подключение — без ошибок страницы и необработанных отклонений`, page.qaErrors.length === 0 && (await page.evaluate(() => window.qaRejections.length)) === 0, JSON.stringify(page.qaErrors));
+    } catch (error) {
+      check(`${label}: повторное подключение — сценарий выполнен`, false, error.stack);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 export async function viewQa(browser, check, open, layout) {
   const server = await serveView();
   try {
@@ -1407,6 +1744,8 @@ export async function viewQa(browser, check, open, layout) {
     await kits(browser, server.base, check, open);
     await failures(browser, server.base, check, open);
     await csp(browser, server.base, check, open);
+    await labels(browser, server.base, check, open);
+    await loading(browser, server.base, check, open);
   } finally {
     await server.close();
   }

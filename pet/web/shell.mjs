@@ -393,7 +393,14 @@ export function createShell(spec) {
     ui.info = infoOf(state);
     ui.treat = state.treat ?? 'waiting';
     syncStoreNote();
-    const fresh = Boolean(state.progress?.unseen);
+    labelOpeners();
+    S.stage?.(ui.info.current.title);
+  }
+
+  // Входы диалога (питомец, лапка вызова) по снимку: точка «новое», доступное имя, aria-expanded. И после того, как
+  // поверхность пересоздала вход (контейнер: облик, напарник, вид, присутствие), — новая кнопка не остаётся без имени.
+  function labelOpeners() {
+    const fresh = Boolean(snap().progress?.unseen);
     for (const button of openers()) {
       // У кнопки вызова точки нет.
       const call = button.hasAttribute('data-cat-call');
@@ -401,7 +408,6 @@ export function createShell(spec) {
       button.setAttribute('aria-label', call ? callLabel() : `${name()} — уголок ${defOf().forms.gen}${fresh ? ', есть новая вещь' : ''}`);
       button.setAttribute('aria-expanded', String(ui.sheetOpen));
     }
-    S.stage?.(ui.info.current.title);
   }
 
   const callLabel = () => `${CALL}: ${name()}`;
@@ -1916,6 +1922,7 @@ export function createShell(spec) {
     paint,
     render,
     showProgress,
+    labelOpeners,
     showMini,
     syncDisplay,
     renderAll,

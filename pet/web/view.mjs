@@ -58,10 +58,13 @@ function viewProblem(container, o) {
 function containerSurface(container, options, own) {
   return (ctx) => {
     const { ui } = ctx;
-    const V = { host: null, shadow: null, box: null, ro: null, mode: 'none', key: '', styles: 0, ready: false };
+    // ready — обязательные стили (пакета и наборов) загружены; seen — видимость, о которой уже сказано оболочке и ядру.
+    const V = { host: null, shadow: null, box: null, ro: null, mode: 'none', key: '', styles: 0, ready: false, seen: false };
     const home = () => safe(() => options.home?.() ?? null)();
-    // Диалог есть где показать: свой элемент в документе и с размерами.
-    own.shows = () => Boolean(V.host?.isConnected) && V.mode !== 'none';
+    // Питомец на виду: стили загружены (до этого место скрыто) и у своего элемента есть размеры. Не на виду — для ядра
+    // как фон (реакции и сценки не начинаются, день сценки не резервируется), диалог показать негде.
+    const showing = () => V.ready && V.mode !== 'none';
+    own.shows = () => Boolean(V.host?.isConnected) && showing();
 
     // Вид по размеру своего элемента: целиком, портрет или ничего (ноль, скрыт, вне документа).
     function modeNow() {
@@ -82,7 +85,9 @@ function containerSurface(container, options, own) {
     }
 
     // Место питомца в контейнере по снимку: питомец (целиком или портрет), лапка вызова или «Показать …». Перерисовка —
-    // только когда сменилось показанное; кнопка с фокусом — снова с фокусом.
+    // только когда сменилось показанное (облик, напарник, вид, присутствие) — любым путём: кнопкой, командой, задачей ядра,
+    // правкой соседа или другой вкладки. Новая кнопка сразу с доступным именем, aria-expanded и точкой «новое» (общий показ
+    // входов оболочки), кнопка с фокусом — снова с фокусом.
     function renderBox() {
       if (!V.box) return;
       const s = ctx.surface();
@@ -101,27 +106,32 @@ function containerSurface(container, options, own) {
             : `<button class="cat-view-btn" type="button" aria-haspopup="dialog" aria-expanded="${ui.sheetOpen}" aria-controls="cat-sheet">${managed(ctx.art({ id: `${ui.kind}-view`, view }))}<span class="cat-dot" hidden></span></button>
       <span class="cat-dock-mini" aria-hidden="true"></span>
       <p class="cat-view-say" aria-hidden="true"><span class="cat-bubble"></span></p>`;
+      ctx.labelOpeners();
       if (had) V.box.querySelector('button')?.focus({ preventScroll: true });
     }
 
-    // Размер изменился: вид, объявление ядру (целиком или портрет — сценки), видимость (без размеров — как фон: реакции и
-    // сценки не начинаются, жесты отпущены, диалог закрыт — показать его некуда).
+    // Размер или готовность стилей изменились: вид, объявление ядру (целиком или портрет — сценки), видимость. Видимость
+    // сверяется и при том же виде (стили загрузились, размер прежний). Не на виду — как фон: реакции и сценки не
+    // начинаются, жесты отпущены, диалог закрыт — показать его некуда.
     function measure() {
       if (!own.alive()) return;
       const next = modeNow();
-      if (next === V.mode) return;
-      const was = V.mode;
-      V.mode = next;
-      if (next === 'none') {
-        ui.pointer?.release('resize');
-        if (ui.sheetOpen) ctx.closeSheet({ restore: false });
+      if (next !== V.mode) {
+        V.mode = next;
+        if (next === 'none') {
+          ui.pointer?.release('resize');
+          if (ui.sheetOpen) ctx.closeSheet({ restore: false });
+        }
+        ctx.renderAll();
       }
-      ctx.renderAll();
-      if ((was === 'none') !== (next === 'none')) own.visibility();
+      if (showing() === V.seen) return;
+      V.seen = showing();
+      own.visibility();
     }
 
-    // Стили теневого дерева: файлы пакета и наборов. Пока не загрузились, место питомца скрыто (не мигает без стилей);
-    // ошибка загрузки любого — вид отключается (mounted: false) и одно console.error: показывать питомца без стилей
+    // Стили теневого дерева: файлы пакета и наборов. Пока не загрузились, место питомца скрыто (не мигает без стилей) и
+    // питомец не на виду: ни реакций, ни сценок, ни диалога; отменённое за это время после загрузки не доигрывается.
+    // Ошибка загрузки любого — вид отключается (mounted: false) и одно console.error: показывать питомца без стилей
     // нельзя. Синхронный mountPetIn этого не ждёт: результат подключения — о ядре и разметке, стили — позже.
     function link(href) {
       const element = document.createElement('link');
@@ -233,7 +243,7 @@ function containerSurface(container, options, own) {
         own.openChange(open);
       },
       canOpen: () => own.alive() && own.shows(),
-      visible: () => V.mode !== 'none',
+      visible: showing,
       roots: () => [V.box, ui.sheet],
       active: () => V.shadow?.activeElement ?? null,
       placeHtml: () => '',
@@ -301,7 +311,7 @@ export function mountPetIn(container, options) {
     open(which = 'corner') {
       if (!live()) return destroyed();
       if (!VIEWS.includes(which) || shell.ui.sheetOpen) return core.open(which);
-      if (!own.shows()) return { ok: false, error: { code: 'unsupported', message: 'Контейнер питомца скрыт, без размеров или вне документа — диалог показать негде.' } };
+      if (!own.shows()) return { ok: false, error: { code: 'unsupported', message: 'Питомец не на виду (стили ещё загружаются, контейнер скрыт, без размеров или вне документа) — диалог показать негде.' } };
       const source = which === 'play' ? 'call' : 'pet';
       return shell.openSheet(shell.openers().find(shown) ?? null, source, which) ?? core.open(which, { source });
     },
