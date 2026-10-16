@@ -2,7 +2,7 @@
   "name": "pet-companion-expo-example",
   "version": "0.0.0",
   "private": true,
-  "description": "Диагностический мобильный потребитель pet-companion (PL09): SQLite-хранение, резервирование дня и жизненный цикл React Native в Expo Go. Не входит в пакет.",
+  "description": "Минимальный мобильный потребитель pet-companion (PL09, PL10.1): питомец на PetView (react-native-svg, без WebView), SQLite-хранение, счёт хоста, резервирование дня и жизненный цикл React Native в Expo Go. Не входит в пакет.",
   "main": "index.js",
   "scripts": {
     "lib": "node scripts/library.mjs",
@@ -12,6 +12,7 @@
     "expo": "58.0.12",
     "expo-sqlite": "58.0.13",
     "react": "19.3.0",
-    "react-native": "0.88.0"
+    "react-native": "0.88.0",
+    "react-native-svg": "15.16.0"
   }
 }

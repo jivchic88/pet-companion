@@ -1,11 +1,11 @@
 // Публичные входы pet-companion/native-sqlite и pet-companion/native в Node (PL09; README, «Мобильное хранение и жизненный
 // цикл»): пакеты expo-sqlite и react-native подменены загрузчиком (registerHooks) — test/fakes/expo-sqlite.mjs (тестовый
 // драйвер на node:sqlite, та же сигнатура openDatabaseAsync) и test/fakes/react-native.mjs (подделка AppState и
-// AccessibilityInfo); react и react-dom — настоящие из devDependencies. Импорт обоих входов — без браузерных глобалов
+// AccessibilityInfo; PL10.1 — ещё компоненты и Animated) и test/fakes/react-native-svg.mjs; react и react-dom — настоящие из devDependencies. Импорт обоих входов — без браузерных глобалов
 // (ловушки), без открытия базы, запросов и подписок. native-sqlite: ровно два экспорта, непрозрачный фасад, своё
 // соединение openDatabaseAsync(имя, { useNewConnection: true }, папка) только при первой загрузке, публичный createPetCore
 // принимает координатор и резервирование, соединение приложения запросов не получает, PetError настроек. native: ровно
-// useNativeLifecycle и usePetState (тот же общий хук, что у /react); сквозной путь хранилище → load → ядро → жизненный
+// useNativeLifecycle, usePetState, PetView, catNative и dogNative (PL10.1; отображение — test/native-view.test.mjs) (тот же общий хук, что у /react); сквозной путь хранилище → load → ядро → жизненный
 // цикл → start после ready; хук в настоящем React 19 (react-dom/client, StrictMode, act) с контейнером-заглушкой — хук
 // ничего не рисует, DOM не нужен: двойной эффект StrictMode снимает и снова ставит слушатели, смена ядра, null, внешний
 // destroy и размонтирование снимают всё. Это не React Native и не Metro: настоящий потребитель — examples/expo/ на устройстве.
@@ -30,7 +30,7 @@ const L = await lab();
 const rn = system();
 globalThis.__petExpo = { calls: [], open: (path) => L.open(path) };
 globalThis.__petRN = rn;
-const FAKES = { 'expo-sqlite': new URL('./fakes/expo-sqlite.mjs', import.meta.url).href, 'react-native': new URL('./fakes/react-native.mjs', import.meta.url).href };
+const FAKES = { 'expo-sqlite': new URL('./fakes/expo-sqlite.mjs', import.meta.url).href, 'react-native': new URL('./fakes/react-native.mjs', import.meta.url).href, 'react-native-svg': new URL('./fakes/react-native-svg.mjs', import.meta.url).href };
 registerHooks({ resolve: (specifier, context, next) => (Object.hasOwn(FAKES, specifier) ? { url: FAKES[specifier], shortCircuit: true } : next(specifier, context)) });
 
 const Sqlite = await import('../pet/native-sqlite.mjs');
@@ -40,17 +40,18 @@ const Core = await import('../pet/core.mjs');
 const { cat, dog } = await import('../pet/pets.mjs');
 const { calm } = await import('../pet/behaviors.mjs');
 const importTouched = [...touched];
-const importCalls = { open: globalThis.__petExpo.calls.length, subscribe: rn.counts.add, ask: rn.counts.ask, queries: L.journal.length };
+const importCalls = { open: globalThis.__petExpo.calls.length, subscribe: rn.counts.add, ask: rn.counts.ask, queries: L.journal.length, animations: rn.animations.started, announced: rn.announced.length };
 for (const name of TRAPS) delete globalThis[name];
 
 test.after(() => L.close());
 
-test('импорт входов: ровно экспорты, без браузерных глобалов, без открытия базы, запросов и подписок системы', () => {
+test('импорт входов: ровно экспорты (PL10.1: ещё PetView, catNative, dogNative), без браузерных глобалов, без открытия базы, запросов, подписок системы, анимаций и объявлений', () => {
   assert.deepEqual(Object.keys(Sqlite).sort(), ['createSqliteScenes', 'createSqliteStorage']);
-  assert.deepEqual(Object.keys(Native).sort(), ['useNativeLifecycle', 'usePetState']);
+  assert.deepEqual(Object.keys(Native).sort(), ['PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
+  assert.ok([Native.catNative, Native.dogNative].every((kit) => Object.isFrozen(kit) && typeof kit.Figure === 'function'), 'наборы — замороженные объекты с рисунком');
   assert.equal(Native.usePetState, Hook.usePetState, 'тот же общий хук, что у pet-companion/react');
   assert.deepEqual(importTouched, []);
-  assert.deepEqual(importCalls, { open: 0, subscribe: 0, ask: 0, queries: 0 });
+  assert.deepEqual(importCalls, { open: 0, subscribe: 0, ask: 0, queries: 0, animations: 0, announced: 0 });
 });
 
 test('native-sqlite: непрозрачный фасад; своё соединение — только при загрузке, openDatabaseAsync(имя, { useNewConnection: true }, папка); публичный createPetCore и резервирование; соединение приложения запросов не получает; PetError настроек', async () => {

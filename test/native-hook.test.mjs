@@ -1,6 +1,6 @@
 // Хук useNativeLifecycle в настоящем React 19 (PL09, доработка по независимой проверке Codex 2026-10-16): готовность
 // принадлежит текущей привязке, а не идентичности ядра. react-native подменён загрузчиком (test/fakes/react-native.mjs —
-// подделка system() из test/native-kit.mjs), ядро — публичный createPetCore на асинхронном хранилище в памяти. Хост — как в
+// подделка system() из test/native-kit.mjs; react-native-svg входа PL10.1 — test/fakes/react-native-svg.mjs), ядро — публичный createPetCore на асинхронном хранилище в памяти. Хост — как в
 // README и примере: его эффект зовёт start(), когда хук вернул true и ядро ещё created; проверка записывает, что вернул хук
 // на каждой отрисовке, что видел каждый запуск эффекта хоста и с какой системной настройкой ядро стартовало. Сценарии:
 // готовый A → null → A (false до свежего ответа, start по прежней готовности не выполняется), системная настройка
@@ -13,8 +13,8 @@ import { nodeRoot, system } from './native-kit.mjs';
 
 const rn = system();
 globalThis.__petRN = rn;
-const FAKE = new URL('./fakes/react-native.mjs', import.meta.url).href;
-registerHooks({ resolve: (specifier, context, next) => (specifier === 'react-native' ? { url: FAKE, shortCircuit: true } : next(specifier, context)) });
+const FAKES = { 'react-native': new URL('./fakes/react-native.mjs', import.meta.url).href, 'react-native-svg': new URL('./fakes/react-native-svg.mjs', import.meta.url).href };
+registerHooks({ resolve: (specifier, context, next) => (Object.hasOwn(FAKES, specifier) ? { url: FAKES[specifier], shortCircuit: true } : next(specifier, context)) });
 const { useNativeLifecycle } = await import('../pet/native.mjs');
 const { createPetCore, createStorage } = await import('../pet/core.mjs');
 const { cat, dog } = await import('../pet/pets.mjs');

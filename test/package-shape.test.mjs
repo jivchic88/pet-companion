@@ -13,8 +13,11 @@
 // у стилей — своя декларация без значений; лицензия заполнена; в файлах пакета нет следов приложения-источника. PL09:
 // входы pet-companion/native (useNativeLifecycle, usePetState) и /native-sqlite (createSqliteStorage, createSqliteScenes) —
 // голые имена react и react-native только у pet/native.mjs, expo-sqlite — только у pet/native-sqlite.mjs; pet/native/** и
-// pet/storage/** — только ядро; натив не достигает веба, DOM и CSS, прежние входы — натива и его партнёров. Нативные входы
-// здесь не импортируются (партнёров в проверках нет): экспорты — разбором исходника.
+// pet/storage/** — только ядро; натив не достигает веба, DOM и CSS, прежние входы — натива и его партнёров. PL10.1: во входе
+// /native ещё PetView, catNative, dogNative; слои pet/native/** — у каждого файла свой перечень импортов (правила и
+// жизненный цикл — только ядро, рисунки — react и react-native-svg, отображение — ещё react-native, хук и правила наборов),
+// голое react-native-svg — только у них; SQLite-вход не достигает ни React, ни отображения. Нативные входы здесь не
+// импортируются (партнёров в проверках нет): экспорты — разбором исходника.
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -75,8 +78,25 @@ test('публичные входы: mountPet, localDay, VERSION; ядро (PL05
   assert.match(Pet.localDay(), /^\d{4}-\d{2}-\d{2}$/);
 });
 
-// Голые имена партнёров — только в своих файлах (PL08 — react; PL09 — react-native, expo-sqlite).
-const PEER_FILES = { react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/'), 'react-native': (file) => file === 'native.mjs', 'expo-sqlite': (file) => file === 'native-sqlite.mjs' };
+// Голые имена партнёров — только в своих файлах (PL08 — react; PL09 — react-native, expo-sqlite; PL10.1 — отображение
+// pet/native/view.mjs и рисунки наборов pet/native/svg.mjs, cat.mjs, dog.mjs — react и react-native-svg).
+const NATIVE_ART = ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs'];
+const PEER_FILES = {
+  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || file === 'native/view.mjs' || file === 'native/svg.mjs',
+  'react-native': (file) => file === 'native.mjs' || file === 'native/view.mjs',
+  'react-native-svg': (file) => file === 'native/view.mjs' || NATIVE_ART.includes(file),
+  'expo-sqlite': (file) => file === 'native-sqlite.mjs',
+};
+// Слои pet/native/** (PL10.1): у каждого файла — ровно разрешённые голые имена и локальные области.
+const NATIVE_LAYERS = {
+  'native/lifecycle.mjs': { bare: [], local: ['core/'] },
+  'native/kits.mjs': { bare: [], local: ['core/'] },
+  'native/motion.mjs': { bare: [], local: [] },
+  'native/svg.mjs': { bare: ['react', 'react-native-svg'], local: [] },
+  'native/cat.mjs': { bare: ['react-native-svg'], local: ['native/svg.mjs'] },
+  'native/dog.mjs': { bare: ['react-native-svg'], local: ['native/svg.mjs'] },
+  'native/view.mjs': { bare: ['react', 'react-native', 'react-native-svg'], local: ['core/ports.mjs', 'hooks/state.mjs', 'native/kits.mjs', 'native/motion.mjs'] },
+};
 // Экспорты значений модуля разбором исходника (для входов, которые без партнёров не импортируются).
 const exported = (text) =>
   [...strip(text).matchAll(/^export (?:const|function|class) (\w+)|^export \{([^}]+)\}/gm)]
@@ -185,10 +205,17 @@ test('граф React (PL08): хук pet/hooks/** — только react (ядр�
   }
 });
 
-test('граф натива (PL09): pet/native/** и pet/storage/** — только ядро; вход /native — react, react-native, хук и pet/native/**; вход /native-sqlite — expo-sqlite и pet/storage/**; натив не достигает веба, DOM, CSS и рисунков; прежние входы не достигают натива и его партнёров', async () => {
+test('граф натива (PL09, PL10.1): pet/storage/** — только ядро; pet/native/** — ровно слои NATIVE_LAYERS (правила наборов, движения и жизненный цикл — без React, рисунки — без react-native); вход /native — react, react-native, хук и pet/native/**; вход /native-sqlite — expo-sqlite и pet/storage/**; натив не достигает веба, DOM, CSS и веб-рисунков; без изменяемого состояния модуля; прежние входы не достигают натива и его партнёров', async () => {
   const files = await runtime('.mjs');
-  for (const file of files.filter((name) => name.startsWith('native/') || name.startsWith('storage/'))) {
+  for (const file of files.filter((name) => name.startsWith('storage/'))) {
     for (const { spec, resolved, external } of await imports(file)) assert.ok(!external && resolved?.startsWith('core/'), `${file}: ${spec} — только ядро`);
+  }
+  assert.deepEqual(files.filter((name) => name.startsWith('native/')).sort(), Object.keys(NATIVE_LAYERS).sort(), 'файлы pet/native/** — известные слои');
+  for (const [file, layer] of Object.entries(NATIVE_LAYERS)) {
+    const found = await imports(file);
+    assert.deepEqual([...new Set(found.filter(({ external }) => external).map(({ spec }) => spec))].sort(), [...layer.bare].sort(), `${file}: голые имена`);
+    for (const { spec, resolved, external } of found) if (!external) assert.ok(layer.local.some((area) => (area.endsWith('/') ? resolved?.startsWith(area) : resolved === area)), `${file}: ${spec}`);
+    assert.doesNotMatch(strip(await read(`pet/${file}`)), /^(?:let|var) /m, `${file}: изменяемое состояние модуля`);
   }
   for (const { spec, resolved, external } of await imports('native.mjs')) assert.ok((external && ['react', 'react-native'].includes(spec)) || resolved?.startsWith('hooks/') || resolved?.startsWith('native/'), `native.mjs: ${spec}`);
   for (const { spec, resolved, external } of await imports('native-sqlite.mjs')) assert.ok((external && spec === 'expo-sqlite') || resolved?.startsWith('storage/'), `native-sqlite.mjs: ${spec}`);
@@ -211,13 +238,15 @@ test('граф натива (PL09): pet/native/** и pet/storage/** — толь
     assert.ok(![...seen].some((file) => file.startsWith('web') || file === 'react.mjs' || file === 'pet.mjs' || /^pet-|art\.mjs$/.test(file)), `${entry}: ${[...seen].join(', ')}`);
     for (const file of seen) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|HTMLElement|import\.meta)\b/, `${entry} → ${file}`);
   }
-  assert.ok(!(await reach('native-sqlite.mjs')).seen.has('hooks/state.mjs'), 'SQLite не тянет React');
+  const sqlite = await reach('native-sqlite.mjs');
+  assert.ok(!sqlite.seen.has('hooks/state.mjs') && ![...sqlite.seen].some((file) => /^native(\/|\.mjs$)/.test(file)) && !sqlite.bare.has('react') && !sqlite.bare.has('react-native-svg'), 'SQLite не тянет React и отображение');
+  assert.deepEqual([...(await reach('native.mjs')).bare].sort(), ['react', 'react-native', 'react-native-svg']);
   for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'web.mjs', 'react.mjs']) {
     const { seen, bare } = await reach(entry);
     assert.ok(![...seen].some((file) => /^(native|storage)(\/|\.|-)/.test(file)), `${entry} достигает натива`);
-    assert.ok(!bare.has('react-native') && !bare.has('expo-sqlite'), `${entry}: ${[...bare].join(', ')}`);
+    assert.ok(!bare.has('react-native') && !bare.has('expo-sqlite') && !bare.has('react-native-svg'), `${entry}: ${[...bare].join(', ')}`);
   }
-  assert.deepEqual(exported(await read('pet/native.mjs')), ['useNativeLifecycle', 'usePetState']);
+  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
   assert.deepEqual(exported(await read('pet/native-sqlite.mjs')), ['createSqliteScenes', 'createSqliteStorage']);
 });
 
@@ -256,16 +285,18 @@ test('пример расширения (§ 7.10): examples/extension — тол
   for (const file of await runtime('.mjs')) assert.doesNotMatch(strip(await read(`pet/${file}`)), /['"`]example\.[\w.-]+['"`]|examples\/|bunny-web|lively\.mjs/, file);
 });
 
-test('мобильный пример (PL09): examples/expo — только публичные входы пакета, expo-sqlite, react и react-native; зависимости — точная матрица SDK 58 без react-native-svg, pet-companion — архивом без записи в package.json; в пакет не входит', async () => {
+test('мобильный пример (PL09, PL10.1): examples/expo — только публичные входы пакета, expo-sqlite, react и react-native; зависимости — точная матрица SDK 58 с react-native-svg 15.16.0 (рисунки наборов; сам пример его не импортирует), pet-companion — архивом без записи в package.json; в пакет не входит', async () => {
   const dir = new URL('../examples/expo/', import.meta.url);
   assert.deepEqual((await readdir(dir)).filter((name) => name !== 'node_modules' && name !== '.lib' && name !== '.expo').sort(), ['.gitignore', 'App.js', 'README.md', 'app.json', 'diagnostics.mjs', 'index.js', 'package-lock.json', 'package.json', 'scripts']);
   const example = JSON.parse(await read('examples/expo/package.json'));
-  assert.deepEqual(example.dependencies, { expo: '58.0.12', 'expo-sqlite': '58.0.13', react: '19.3.0', 'react-native': '0.88.0' }, 'точные версии; react-native-svg — PL10');
+  assert.deepEqual(example.dependencies, { expo: '58.0.12', 'expo-sqlite': '58.0.13', react: '19.3.0', 'react-native': '0.88.0', 'react-native-svg': '15.16.0' }, 'точные версии матрицы SDK 58');
   assert.equal(example.devDependencies, undefined);
   assert.equal(example.private, true);
   const lock = JSON.parse(await read('examples/expo/package-lock.json'));
   assert.deepEqual(lock.packages[''].dependencies, example.dependencies);
-  assert.ok(!Object.keys(lock.packages).some((key) => /node_modules\/(pet-companion|react-native-svg)$/.test(key)), 'в lock нет pet-companion и react-native-svg');
+  assert.ok(!Object.keys(lock.packages).some((key) => /node_modules\/pet-companion$/.test(key)), 'в lock нет pet-companion');
+  const svg = Object.entries(lock.packages).filter(([key]) => /(^|\/)node_modules\/react-native-svg$/.test(key));
+  assert.deepEqual(svg.map(([key, entry]) => [key, entry.version]), [['node_modules/react-native-svg', '15.16.0']], 'одна копия react-native-svg 15.16.0');
   assert.ok(!Object.values(lock.packages).some((entry) => entry.hasInstallScript), 'без скриптов установки');
   assert.equal(Object.keys(lock.packages).filter((key) => /(^|\/)node_modules\/react$/.test(key)).length, 1, 'одна копия react');
   const PUBLIC = ['pet-companion/core', 'pet-companion/pets', 'pet-companion/behaviors', 'pet-companion/native', 'pet-companion/native-sqlite', 'expo', 'expo-sqlite', 'react', 'react-native'];
@@ -308,11 +339,13 @@ test('CSS контейнера (PL07): view.css переносит каждую 
 
 test('package.json: без зависимостей и скриптов установки; react, react-native, expo-sqlite — только необязательные партнёры (PL08, PL09); средства проверки — точные версии; exports — публичные входы с типами, их файлы в files; стили — sideEffects', async () => {
   for (const field of ['dependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies']) assert.equal(pkg[field], undefined, field);
-  // PL08: react нужен только входам React; PL09: react-native — входу /native, expo-sqlite — входу /native-sqlite. Все —
-  // необязательные партнёры: npm их не ставит сам, прежние входы их не требуют.
-  assert.deepEqual(pkg.peerDependencies, { 'expo-sqlite': '>=58.0.0', react: '^18.3.1 || ^19.0.0', 'react-native': '>=0.88.0' });
-  assert.deepEqual(pkg.peerDependenciesMeta, { 'expo-sqlite': { optional: true }, react: { optional: true }, 'react-native': { optional: true } });
+  // PL08: react нужен только входам React; PL09: react-native — входу /native, expo-sqlite — входу /native-sqlite; PL10.1:
+  // react-native-svg — отображению входа /native. Все — необязательные партнёры: npm их не ставит сам, прежние входы их не
+  // требуют.
+  assert.deepEqual(pkg.peerDependencies, { 'expo-sqlite': '>=58.0.0', react: '^18.3.1 || ^19.0.0', 'react-native': '>=0.88.0', 'react-native-svg': '>=15.16.0' });
+  assert.deepEqual(pkg.peerDependenciesMeta, { 'expo-sqlite': { optional: true }, react: { optional: true }, 'react-native': { optional: true }, 'react-native-svg': { optional: true } });
   for (const name of ['expo', 'expo-sqlite', 'react-native', 'react-native-svg']) assert.equal(pkg.devDependencies[name], undefined, `${name} — не средство проверки библиотеки`);
+  assert.equal(pkg.dependencies?.['react-native-svg'], undefined);
   for (const [name, version] of Object.entries(pkg.devDependencies)) assert.match(version, /^\d+\.\d+\.\d+$/, `${name}: точная версия`);
   for (const script of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack', 'preuninstall', 'uninstall', 'postuninstall']) assert.equal(pkg.scripts?.[script], undefined, script);
   assert.equal(pkg.type, 'module');
@@ -369,9 +402,14 @@ test('типы: pet.d.mts, core.d.mts, pets.d.mts, behaviors.d.mts, web.d.mts и
   // PL09: нативные входы — по разбору исходника (без партнёров не импортируются).
   assert.deepEqual(values(await read('pet/native.d.mts')), exported(await read('pet/native.mjs')));
   assert.deepEqual(values(await read('pet/native-sqlite.d.mts')), exported(await read('pet/native-sqlite.mjs')));
-  // Декларации ядра, определений и натива не тянут DOM (ядро — и для Node без lib dom); натив — и типов React Native/expo-sqlite.
+  // Декларации ядра, определений и натива не тянут DOM (ядро — и для Node без lib dom); натив — и типов React Native,
+  // react-native-svg и expo-sqlite. PL10.1: /native — только типы элементов из react (import type), как /react; SQLite — без
+  // React; ядро и веб от типов натива не зависят.
   for (const file of ['pet/core.d.mts', 'pet/pets.d.mts', 'pet/behaviors.d.mts', 'pet/native.d.mts', 'pet/native-sqlite.d.mts']) assert.doesNotMatch(strip(await read(file)), /\bHTML\w*Element\b|\bDocument\b|\bWindow\b|\bEvent\b/, file);
-  for (const file of ['pet/native.d.mts', 'pet/native-sqlite.d.mts']) assert.doesNotMatch(strip(await read(file)), /from 'react-native'|from 'expo-sqlite'|from 'react'/, file);
+  for (const file of ['pet/native.d.mts', 'pet/native-sqlite.d.mts']) assert.doesNotMatch(strip(await read(file)), /from 'react-native'|from 'react-native-svg'|from 'expo-sqlite'/, file);
+  assert.deepEqual([...strip(await read('pet/native.d.mts')).matchAll(/^import\b.*?from '([^']+)'/gm)].map((match) => match[0].startsWith('import type') && match[1]), ['react', './core.mjs'], 'native.d.mts: import type из react и ядра');
+  assert.doesNotMatch(strip(await read('pet/native-sqlite.d.mts')), /from 'react'/);
+  for (const file of ['pet/core.d.mts', 'pet/pets.d.mts', 'pet/behaviors.d.mts', 'pet/web.d.mts', 'pet/pet.d.mts']) assert.doesNotMatch(strip(await read(file)), /native/, `${file}: без типов натива`);
   // Ни default, ни имён классов (это не CSS Modules), ни declare module '*.css' для всего проекта сайта.
   assert.equal(strip(await read('pet/css.d.mts')).trim(), 'export {};');
 });

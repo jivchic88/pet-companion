@@ -1,22 +1,34 @@
-// Диагностический экран мобильного потребителя (PL09): состояние ядра, статусы сохранения и результаты проверок на обычных
-// View, Text и Button — без рисунков, анимаций и уголка (нативное отображение — PL10). Хранение — createSqliteStorage
-// (настоящий expo-sqlite), жизненный цикл — useNativeLifecycle (настоящие AppState и AccessibilityInfo); start — после
-// начальной синхронизации. Сценарии и что записать — README.md рядом.
+// Минимальный мобильный потребитель (PL10.1): питомец на экране — PetView и штатные наборы pet-companion/native (рисунки
+// react-native-svg, без WebView); выбор кота или собаки, имя с клавиатуры, облик и платок, движение, «Погладить»,
+// «Покормить», подтверждённое занятие хоста, отключение и повторное подключение. Ниже — диагностика PL09: хранение
+// (настоящий expo-sqlite), жизненный цикл (useNativeLifecycle — единственный владелец), «Новое ядро», резервирование дня,
+// занятый файл, журнал. Все решения — ядро: подписи и доступность кнопок — по снимку, команда всё равно проходит его
+// проверку. Сценарии и что записать — README.md рядом.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Button, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useNativeLifecycle, usePetState } from 'pet-companion/native';
-import { busyProbe, confirmed, MOTIONS, NAMES, newCore, openStore, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
+import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { catNative, dogNative, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
+import { busyProbe, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck, same } from './diagnostics.mjs';
+
+const KITS = [catNative, dogNative];
+const MOTION_TITLES = [
+  ['normal', 'Обычное'],
+  ['calm', 'Спокойное'],
+  ['none', 'Без анимации'],
+];
+const SAVE = { none: 'без изменений', pending: 'сохраняется…', saved: 'сохранено', failed: 'не сохранилось', partial: 'сохранено частично' };
+const TREAT = { waiting: 'Покормить (сначала занятие)', ready: 'Покормить', fed: 'Покормить (сегодня уже угостили)' };
+const KEEP = ['pet', 'name', 'motion', 'coat', 'accessory'];
 
 const time = () => new Date().toTimeString().slice(0, 8);
 const next = (list, value) => list[(list.indexOf(value) + 1) % list.length];
 // В разработке (Expo Go, __DEV__) журнал, проверки и смены строк состояния дублируются в консоль — Expo CLI печатает их в
-// терминале Metro: доказательство запуска на устройстве без снимков экрана. В Node-проверке __DEV__ нет — консоль молчит.
-const trace = (text) => globalThis.__DEV__ && console.log(`[PL09] ${text}`);
+// терминале Metro: доказательство запуска на устройстве вместе со снимками экрана. В Node-проверке __DEV__ нет.
+const trace = (text) => globalThis.__DEV__ && console.log(`[PET] ${text}`);
 const mark = (value) => (value.ok === true ? '✓' : value.ok === false ? '✗' : '·');
 
-// Владение ядром: у подключённого экрана — запись own { live, core, turn }: текущее ядро и номер последнего создания.
-// Созданное ядро принимается, только если экран ещё подключён и создание — последнее; иначе (размонтирован, опередило
-// более новое «Новое ядро») уничтожается сразу — ядра без владельца не остаётся.
+// Владение ядром: у подключённого экрана — запись own { live, core, turn, before }: текущее ядро, номер последнего создания
+// и подтверждённое на момент отключения. Созданное ядро принимается, только если экран ещё подключён и создание — последнее;
+// иначе (размонтирован, опередило более новое) уничтожается сразу — ядра без владельца не остаётся.
 function adopt(own, turn, core) {
   if (own.live && own.turn === turn) {
     own.core = core;
@@ -31,39 +43,51 @@ export default function App() {
   const [core, setCore] = useState(null);
   const [lines, setLines] = useState([]);
   const [checks, setChecks] = useState({});
-  const marks = useRef(0);
+  const [note, setNote] = useState('');
+  const [draft, setDraft] = useState(null);
   // Запись владения подключённого экрана (null — экран не подключён): после размонтирования экран своё состояние не меняет.
   const owner = useRef(null);
+  // Что сверить после ближайшего start: первый запуск процесса (restart) или переподключение ({ reason, before }).
+  const follow = useRef(null);
+  const lastKey = useRef('');
+  // Поле имени: сохранение снимает с него фокус — вместе с ним снимается и тишина ввода (setContext typing).
+  const nameField = useRef(null);
+  const seq = useRef(0);
   const say = useCallback((text) => {
     if (!owner.current) return;
     const line = `${time()} ${text}`;
     trace(line);
-    setLines((list) => [line, ...list].slice(0, 60));
+    setLines((list) => [line, ...list].slice(0, 80));
   }, []);
   const check = useCallback((name, value) => {
     if (!owner.current) return;
     trace(`проверка «${name}»: ${mark(value)} ${value.text}`);
     setChecks((all) => ({ ...all, [name]: value }));
   }, []);
-  const progress = useCallback(() => ({ marks: marks.current, today: marks.current, limit: null }), []);
+  // Итог для человека: строка состояния; важное (отказы, итог занятия хоста) — ещё и скринридеру, один раз. Объявления
+  // самого питомца (лакомство, готовое имя) делает PetView по эффектам ядра — здесь они не повторяются.
+  const tell = useCallback((text, important = false) => {
+    if (!owner.current) return;
+    setNote(text);
+    trace(`итог: ${text}`);
+    if (important) AccessibilityInfo.announceForAccessibility?.(text);
+  }, []);
   const ready = useNativeLifecycle(core);
   const pet = usePetState(core);
 
-  // Запуск: база примера, барьер загрузки, ядро; сверка подтверждённого прошлого запуска. Размонтирование уничтожает
-  // текущее ядро (и первое, и созданное «Новое ядро»); ядро, созданное после него, уничтожает adopt.
+  // Запуск: база примера, барьер загрузки, ядро. Размонтирование уничтожает текущее ядро (и первое, и созданное позже);
+  // ядро, созданное после него, уничтожает adopt.
   useEffect(() => {
-    const own = { live: true, core: null, turn: 1 };
+    const own = { live: true, core: null, turn: 1, before: null };
     owner.current = own;
     (async () => {
       const opened = await openStore();
-      const { core: first, status } = await newCore(opened, progress);
+      const { core: first, status } = await newCore(opened);
       if (!adopt(own, 1, first)) return;
+      follow.current = { reason: 'restart', expected: opened.expected };
       setStore(opened);
       setCore(first);
-      say(`хранилище: ${status}`);
-      const result = restartCheck(opened.expected, first.getState());
-      check('Перезапуск с тем же файлом', result);
-      say(`перезапуск: ${result.text}`);
+      say(`хранилище: ${status}; день хоста ${opened.host?.today?.() ?? '—'}`);
     })().catch((error) => own.live && say(`ошибка запуска: ${error?.message ?? error}`));
     return () => {
       own.live = false;
@@ -71,29 +95,45 @@ export default function App() {
       own.core?.destroy();
       own.core = null;
     };
-  }, [check, progress, say]);
+  }, [say]);
 
-  // Ядро запускается после начальной синхронизации видимости и «уменьшить движение».
+  // Ядро запускается после начальной синхронизации видимости и «уменьшить движение»; затем — сверка восстановленного.
   useEffect(() => {
-    if (core && ready && core.status === 'created') {
-      core.start();
-      say('start после useNativeLifecycle → ready');
+    if (!core || !ready || core.status !== 'created') return;
+    core.start();
+    say('start после useNativeLifecycle → ready');
+    const want = follow.current;
+    follow.current = null;
+    if (!want) return;
+    const state = core.getState();
+    if (want.reason === 'restart') {
+      const result = restartCheck(want.expected, state);
+      check('Перезапуск с тем же файлом', result);
+      say(`перезапуск: ${result.text}`);
+      return;
     }
-  }, [core, ready, say]);
+    const now = confirmed(state);
+    const fields = want.reason === 'Следующий день' ? KEEP : undefined;
+    const ok = Boolean(now) && (!want.before || same(want.before, now, fields));
+    check(want.reason === 'Новое ядро' ? 'destroy → load → новое ядро' : `${want.reason}: восстановлено`, { ok, text: now ? `${now.pet} / ${now.name} / ${now.motion} / ${now.coat} / ${now.accessory} / ${now.treat}` : 'есть неподтверждённое' });
+  }, [core, ready, say, check]);
 
-  // Переходы статуса сохранения cat и запоминание подтверждённого для сверки после перезапуска.
+  // Журнал переходов: сохранение, видимость, реакция и нарисованная поза; запоминание подтверждённого для сверки после
+  // перезапуска.
   useEffect(() => {
     if (!core || !store) return undefined;
-    let last = core.getState()?.save.cat.status;
-    let shown = core.getState()?.visible;
+    const first = core.getState();
+    let last = { cat: first?.save.cat.status, visible: first?.visible, reaction: first?.pose.reaction?.type ?? '—', page: first?.pose.shown.page };
     return core.subscribe(
       (update) => {
-        const now = update.snapshot.save.cat.status;
-        if (now !== last) say(`cat: ${last} → ${now}`);
+        const s = update.snapshot;
+        const now = { cat: s.save.cat.status, visible: s.visible, reaction: s.pose.reaction?.type ?? '—', page: s.pose.shown.page };
+        if (now.cat !== last.cat) say(`cat: ${last.cat} → ${now.cat}`);
+        if (now.visible !== last.visible) say(`ядро visible: ${last.visible} → ${now.visible}`);
+        if (now.reaction !== last.reaction) say(`реакция: ${last.reaction} → ${now.reaction}`);
+        if (now.page !== last.page) say(`поза: ${last.page} → ${now.page}`);
         last = now;
-        if (update.snapshot.visible !== shown) say(`ядро visible: ${shown} → ${update.snapshot.visible}`);
-        shown = update.snapshot.visible;
-        const value = confirmed(update.snapshot);
+        const value = confirmed(s);
         if (value) remember(store.db, value).catch((error) => say(`диагностика не записана: ${error?.message ?? error}`));
       },
       { initial: false },
@@ -106,33 +146,122 @@ export default function App() {
     return () => subscription.remove();
   }, [say]);
 
+  // Итог команды ядра: отказ — его текст (ядро пишет по-русски), успех — судьба записи; поздний итог — тоже.
+  const report = (title, result) => {
+    if (!result.ok) {
+      say(`${title}: ${result.error.code}`);
+      tell(`${title}: ${result.error.message}`, true);
+      return;
+    }
+    say(`${title}: ${result.save.status}`);
+    tell(`${title}: ${SAVE[result.save.status]}`);
+    result.save.done?.then((done) => {
+      say(`${title}: done → ${done}`);
+      tell(`${title}: ${SAVE[done]}`, done !== 'saved');
+    });
+  };
   const command = (title, run) => () => {
-    if (!core) return;
-    const result = run(core);
-    say(`${title}: ${result.ok ? result.save.status : result.error.code}`);
-    result.save?.done?.then((done) => say(`${title}: done → ${done}`));
+    const live = owner.current?.core;
+    if (live) report(title, run(live));
   };
 
-  // «Новое ядро»: прежнее уничтожается до барьера загрузки (load ждёт его принятых операций), новое — во владение экрана.
-  // Каждое нажатие получает свой номер: результат более раннего (в том числе нажатого, пока предыдущее ещё грузится)
-  // уничтожается и экран не трогает.
-  const renew = async () => {
+  // Подключение: прежнее ядро уничтожается до барьера загрузки (load ждёт его принятых операций), новое — во владение
+  // экрана; каждое нажатие получает номер — результат более раннего уничтожается и экран не трогает.
+  const connect = async (reason) => {
     const own = owner.current;
     if (!own || !store) return;
     const turn = ++own.turn;
+    const before = own.core ? confirmed(own.core.getState()) : own.before;
     own.core?.destroy();
     own.core = null;
     setCore(null);
     try {
-      const { core: fresh, status } = await newCore(store, progress);
+      const { core: fresh, status } = await newCore(store);
       if (!adopt(own, turn, fresh)) return;
+      follow.current = { reason, before };
       setCore(fresh);
-      const value = confirmed(fresh.getState());
-      say(`новое ядро после load (${status}): ${fresh.getState().name.display} / ${fresh.getState().prefs.motion}`);
-      check('destroy → load → новое ядро', { ok: Boolean(value), text: value ? `подтверждённое: ${value.name} / ${value.motion}` : 'есть неподтверждённое' });
+      say(`${reason}: новое ядро после load (${status}): ${fresh.getState().name.display} / ${fresh.getState().prefs.motion}`);
+      tell(reason === 'Подключение' ? 'Питомец подключён' : `${reason}: ядро заново`);
     } catch (error) {
       if (own.live) say(`новое ядро не создано: ${error?.message ?? error}`);
     }
+  };
+  const disconnect = () => {
+    const own = owner.current;
+    if (!own?.core) return;
+    own.turn += 1;
+    own.before = confirmed(own.core.getState());
+    own.core.destroy();
+    own.core = null;
+    setCore(null);
+    say('питомец отключён: destroy');
+    tell('Питомец отключён', true);
+  };
+  const nextDay = async () => {
+    const own = owner.current;
+    if (!own || !store) return;
+    own.before = own.core ? confirmed(own.core.getState()) : own.before;
+    own.turn += 1;
+    own.core?.destroy();
+    own.core = null;
+    setCore(null);
+    await store.host.shiftDay(1);
+    if (!own.live) return;
+    say(`день хоста: ${store.host.today()} (сдвиг +${store.host.shift})`);
+    await connect('Следующий день');
+  };
+
+  // Подтверждённое занятие хоста: сначала записать в счёт хоста, затем notify('saved') — progress() уже со знаком.
+  const saveAction = async ({ fail = false } = {}) => {
+    const own = owner.current;
+    if (!own || !store) return;
+    seq.current += 1;
+    const key = `a-${Date.now().toString(36)}-${seq.current}`;
+    tell('Занятие: сохраняется…');
+    try {
+      await store.host.save(key, { fail });
+    } catch (error) {
+      if (!own.live) return;
+      say(`занятие не записано хостом: ${error?.message ?? error}`);
+      const result = own.core?.notify('failed');
+      if (result) say(`notify failed: ${result.ok ? `reacted ${result.reacted}` : result.error.code}`);
+      tell('Занятие не сохранилось — знака нет', true);
+      return;
+    }
+    if (!own.live) return;
+    lastKey.current = key;
+    const live = own.core;
+    if (!live) {
+      say(`занятие ${key} сохранено, питомец отключён`);
+      tell('Занятие сохранено; питомец отключён — без реакции', true);
+      return;
+    }
+    const result = live.notify('saved', { key, counted: true });
+    say(`notify saved ${key}: ${result.ok ? `reacted ${result.reacted}, duplicate ${result.duplicate}` : result.error.code}`);
+    tell(result.ok ? `Занятие сохранено: знаков сегодня ${store.host.progress().today}` : `Занятие сохранено; питомец: ${result.error.message}`, true);
+  };
+  const repeatAction = () => {
+    const live = owner.current?.core;
+    if (!live || !lastKey.current) return tell('Повторять нечего: занятий ещё не было', true);
+    const result = live.notify('saved', { key: lastKey.current, counted: true });
+    say(`повтор notify ${lastKey.current}: ${result.ok ? `reacted ${result.reacted}, duplicate ${result.duplicate}` : result.error.code}`);
+    tell(result.ok && result.duplicate ? 'Повтор того же занятия: реакции и знака нет' : 'Повтор: ' + (result.ok ? 'принят' : result.error.message), true);
+  };
+  const saveName = () => {
+    const live = owner.current?.core;
+    if (!live) return;
+    report('Имя', live.setName(draft ?? live.getState().name.value));
+    setDraft(null);
+    nameField.current?.blur?.();
+  };
+  const typing = (on) => owner.current?.core?.setContext({ typing: on });
+  // «Погладить» — то же публичное interact({ type: 'pet' }), что касание питомца: без знаков и записи; итог — от ядра.
+  const stroke = () => {
+    const live = owner.current?.core;
+    if (!live) return;
+    const result = live.interact({ type: 'pet' });
+    say(`interact pet: ${result.ok ? `outcome ${result.outcome ?? '—'}, реакция ${live.getState().pose.reaction?.type ?? '—'}` : result.error.code}`);
+    tell(result.ok ? 'Погладили' : `Погладить: ${result.error.message}`, !result.ok);
   };
 
   const reserve = async () => {
@@ -140,71 +269,133 @@ export default function App() {
     const result = await reserveProbe(store.scenes);
     check('Резервирование дня', { ok: result.ok, text: `${result.first}, затем ${result.second}; показов ${result.shown}` });
   };
-
   const busy = async () => {
-    if (!store || !core) return;
-    const name = next(NAMES, core.getState().name.display);
-    const result = await busyProbe(store.db, core, name);
+    const live = owner.current?.core;
+    if (!store || !live) return;
+    const result = await busyProbe(store.db, live, next(NAMES, live.getState().name.display));
     check('Занятый файл', { ok: result.ok, text: `${result.done} через ${result.ms} мс; несохранённое уйдёт со следующей правкой` });
   };
 
   const state = pet;
+  const def = PETS.find((one) => one.id === state?.pet.shown) ?? PETS[0];
+  const opened = new Set(state?.progress?.accessories ?? []);
+  const running = Boolean(core && state);
+  // Кнопки — данные: та же функция у кнопки и у моста разработки.
+  const kinds = PETS.map((one) => ({ id: `kind-${one.id}`, title: one.title, selected: state?.pet.shown === one.id, disabled: !running, onPress: command(`Питомец «${one.title}»`, (c) => c.setPet(one.id)) }));
+  const coats = def.coats.map((coat) => ({ id: `coat-${coat.id}`, title: coat.title, selected: state?.look.coat === coat.id, disabled: !running, onPress: command(`Облик «${coat.title}»`, (c) => c.setAppearance({ coat: coat.id })) }));
+  const accessories = def.accessories.map((item) => ({
+    id: `acc-${item.id}`,
+    title: item.title,
+    selected: state?.look.accessory === item.id,
+    disabled: !running || !opened.has(item.id),
+    hint: opened.has(item.id) ? undefined : `Откроется на ступени ${item.stage}`,
+    onPress: command(`Аксессуар «${item.title}»`, (c) => c.setAppearance({ accessory: item.id })),
+  }));
+  const motions = MOTION_TITLES.map(([id, title]) => ({ id: `motion-${id}`, title, selected: state?.prefs.motion === id, disabled: !running, onPress: command(`Движение «${title}»`, (c) => c.setPreferences({ motion: id })) }));
+  const actions = [
+    { id: 'pet-stroke', title: 'Погладить', disabled: !running, onPress: stroke },
+    { id: 'pet-feed', title: TREAT[state?.treat] ?? 'Покормить', disabled: !running, hint: state?.treat === 'ready' ? undefined : 'Ядро проверит, можно ли сейчас', onPress: command('Покормить', (c) => c.feed()) },
+    { id: 'host-save', title: 'Занятие сохранено', disabled: !store, onPress: () => saveAction() },
+    { id: 'host-fail', title: 'Занятие не сохранилось', disabled: !store, onPress: () => saveAction({ fail: true }) },
+    { id: 'host-repeat', title: 'Повторить уведомление', disabled: !running, onPress: repeatAction },
+  ];
+  const life = [
+    core ? { id: 'pet-off', title: 'Отключить питомца', onPress: disconnect } : { id: 'pet-on', title: 'Подключить питомца', disabled: !store, onPress: () => connect('Подключение') },
+    { id: 'day-next', title: 'Следующий день (проверка)', disabled: !store, onPress: nextDay },
+  ];
+  const diag = [
+    { id: 'diag-renew', title: 'Новое ядро', disabled: !store, onPress: () => connect('Новое ядро') },
+    { id: 'diag-reserve', title: 'Резервирование дня', disabled: !store, onPress: reserve },
+    { id: 'diag-busy', title: 'Занятый файл', disabled: !running, onPress: busy },
+  ];
+  const nameSave = { id: 'name-save', title: 'Сохранить имя', disabled: !running, onPress: saveName };
+  const all = [...kinds, nameSave, ...coats, ...accessories, ...motions, ...actions, ...life, ...diag];
+  const progress = store?.host?.progress?.();
   const rows = [
     ['Хранилище', store ? store.storage.status : '…'],
-    ['Ядро', core ? `${core.status}${ready ? ', ready' : ''}` : 'нет'],
+    ['Ядро', core ? `${core.status}${ready ? ', ready' : ''}` : 'отключено'],
     ['AppState / visible', `${AppState.currentState} / ${state ? state.visible : '—'}`],
     ['Имя', state ? state.name.display : '—'],
     ['Движение: владелец / система / итог', state ? `${state.prefs.motion} / ${state.prefs.reducedMotion} / ${state.prefs.effectiveMotion}` : '—'],
-    ['cat: статус, pending, unsaved', state ? `${state.save.cat.status}, [${state.save.cat.pending}], [${state.save.cat.unsaved}]` : '—'],
-    ['Реакция', state?.pose.reaction?.type ?? '—'],
+    ['Сохранение cat, companion, look, treat', state ? ['cat', 'companion', 'look', 'treat'].map((key) => state.save[key].status).join(', ') : '—'],
+    ['cat: pending, unsaved', state ? `[${state.save.cat.pending}], [${state.save.cat.unsaved}]` : '—'],
+    ['Реакция / поза', state ? `${state.pose.reaction?.type ?? '—'} / ${state.pose.shown.page}` : '—'],
+    ['Лакомство', state?.treat ?? '—'],
+    ['Знаки хоста: всего / сегодня / день', progress ? `${progress.marks} / ${progress.today} / ${store.host.today()}${store.host.shift ? ` (сдвиг +${store.host.shift})` : ''}` : '—'],
   ];
   const summary = rows.map(([label, value]) => `${label}: ${value}`).join(' | ');
   useEffect(() => {
     if (owner.current) trace(`экран — ${summary}`);
   }, [summary]);
-  const buttons = [
-    ['Имя', command('setName', (c) => c.setName(next(NAMES, c.getState().name.display)))],
-    ['Движение', command('setPreferences', (c) => c.setPreferences({ motion: next(MOTIONS, c.getState().prefs.motion) }))],
-    ['Подтверждённое занятие', command('notify saved', (c) => ((marks.current += 1), c.notify('saved', { key: `k${Date.now()}`, counted: true })))],
-    ['Новое ядро', renew],
-    ['Резервирование дня', reserve],
-    ['Занятый файл', busy],
-  ];
-  // Мост диагностики (только разработка, __DEV__): инспектор Metro вызывает те же функции, что отданы кнопкам последнего
-  // смонтированного экрана, и читает показанные строки; своих действий у моста нет. Снимается при размонтировании. В
-  // Node-проверке __DEV__ нет — моста нет.
+  // Мост разработки (__DEV__): инспектор Metro вызывает те же функции, что отданы кнопкам последнего смонтированного
+  // экрана, и читает показанные строки; своих действий у моста нет. Снимается при размонтировании. В Node-проверке нет.
   useEffect(() => {
     if (!globalThis.__DEV__) return undefined;
     const bridge = {
-      titles: buttons.map(([title]) => title),
+      titles: all.map((item) => item.title),
       press: (title) => {
-        const found = buttons.find(([name]) => name === title);
+        const found = all.find((item) => item.title === title || item.id === title);
         if (!found) throw new Error(`нет кнопки «${title}»`);
-        return found[1]();
+        return found.onPress();
       },
-      screen: () => ({ rows: Object.fromEntries(rows), checks, lines }),
+      screen: () => ({ rows: Object.fromEntries(rows), checks, lines, note }),
     };
-    globalThis.__PL09__ = bridge;
+    globalThis.__PET_EXAMPLE__ = bridge;
     return () => {
-      if (globalThis.__PL09__ === bridge) delete globalThis.__PL09__;
+      if (globalThis.__PET_EXAMPLE__ === bridge) delete globalThis.__PET_EXAMPLE__;
     };
   });
+
   return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <Text style={styles.title}>pet-companion · PL09 · диагностика</Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" testID="screen">
+      <Text style={styles.title} accessibilityRole="header">
+        pet-companion · нативный пример
+      </Text>
+      <View style={styles.stage}>{core ? <PetView core={core} pets={PETS} kits={KITS} size={200} testID="pet" /> : <Text style={styles.off}>Питомец отключён</Text>}</View>
+      <Text style={styles.status} testID="status">
+        {`${store ? `Хранилище: ${store.storage.status}` : 'Хранилище: загрузка…'} · ${core ? `ядро ${core.status}` : 'ядро отключено'}${note ? `\n${note}` : ''}`}
+      </Text>
+      <Group title="Действия" items={actions} />
+      <Group title="Питомец" items={kinds} />
+      <Text style={styles.label} nativeID="name-label">
+        Имя: {state ? state.name.display : '—'}
+      </Text>
+      <View style={styles.row}>
+        <TextInput
+          ref={nameField}
+          testID="name-input"
+          style={styles.input}
+          accessibilityLabel="Имя питомца"
+          accessibilityLabelledBy="name-label"
+          value={draft ?? state?.name.value ?? ''}
+          placeholder={def.names.default}
+          maxLength={40}
+          editable={running}
+          returnKeyType="done"
+          onChangeText={setDraft}
+          onFocus={() => typing(true)}
+          onBlur={() => typing(false)}
+          onSubmitEditing={saveName}
+        />
+        <Control item={nameSave} />
+      </View>
+      <Group title="Облик" items={coats} />
+      <Group title="Платок" items={accessories} />
+      <Group title="Движение" items={motions} />
+      <Group title="Подключение и день" items={life} />
+      <Text style={styles.head} accessibilityRole="header">
+        Диагностика
+      </Text>
       {rows.map(([label, value]) => (
         <Row key={label} label={label} value={value} />
       ))}
-      <View style={styles.buttons}>
-        {buttons.map(([title, onPress]) => (
-          <Button key={title} title={title} onPress={onPress} />
-        ))}
-      </View>
-      <Text style={styles.head}>Проверки</Text>
+      <Group title="Проверки хранения" items={diag} />
       {Object.entries(checks).map(([name, value]) => (
         <Row key={name} label={`${mark(value)} ${name}`} value={value.text} />
       ))}
-      <Text style={styles.head}>Журнал</Text>
+      <Text style={styles.head} accessibilityRole="header">
+        Журнал
+      </Text>
       {lines.map((line, index) => (
         <Text key={`${index}-${line}`} style={styles.line}>
           {line}
@@ -214,21 +405,72 @@ export default function App() {
   );
 }
 
-function Row({ label, value }) {
+function Group({ title, items }) {
   return (
-    <View style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
-      <Text selectable>{String(value)}</Text>
+    <View style={styles.group}>
+      <Text style={styles.label} accessibilityRole="header">
+        {title}
+      </Text>
+      <View style={styles.row}>
+        {items.map((item) => (
+          <Control key={item.id} item={item} />
+        ))}
+      </View>
     </View>
   );
 }
 
+// Кнопка: роль, название, состояние (выбрана, недоступна), область касания не меньше 48 точек.
+function Control({ item }) {
+  const { id, title, onPress, selected, disabled, hint } = item;
+  return (
+    <Pressable
+      testID={id}
+      onPress={onPress}
+      disabled={Boolean(disabled)}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={hint}
+      accessibilityState={{ disabled: Boolean(disabled), ...(selected === undefined ? {} : { selected }) }}
+      style={({ pressed }) => [styles.control, selected && styles.selected, disabled && styles.disabled, pressed && styles.pressed]}
+    >
+      <Text style={[styles.controlText, selected && styles.selectedText]}>{title}</Text>
+    </Pressable>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <View style={styles.rowText}>
+      <Text style={styles.small}>{label}</Text>
+      <Text style={styles.value} selectable>
+        {String(value)}
+      </Text>
+    </View>
+  );
+}
+
+const INK = '#1d2024';
 const styles = StyleSheet.create({
-  page: { padding: 16, paddingTop: 56, gap: 8 },
-  title: { fontSize: 18, fontWeight: '600' },
-  row: { gap: 2 },
-  label: { fontSize: 12, opacity: 0.7 },
-  buttons: { gap: 8, marginVertical: 8 },
-  head: { marginTop: 12, fontWeight: '600' },
-  line: { fontSize: 12 },
+  screen: { backgroundColor: '#f6f2ea' },
+  page: { padding: 16, paddingTop: 56, paddingBottom: 48, gap: 10 },
+  title: { fontSize: 20, fontWeight: '600', color: INK },
+  stage: { alignItems: 'center', minHeight: 200, justifyContent: 'center' },
+  off: { fontSize: 16, color: INK },
+  status: { fontSize: 15, lineHeight: 21, color: INK },
+  group: { gap: 6 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  label: { fontSize: 15, fontWeight: '600', color: INK },
+  input: { flexGrow: 1, flexBasis: 180, minHeight: 48, borderWidth: 1, borderColor: '#8a8478', borderRadius: 8, paddingHorizontal: 12, fontSize: 17, color: INK, backgroundColor: '#ffffff' },
+  control: { minHeight: 48, minWidth: 48, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2f5249', justifyContent: 'center', backgroundColor: '#ffffff' },
+  selected: { backgroundColor: '#2f5249' },
+  disabled: { opacity: 0.45 },
+  pressed: { opacity: 0.7 },
+  controlText: { fontSize: 16, color: '#2f5249' },
+  selectedText: { color: '#ffffff', fontWeight: '600' },
+  head: { marginTop: 14, fontSize: 17, fontWeight: '600', color: INK },
+  rowText: { gap: 2 },
+  small: { fontSize: 12, color: '#5b574f' },
+  value: { fontSize: 14, color: INK },
+  line: { fontSize: 12, color: INK },
 });

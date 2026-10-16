@@ -145,7 +145,9 @@ export async function sqliteSite(initial = {}, { ns = 'qa', mode = 'wal', busyTi
 }
 
 // Подделка React Native: AppState (currentState, change, blur) и AccessibilityInfo (isReduceMotionEnabled — ручное
-// обещание, reduceMotionChanged). Счётчики подписок и снятий; emit — событие всем текущим слушателям.
+// обещание, reduceMotionChanged, announceForAccessibility — в announced). Счётчики подписок и снятий; emit — событие всем
+// текущим слушателям; animations — учёт анимаций подделки Animated (test/fakes/react-native.mjs): started, stopped и
+// идущие (live), finish() — все идущие закончились сами.
 export function system({ state = 'active' } = {}) {
   const listeners = { change: new Set(), blur: new Set(), reduceMotionChanged: new Set() };
   const counts = { add: 0, remove: 0, ask: 0 };
@@ -167,15 +169,29 @@ export function system({ state = 'active' } = {}) {
     },
   });
   const AppState = Object.assign(target(['change', 'blur']), { currentState: state });
+  const announced = [];
   const AccessibilityInfo = Object.assign(target(['reduceMotionChanged']), {
     isReduceMotionEnabled() {
       counts.ask += 1;
       return new Promise((resolve, reject) => asks.push({ resolve, reject }));
     },
+    announceForAccessibility(text) {
+      announced.push(text);
+    },
   });
+  const animations = {
+    started: 0,
+    stopped: 0,
+    live: new Set(),
+    finish() {
+      for (const run of [...this.live]) run.end({ finished: true });
+    },
+  };
   return {
     AppState,
     AccessibilityInfo,
+    announced,
+    animations,
     counts,
     asks,
     listeners,

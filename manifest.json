@@ -245,14 +245,26 @@
       "styles": [],
       "peers": {
         "react": "^18.3.1 || ^19.0.0",
-        "react-native": ">=0.88.0"
+        "react-native": ">=0.88.0",
+        "react-native-svg": ">=15.16.0"
       },
       "files": [
         "pet/core/day.mjs",
+        "pet/core/define.mjs",
+        "pet/core/errors.mjs",
+        "pet/core/formats/legacy.mjs",
+        "pet/core/pets.mjs",
         "pet/core/ports.mjs",
+        "pet/core/stages.mjs",
         "pet/hooks/state.mjs",
         "pet/native.mjs",
-        "pet/native/lifecycle.mjs"
+        "pet/native/cat.mjs",
+        "pet/native/dog.mjs",
+        "pet/native/kits.mjs",
+        "pet/native/lifecycle.mjs",
+        "pet/native/motion.mjs",
+        "pet/native/svg.mjs",
+        "pet/native/view.mjs"
       ]
     },
     "./native-sqlite": {

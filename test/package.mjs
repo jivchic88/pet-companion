@@ -33,6 +33,10 @@
 // pet/storage/**; голые имена react-native и expo-sqlite — только у своих входов, native/** и storage/** — только core/**;
 // в проекте без мобильных партнёров оба входа разрешаются, а импорт честно отказывает (нет react / expo-sqlite), прежние
 // входы работают; внутренние пути натива закрыты (Node и TypeScript); типы обоих входов — без lib dom и без типов партнёров.
+// PL10.1: в архиве отображение pet/native/** (view, kits, motion, svg, cat, dog) — слои импортов по файлам (правила наборов
+// и жизненный цикл — только ядро, рисунки — react и react-native-svg), голое react-native-svg — только у отображения;
+// типы PetView и наборов — с @types/react проекта, без типов React Native и react-native-svg; логика примера Expo на
+// архиве — счёт хоста, подтверждённое и восстановление питомца, облика и лакомства во втором процессе, сдвиг дня.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -60,11 +64,27 @@ const DEFS = ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs'];
 const WEB = ['web/catalog.mjs', 'web/kits.mjs', 'web/legacy/places.mjs', 'web/parts.mjs', 'web/pointer.mjs', 'web/scenes.mjs', 'web/shell.mjs', 'web/storage.mjs', 'web/view.css', 'web/view.mjs'];
 // PL08: вход React pet/react.mjs с типами и общий хук pet/hooks/state.mjs.
 const REACT = ['hooks/state.mjs', 'react.d.mts', 'react.mjs'];
-// PL09: входы натива с типами, жизненный цикл и SQLite-адаптер.
-const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/lifecycle.mjs', 'storage/sqlite.mjs'];
+// PL09: входы натива с типами, жизненный цикл и SQLite-адаптер; PL10.1: отображение, наборы и рисунки.
+const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
 const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', ...REACT, ...NATIVE, 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
-// Голые имена партнёров — только в своих файлах (PL08 — react, PL09 — react-native и expo-sqlite).
-const PEER_FILES = { react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/'), 'react-native': (file) => file === 'native.mjs', 'expo-sqlite': (file) => file === 'native-sqlite.mjs' };
+// Голые имена партнёров — только в своих файлах (PL08 — react, PL09 — react-native и expo-sqlite, PL10.1 — отображение и
+// рисунки натива: react и react-native-svg).
+const PEER_FILES = {
+  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || file === 'native/view.mjs' || file === 'native/svg.mjs',
+  'react-native': (file) => file === 'native.mjs' || file === 'native/view.mjs',
+  'react-native-svg': (file) => ['native/view.mjs', 'native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs'].includes(file),
+  'expo-sqlite': (file) => file === 'native-sqlite.mjs',
+};
+// Локальные импорты слоёв pet/native/** (PL10.1): области, в которые файл может ссылаться.
+const NATIVE_LOCAL = {
+  'native/lifecycle.mjs': ['core/'],
+  'native/kits.mjs': ['core/'],
+  'native/motion.mjs': [],
+  'native/svg.mjs': [],
+  'native/cat.mjs': ['native/svg.mjs'],
+  'native/dog.mjs': ['native/svg.mjs'],
+  'native/view.mjs': ['core/ports.mjs', 'hooks/state.mjs', 'native/kits.mjs', 'native/motion.mjs'],
+};
 // Пример расширения (вне архива): файлы для Node и для браузера (legacy и контейнер).
 const EXTENSION = ['bunny.mjs', 'bunny-web.mjs', 'bunny.css', 'container.html', 'index.html', 'lively.mjs', 'node.mjs'];
 // CSP-пример контейнера (вне архива): страница, её модуль и стили — файлы; заголовок CSP ставит сервер.
@@ -685,11 +705,12 @@ try {
         continue;
       }
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
-      const coreOnly = file.startsWith('core/') || file === 'core.mjs' || file.startsWith('native/') || file.startsWith('storage/');
-      if (!RUNTIME.includes(target) || (coreOnly && !target.startsWith('core/')) || (defsSide(file) && !target.startsWith('core/') && !target.startsWith('defs/'))) graph.push(`${file} → ${spec}`);
+      const coreOnly = file.startsWith('core/') || file === 'core.mjs' || file.startsWith('storage/');
+      const nativeLayer = file.startsWith('native/') && !(NATIVE_LOCAL[file] ?? []).some((area) => (area.endsWith('/') ? target.startsWith(area) : target === area));
+      if (!RUNTIME.includes(target) || nativeLayer || (coreOnly && !target.startsWith('core/')) || (defsSide(file) && !target.startsWith('core/') && !target.startsWith('defs/'))) graph.push(`${file} → ${spec}`);
     }
   }
-  check('архив: импорты — файлы архива внутри pet/; голое имя react — только у pet/react.mjs, pet/hooks/** и pet/native.mjs, react-native — у pet/native.mjs, expo-sqlite — у pet/native-sqlite.mjs (PL08, PL09); вход ядра core.mjs, ядро core/**, натив native/** и SQLite storage/** импортируют только core/**; определения defs/** и входы pets.mjs, behaviors.mjs — только defs/** и core/**', graph.length === 0, graph.join(', '));
+  check('архив: импорты — файлы архива внутри pet/; голое имя react — только у pet/react.mjs, pet/hooks/**, pet/native.mjs и отображения натива, react-native — у pet/native.mjs и pet/native/view.mjs, react-native-svg — у отображения и рисунков натива, expo-sqlite — у pet/native-sqlite.mjs (PL08–PL10.1); вход ядра core.mjs, ядро core/** и SQLite storage/** импортируют только core/**, слои pet/native/** — только свои области; определения defs/** и входы pets.mjs, behaviors.mjs — только defs/** и core/**', graph.length === 0, graph.join(', '));
 
   // Перечень (PL08): в архиве, публичным путём; совпадает с собранным по графу самого архива; файлы — в архиве, внутри
   // пакета, без повторов; версия — пакета; каждый файл исполнения pet/ архива — в перечне хотя бы одного входа.
@@ -718,7 +739,7 @@ try {
     const web = await import('${NAME}/web');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs', 'hooks', 'hooks/state.mjs', 'pet/native.mjs', 'pet/native.d.mts', 'pet/native-sqlite.mjs', 'pet/native/lifecycle.mjs', 'pet/storage/sqlite.mjs', 'native/lifecycle.mjs', 'storage/sqlite.mjs', 'storage'].map((name) => resolve('${NAME}/' + name));
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs', 'hooks', 'hooks/state.mjs', 'pet/native.mjs', 'pet/native.d.mts', 'pet/native-sqlite.mjs', 'pet/native/lifecycle.mjs', 'pet/storage/sqlite.mjs', 'native/lifecycle.mjs', 'storage/sqlite.mjs', 'storage', 'pet/native/view.mjs', 'pet/native/cat.mjs', 'native/view.mjs', 'native/kits.mjs'].map((name) => resolve('${NAME}/' + name));
     const react = await import('${NAME}/react').then(() => 'imported', (error) => ({ code: error.code, message: error.message }));
     const failure = (error) => ({ code: error.code, message: error.message });
     const native = { at: resolve('${NAME}/native').replace(/^.*node_modules\\//, ''), sqliteAt: resolve('${NAME}/native-sqlite').replace(/^.*node_modules\\//, ''), lifecycle: await import('${NAME}/native').then(() => 'imported', failure), sqlite: await import('${NAME}/native-sqlite').then(() => 'imported', failure) };
@@ -729,7 +750,7 @@ try {
   check('Node: вход ядра pet-companion/core — ровно createPetCore, createStorage, defineBehavior, definePet (PL06), PetError, localDay, VERSION из pet/core.mjs; та же граница дня и версия', JSON.stringify(node.coreKeys) === '["PetError","VERSION","createPetCore","createStorage","defineBehavior","definePet","localDay"]' && node.coreAt === `${NAME}/pet/core.mjs` && node.sameDay && node.sameVersion, stdout);
   check('Node: входы pet-companion/pets (cat, dog, corner, cornerItems) и pet-companion/behaviors (calm) — pet/pets.mjs и pet/behaviors.mjs; определения глубоко заморожены', JSON.stringify(node.petsKeys) === '["cat","corner","cornerItems","dog"]' && JSON.stringify(node.behaviorsKeys) === '["calm"]' && node.petsAt === `${NAME}/pet/pets.mjs` && node.behaviorsAt === `${NAME}/pet/behaviors.mjs` && node.frozen && node.ids.join() === 'cat,dog,calm', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
-  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, файлы React по внутренним путям (pet/react.mjs, типы, хук), файлы натива по внутренним путям (pet/native.mjs, типы, pet/native-sqlite.mjs, жизненный цикл, SQLite-адаптер), несуществующие входы (defs, kits, hooks, storage) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 52 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, файлы React по внутренним путям (pet/react.mjs, типы, хук), файлы натива по внутренним путям (pet/native.mjs, типы, pet/native-sqlite.mjs, жизненный цикл, SQLite-адаптер; PL10.1 — отображение и наборы), несуществующие входы (defs, kits, hooks, storage) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 56 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
   check('Node без мобильных партнёров (PL09): pet-companion/native и /native-sqlite разрешаются в pet/native.mjs и pet/native-sqlite.mjs, импорт честно отказывает — нет react (необязательный партнёр /native, за ним react-native) и expo-sqlite; прежние входы выше работают', node.native?.at === `${NAME}/pet/native.mjs` && node.native.sqliteAt === `${NAME}/pet/native-sqlite.mjs` && node.native.lifecycle?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.native.lifecycle.message) && node.native.sqlite?.code === 'ERR_MODULE_NOT_FOUND' && /'expo-sqlite'/.test(node.native.sqlite.message), stdout);
   check('Node без React (PL08): pet-companion/manifest.json — публичный путь к manifest.json; pet-companion/react разрешается в pet/react.mjs, а импорт честно отказывает — нет пакета react (необязательный партнёр); остальные входы выше работают', node.manifestAt === `${NAME}/manifest.json` && node.reactAt === `${NAME}/pet/react.mjs` && node.react?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.react.message), stdout);
   check('Node: вход pet-companion/web (PL07) — ровно catWeb, createWebScenes, createWebStorage, dogWeb, mountPetIn из pet/web.mjs', JSON.stringify(node.webKeys) === '["catWeb","createWebScenes","createWebStorage","dogWeb","mountPetIn"]' && node.webAt === `${NAME}/pet/web.mjs`, stdout);
@@ -767,9 +788,12 @@ try {
   for (const file of EXTENSION) await cp(path.join(root, 'examples', 'extension', file), path.join(project, 'extension', file));
   const extensionNode = await run(process.execPath, [path.join('extension', 'node.mjs')], { cwd: project }).then(({ stdout }) => JSON.parse(stdout.trim().split('\n').at(-1)), (error) => ({ failed: error.stderr || error.message }));
   check('Node: внешний пример расширения examples/extension/node.mjs на установленном архиве — кролик и живая модель через definePet/defineBehavior, ext:v1, лапы нет, лимит модели, сценка hop, запасной показ без определения, ошибочные ссылки отклонены', extensionNode.ok === true && extensionNode.pets?.join() === 'cat,dog,example.bunny' && extensionNode.ext?.pet?.id === 'example.bunny' && extensionNode.ext?.behavior === 'example.lively' && extensionNode.stored?.every((key) => key.startsWith('demo-ext:')) && extensionNode.warnings === 1, JSON.stringify(extensionNode));
-  // PL09: логика мобильного примера (examples/expo/diagnostics.mjs) на установленном архиве; expo-sqlite — замена
-  // загрузчиком (тестовый драйвер node:sqlite, та же сигнатура openDatabaseAsync), два процесса подряд — второй сверяет
-  // восстановление подтверждённого. Не устройство: React Native, Metro и настоящий expo-sqlite здесь не участвуют.
+  // PL09, PL10.1: логика мобильного примера (examples/expo/diagnostics.mjs) на установленном архиве; expo-sqlite — замена
+  // загрузчиком (тестовый драйвер node:sqlite, та же сигнатура openDatabaseAsync), три процесса подряд с одним файлом:
+  // первый — занятие хоста (запись, затем notify), кормление, собака, имя и облик, резервирование, занятый файл, новое
+  // ядро после load; второй — восстановление подтверждённого (питомец, имя, облик, лакомство дня и счёт хоста), повтор
+  // кормления — отказ ядра, сдвиг дня хоста — новое ядро ждёт занятия; третий — сдвиг дня сохранён. Не устройство: React
+  // Native, Metro и настоящий expo-sqlite здесь не участвуют.
   await mkdir(path.join(project, 'expo', 'fake'), { recursive: true });
   await cp(path.join(root, 'examples', 'expo', 'diagnostics.mjs'), path.join(project, 'expo', 'diagnostics.mjs'));
   for (const file of ['sqlite-driver.mjs', 'sqlite-worker.mjs']) await cp(path.join(root, 'test', file), path.join(project, 'expo', 'fake', file));
@@ -791,27 +815,53 @@ export async function openDatabaseAsync(name, options = {}, directory = process.
     `import { registerHooks } from 'node:module';
 registerHooks({ resolve: (specifier, context, next) => (specifier === 'expo-sqlite' ? { url: new URL('./fake/expo-sqlite.mjs', import.meta.url).href, shortCircuit: true } : next(specifier, context)) });
 const D = await import('./diagnostics.mjs');
+const mode = process.argv[2];
 const store = await D.openStore();
-const { core, status } = await D.newCore(store, () => ({ marks: 0, today: 0 }));
-const restart = D.restartCheck(store.expected, core.getState());
+const made = await D.newCore(store);
+const core = made.core;
 core.start();
-const name = process.argv[2];
-const saved = await core.setName(name).save.done;
-const kept = D.confirmed(core.getState());
-await D.remember(store.db, kept);
-const reserve = await D.reserveProbe(store.scenes, '2026-10-16');
-const busy = await D.busyProbe(store.db, core, 'Дымок');
-core.destroy();
-const fresh = await D.newCore(store, () => ({ marks: 0, today: 0 }));
-console.log(JSON.stringify({ status, restart, saved, kept, reserve, busy: { ok: busy.ok, done: busy.done, slow: busy.ms >= 900 }, renewed: { status: fresh.status, name: fresh.core.getState().name.display, unsaved: fresh.core.getState().save.cat.unsaved } }));
+const out = { mode, status: made.status, restart: D.restartCheck(store.expected, core.getState()), shift: store.host.shift, today: store.host.progress().today, treat: core.getState().treat };
+if (mode === 'first') {
+  await store.host.save('k1');
+  out.reacted = core.notify('saved', { key: 'k1', counted: true }).reacted;
+  out.fed = await core.feed().save.done;
+  out.pet = await core.setPet('dog').save.done;
+  out.saved = await core.setName('Пиксель').save.done;
+  out.coat = await core.setAppearance({ coat: 'spotted' }).save.done;
+  out.kept = D.confirmed(core.getState());
+  await D.remember(store.db, out.kept);
+  out.reserve = await D.reserveProbe(store.scenes, '2026-10-16');
+  const busy = await D.busyProbe(store.db, core, 'Дымок');
+  out.busy = { ok: busy.ok, done: busy.done, slow: busy.ms >= 900 };
+  core.destroy();
+  const fresh = await D.newCore(store);
+  out.renewed = { status: fresh.status, name: fresh.core.getState().name.display, unsaved: fresh.core.getState().save.cat.unsaved };
+} else if (mode === 'second') {
+  out.reserve = await D.reserveProbe(store.scenes, '2026-10-16');
+  out.again = core.feed().error?.code;
+  core.destroy();
+  out.shifted = await store.host.shiftDay(1);
+  const next = await D.newCore(store);
+  next.core.start();
+  out.next = { treat: next.core.getState().treat, today: next.core.getState().progress.today, pet: next.core.getState().pet.shown };
+}
+console.log(JSON.stringify(out));
 process.exit(0);
 `,
   );
   const expoDir = await mkdtemp(path.join(tmpdir(), `${NAME}-expo-`));
-  const expo = async (name) => run(process.execPath, [path.join('expo', 'run.mjs'), name], { cwd: project, env: { ...process.env, PET_EXPO_DIR: expoDir } }).then(({ stdout }) => JSON.parse(stdout.trim().split('\n').at(-1)), (error) => ({ failed: error.stderr || error.message }));
-  const firstRun = await expo('Пиксель');
-  const secondRun = await expo('Барсик');
-  check('Node: логика мобильного примера examples/expo/diagnostics.mjs на установленном архиве (expo-sqlite — замена на node:sqlite): загрузка, подтверждённое имя, резервирование дня — shown, затем skip, занятый файл — failed после ожидания, новое ядро после load — подтверждённое; второй процесс — «восстановлено», день уже занят', firstRun.status === 'ready' && firstRun.restart?.ok === null && firstRun.saved === 'saved' && firstRun.kept?.name === 'Пиксель' && firstRun.reserve?.ok && firstRun.reserve.first === 'shown' && firstRun.busy?.ok && firstRun.busy.slow && firstRun.renewed?.status === 'ready' && firstRun.renewed.name === 'Пиксель' && secondRun.restart?.ok === true && secondRun.reserve?.first === 'skip' && secondRun.reserve.ok && secondRun.saved === 'saved', JSON.stringify({ firstRun, secondRun }));
+  const expo = async (mode) => run(process.execPath, [path.join('expo', 'run.mjs'), mode], { cwd: project, env: { ...process.env, PET_EXPO_DIR: expoDir } }).then(({ stdout }) => JSON.parse(stdout.trim().split('\n').at(-1)), (error) => ({ failed: error.stderr || error.message }));
+  const firstRun = await expo('first');
+  const secondRun = await expo('second');
+  const thirdRun = await expo('third');
+  check(
+    'Node: логика мобильного примера examples/expo/diagnostics.mjs на установленном архиве (expo-sqlite — замена на node:sqlite): занятие хоста — запись, затем notify и реакция; кормление, собака, имя и облик — saved; резервирование дня — shown, затем skip; занятый файл — failed после ожидания; новое ядро после load — подтверждённое; второй процесс — «восстановлено» (собака, Пиксель, облик, лакомство дня, счёт хоста), повтор кормления — treat-fed, сдвиг дня — новое ядро ждёт занятия; третий процесс — сдвиг сохранён',
+    firstRun.status === 'ready' && firstRun.restart?.ok === null && firstRun.treat === 'waiting' && firstRun.reacted === true && firstRun.fed === 'saved' && firstRun.pet === 'saved' && firstRun.saved === 'saved' && firstRun.coat === 'saved' &&
+      firstRun.kept?.pet === 'dog' && firstRun.kept.name === 'Пиксель' && firstRun.kept.coat === 'spotted' && firstRun.kept.treat === 'fed' && firstRun.reserve?.ok && firstRun.reserve.first === 'shown' && firstRun.busy?.ok && firstRun.busy.slow &&
+      firstRun.renewed?.status === 'ready' && firstRun.renewed.name === 'Пиксель' && secondRun.restart?.ok === true && secondRun.today === 1 && secondRun.treat === 'fed' && secondRun.reserve?.first === 'skip' && secondRun.reserve.ok && secondRun.again === 'treat-fed' &&
+      secondRun.shifted === 1 && secondRun.next?.treat === 'waiting' && secondRun.next.today === 0 && secondRun.next.pet === 'dog' && thirdRun.shift === 1 && thirdRun.today === 0 && thirdRun.treat === 'waiting',
+    JSON.stringify({ firstRun, secondRun, thirdRun }),
+  );
   await rm(expoDir, { recursive: true, force: true });
 
   // TypeScript: полное подключение, как в README, — вход и три стиля. У проекта нет общих деклараций CSS (declare module
@@ -1128,12 +1178,14 @@ export { styles };
 `,
   );
   const PATH_ERRORS = ['1 TS2307', '2 TS2307', '3 TS2307', '4 TS2307', '5 TS2307', '6 TS2307', '7 TS2307', '8 TS2307', '9 TS2307', '10 TS2307', '11 TS2307', '12 TS2307', '13 TS2307', '14 TS2307', '15 TS2307', '16 TS2307', '17 TS1192'];
-  // PL09: натив — типы входов без lib dom и без типов React Native и expo-sqlite (их у проекта нет).
+  // PL09: натив — типы входов без lib dom и без типов React Native и expo-sqlite (их у проекта нет). PL10.1: PetView и наборы —
+  // типы элементов из react: проекту нужен @types/react (как входу /react), копия из devDependencies библиотеки, без сети.
+  for (const name of ['@types/react', 'csstype']) await cp(path.join(root, 'node_modules', name), path.join(project, 'node_modules', name), { recursive: true });
   await writeFile(
     path.join(project, 'native.mts'),
     `import { calm } from '${NAME}/behaviors';
-import { createPetCore, type PetCore, type PetLoadStatus, type PetSceneReserver } from '${NAME}/core';
-import { useNativeLifecycle, usePetState } from '${NAME}/native';
+import { createPetCore, type PetCore, type PetLoadStatus, type PetSceneReserver, type PetView as PetViewName } from '${NAME}/core';
+import { catNative, dogNative, PetView, useNativeLifecycle, usePetState, type NativePetKit, type PetViewProps } from '${NAME}/native';
 import { createSqliteScenes, createSqliteStorage, type PetSqliteOptions } from '${NAME}/native-sqlite';
 import { cat, dog } from '${NAME}/pets';
 declare const db: { databasePath: string; execAsync(source: string): Promise<void> };
@@ -1157,7 +1209,20 @@ createSqliteStorage({ db, retry: true });
 useNativeLifecycle(storage);
 // @ts-expect-error load асинхронный — обещание, не итог
 const sync: PetLoadStatus = storage.load();
-export { loaded, ready, idle, name, sync };
+// PL10.1: PetView — значение входа /native; тип вида ядра PetView прежний.
+const props: PetViewProps = { core, pets: [cat, dog], kits: [catNative, dogNative], size: 200, style: [{ margin: 8 }, false], label: 'Марс', announce: false, testID: 'pet' };
+const view = PetView(props);
+const kind: PetViewName = 'corner';
+const own: NativePetKit = { pet: 'example.fox', poses: ['calm'], coats: ['red'], accessories: [], substitutes: { yawn: 'calm' }, Figure: dogNative.Figure };
+// @ts-expect-error kits обязательны
+PetView({ core, pets: [cat] });
+// @ts-expect-error набор рисует элементами react-native-svg, а не строкой разметки
+const web: NativePetKit = { ...catNative, Figure: () => '<svg class="cat-art"></svg>' };
+// @ts-expect-error size — число точек
+PetView({ ...props, size: '200' });
+// @ts-expect-error тип вида ядра — не компонент
+const notView: PetViewName = 'pet';
+export { loaded, ready, idle, name, sync, view, kind, own, web, notView };
 `,
   );
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
@@ -1181,7 +1246,7 @@ export { loaded, ready, idle, name, sync };
     const web = await types('web.mts');
     check(`TypeScript (${resolution}): pet-companion/web — mountPetIn, настройки и вид, веб-адаптеры с публичным createPetCore, наборы и стили набора; неверные настройки, вид, контейнер и поля — ошибки (8 @ts-expect-error)`, web === '', web);
     const native = await types('native.mts', 'es2022');
-    check(`TypeScript (${resolution}, без lib dom и без типов React Native и expo-sqlite): pet-companion/native-sqlite — настройки, асинхронный координатор и резервирование с публичным createPetCore; pet-companion/native — useNativeLifecycle и usePetState; неверные настройки, аргумент хука и синхронный load — ошибки (6 @ts-expect-error)`, native === '', native);
+    check(`TypeScript (${resolution}, без lib dom и без типов React Native, react-native-svg и expo-sqlite; @types/react — для PetView): pet-companion/native-sqlite — настройки, асинхронный координатор и резервирование с публичным createPetCore; pet-companion/native — useNativeLifecycle, usePetState, PetView и наборы catNative, dogNative, свой набор; тип вида ядра PetView прежний; неверные настройки, аргумент хука, синхронный load, PetView без kits, набор-строка, size строкой, неверный вид — ошибки (10 @ts-expect-error)`, native === '', native);
     const closed = await types('paths.mts');
     const errors = [...closed.matchAll(/^paths\.mts\((\d+),\d+\): error (TS\d+)/gm)].map(([, line, code]) => `${line} ${code}`);
     check(`TypeScript (${resolution}): несуществующий стиль, внутренние пути (в том числе файлы ядра, входов штатных, определений, наборов, веба, React и натива) и несуществующий вход kits — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);

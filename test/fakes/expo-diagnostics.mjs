@@ -1,16 +1,19 @@
 // Только проверки примера Expo (test/native-example.test.mjs): замена './diagnostics.mjs' для настоящего
 // examples/expo/App.js (загрузчик подставляет её только импорту из App.js). Логика примера — настоящая
-// (examples/expo/diagnostics.mjs: newCore с барьером загрузки и публичным createPetCore, confirmed, restartCheck, имена);
+// (examples/expo/diagnostics.mjs: newCore с барьером загрузки и публичным createPetCore, хост createHost — счёт занятий и
+// часы со сдвигом дня, confirmed, restartCheck, имена);
 // управляемы только ввод-вывод и время. База — асинхронное хранилище в памяти на внутреннем координаторе, общее для всех
 // экранов (как один файл): подключения ядер считаются (box.connections), запись ключа можно удержать (box.holdWrites —
 // обещание), выполненные записи — box.saved; каждое создание ядра — управляемая точка до барьера загрузки (box.manual:
 // ждёт, пока проверка отпустит box.waiting[i]). Созданные ядра — box.cores по порядку. Состояние — globalThis.__petExample
-// (кладёт проверка).
+// (кладёт проверка). Записи хоста (example_marks, example_clock) — box.hostWrites; отказ записи хоста — box.hostFail.
+// Экрану отдаётся то же ядро через делегирующую обёртку (ядро заморожено): каждый notify записывается в box.notifies вместе
+// со счётом хоста в момент вызова — так видно, что подтверждённое занятие сначала записано хостом, а затем сообщено.
 import { createCoordinator, publicStorage } from '../../pet/core/storage.mjs';
-import { newCore as realNewCore } from '../../examples/expo/diagnostics.mjs';
+import { createHost, newCore as realNewCore } from '../../examples/expo/diagnostics.mjs';
 import { CORE_KEYS } from '../core-kit.mjs';
 
-export { busyProbe, confirmed, MOTIONS, NAMES, reserveProbe, restartCheck } from '../../examples/expo/diagnostics.mjs';
+export { busyProbe, confirmed, MOTIONS, NAMES, PETS, reserveProbe, restartCheck, same } from '../../examples/expo/diagnostics.mjs';
 
 const box = globalThis.__petExample;
 const data = new Map();
@@ -55,14 +58,33 @@ const storage = publicStorage(
 export async function openStore() {
   box.opens += 1;
   await null;
-  return { db: {}, expected: null, storage, scenes: null };
+  const db = {
+    async runAsync(sql) {
+      await null;
+      if (box.hostFail) throw new Error('запись хоста: отказ проверки');
+      box.hostWrites.push(sql.split(' ').slice(0, 3).join(' '));
+    },
+  };
+  return { db, expected: null, storage, scenes: null, host: createHost(db) };
+}
+
+function watched(core, store) {
+  const view = {};
+  for (const key of Object.keys(core)) if (key !== 'status') view[key] = core[key];
+  Object.defineProperty(view, 'status', { get: () => core.status, enumerable: true });
+  view.notify = (type, detail) => {
+    box.notifies.push({ type, key: detail?.key ?? null, today: store.host.progress().today });
+    return core.notify(type, detail);
+  };
+  return Object.freeze(view);
 }
 
 export async function newCore(store, progress) {
   if (box.manual) await new Promise((resolve, reject) => box.waiting.push({ resolve, reject }));
-  const made = await realNewCore(store, progress);
-  box.cores.push(made.core);
-  return made;
+  const made = await realNewCore(store, progress ?? store.host.progress);
+  const core = watched(made.core, store);
+  box.cores.push(core);
+  return { ...made, core };
 }
 
 export async function remember() {

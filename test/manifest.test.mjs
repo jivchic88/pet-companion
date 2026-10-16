@@ -6,8 +6,9 @@
 // копии пакета: новый модуль и новый стиль в графе — перечень устарел (для /web и /react, не для /core); импорт
 // несуществующего файла, путь за пределы пакета, необъявленная зависимость и адрес стиля не литералом (как в 290e949 —
 // перечисление через map) — перечень не собирается; испорченные перечни — каждая ошибка названа; стиль из комментария —
-// не ресурс. PL09: входы /native (react, react-native) и /native-sqlite (expo-sqlite) — без веба, DOM и CSS; в загрузчике
-// react-native и expo-sqlite — заглушки (в devDependencies их нет), граф файлов пакета — настоящий.
+// не ресурс. PL09: входы /native (react, react-native; PL10.1 — ещё react-native-svg) и /native-sqlite (expo-sqlite) — без
+// веба, DOM и CSS; в загрузчике react-native, react-native-svg и expo-sqlite — заглушки (в devDependencies их нет), граф
+// файлов пакета — настоящий.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -58,7 +59,7 @@ test('перечень — только файлы исполнения внут
   for (const file of listed) assert.match(file, /^pet\/[\w/-]+\.(mjs|css)$/, file);
 });
 
-test('входы: стили страницы — только у mountPet (порядок каскада, pet-base.css по желанию); контейнер (/web, /react) — свои стили в files; peers — react у /react, react и react-native у /native, expo-sqlite у /native-sqlite; ядро, определения и натив — без веба и CSS', () => {
+test('входы: стили страницы — только у mountPet (порядок каскада, pet-base.css по желанию); контейнер (/web, /react) — свои стили в files; peers — react у /react, react, react-native и react-native-svg у /native, expo-sqlite у /native-sqlite; ядро, определения и натив — без веба и CSS', () => {
   const { entries } = stored;
   assert.deepEqual(entries['.'].styles, PAGE_STYLES['.'].map((style) => ({ ...style })));
   assert.deepEqual(entries['.'].styles.map((style) => [style.file, style.required]), [['pet/pet-base.css', false], ['pet/pet.css', true], ['pet/dog.css', true]]);
@@ -66,7 +67,7 @@ test('входы: стили страницы — только у mountPet (по
   for (const entry of ['./web', './react']) for (const file of ['pet/pet-base.css', 'pet/pet.css', 'pet/dog.css', 'pet/web/view.css']) assert.ok(entries[entry].files.includes(file), `${entry}: ${file}`);
   assert.deepEqual(entries['./react'].peers, { react: pkg.peerDependencies.react });
   // PL09: натив — только свой слой, общий хук и ядро; SQLite — только адаптер и ядро.
-  assert.deepEqual(entries['./native'].peers, { react: pkg.peerDependencies.react, 'react-native': pkg.peerDependencies['react-native'] });
+  assert.deepEqual(entries['./native'].peers, { react: pkg.peerDependencies.react, 'react-native': pkg.peerDependencies['react-native'], 'react-native-svg': pkg.peerDependencies['react-native-svg'] });
   assert.deepEqual(entries['./native-sqlite'].peers, { 'expo-sqlite': pkg.peerDependencies['expo-sqlite'] });
   assert.ok(entries['./native'].files.every((file) => file === 'pet/native.mjs' || /^pet\/(native|hooks|core)\//.test(file)), `/native: ${entries['./native'].files.join(', ')}`);
   assert.ok(entries['./native-sqlite'].files.every((file) => file === 'pet/native-sqlite.mjs' || /^pet\/(storage|core)\//.test(file)), `/native-sqlite: ${entries['./native-sqlite'].files.join(', ')}`);
@@ -84,13 +85,18 @@ test('входы: стили страницы — только у mountPet (по
 // Модули, которые действительно загружает импорт входа (загрузчик Node, отдельный процесс на вход).
 async function loaded(module) {
   const base = pathToFileURL(`${root}${path.sep}`).href;
-  // react-native и expo-sqlite (партнёры /native и /native-sqlite) в проверках не установлены — заглушки загрузчика.
-  const stub = 'data:text/javascript,export const AppState = {}; export const AccessibilityInfo = {}; export function openDatabaseAsync() {}';
+  // react-native, react-native-svg и expo-sqlite (партнёры /native и /native-sqlite) в проверках не установлены — заглушки
+  // загрузчика с теми же именами экспорта.
+  const stubs = {
+    'react-native': 'data:text/javascript,export const AppState = {}; export const AccessibilityInfo = {}; export const Animated = {}; export const Pressable = () => null; export const Text = () => null; export const View = () => null; export const StyleSheet = { create: (styles) => styles };',
+    'react-native-svg': "data:text/javascript,export default () => null; export const Circle = 'circle', ClipPath = 'clipPath', Defs = 'defs', Ellipse = 'ellipse', G = 'g', LinearGradient = 'linearGradient', Path = 'path', Pattern = 'pattern', RadialGradient = 'radialGradient', Rect = 'rect', Stop = 'stop';",
+    'expo-sqlite': 'data:text/javascript,export function openDatabaseAsync() {}',
+  };
   const probe = `
     import { registerHooks } from 'node:module';
     const seen = new Set();
     registerHooks({
-      resolve(specifier, context, next) { return specifier === 'react-native' || specifier === 'expo-sqlite' ? { url: ${JSON.stringify(stub)}, shortCircuit: true } : next(specifier, context); },
+      resolve(specifier, context, next) { const stubs = ${JSON.stringify(stubs)}; return Object.hasOwn(stubs, specifier) ? { url: stubs[specifier], shortCircuit: true } : next(specifier, context); },
       load(url, context, next) { if (url.startsWith(${JSON.stringify(`${base}pet/`)})) seen.add(url.slice(${base.length})); return next(url, context); },
     });
     await import(${JSON.stringify(new URL(module, base).href)});
@@ -99,7 +105,7 @@ async function loaded(module) {
   return JSON.parse(stdout);
 }
 
-test('загрузчик Node: импорт каждого входа загружает ровно JS-файлы его перечня (react — из node_modules, react-native и expo-sqlite — заглушки, вне перечня)', async () => {
+test('загрузчик Node: импорт каждого входа загружает ровно JS-файлы его перечня (react — из node_modules, react-native, react-native-svg и expo-sqlite — заглушки, вне перечня)', async () => {
   for (const entry of JS_ENTRIES) {
     const own = stored.entries[entry];
     assert.deepEqual(await loaded(own.module), own.files.filter((file) => file.endsWith('.mjs')), entry);

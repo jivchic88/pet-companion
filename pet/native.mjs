@@ -1,14 +1,18 @@
-// pet-companion/native — React Native (этап PL09, частичный вход; README, «Мобильное хранение и жизненный цикл»;
-// docs/ARCHITECTURE.md § 6.1, § 12.2): жизненный цикл приложения для ядра (useNativeLifecycle) и снимок для React
-// (usePetState — тот же общий хук, что у pet-companion/react, без веб-оболочки). Нативного отображения (PetView, PetCorner,
-// наборы) в PL09 нет — PL10. Импортирует react, react-native, pet/hooks/** и pet/native/**: ни DOM, ни CSS, ни веба. Импорт
-// ничего не делает: подписки — только в эффекте хука.
+// pet-companion/native — React Native (README, «Мобильное хранение и жизненный цикл», «Нативное отображение»;
+// docs/ARCHITECTURE.md § 6.1, § 12.2): жизненный цикл приложения для ядра (useNativeLifecycle, PL09), снимок для React
+// (usePetState — тот же общий хук, что у pet-companion/react, без веб-оболочки) и минимальное нативное отображение PL10.1 —
+// компонент PetView и штатные наборы catNative, dogNative (рисунки react-native-svg). Уголок, «Поиграть», «Обустроить
+// уголок» и сценки — PL10.2, этим входом пока не обещаны. Импортирует react, react-native, react-native-svg, pet/hooks/**,
+// pet/native/** и ядро: ни DOM, ни CSS, ни веба. Импорт ничего не делает: подписки — только в эффектах.
 
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo, AppState } from 'react-native';
 import { bindLifecycle } from './native/lifecycle.mjs';
 
 export { usePetState } from './hooks/state.mjs';
+export { PetView } from './native/view.mjs';
+export { catNative } from './native/cat.mjs';
+export { dogNative } from './native/dog.mjs';
 
 // useNativeLifecycle(core | null) → boolean: AppState и системное «уменьшить движение» → ядро, пока компонент подключён и
 // ядро то же; true — начальная настройка движения известна текущей привязке (можно звать core.start()). Смена core,

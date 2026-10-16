@@ -85,7 +85,8 @@
   "peerDependencies": {
     "expo-sqlite": ">=58.0.0",
     "react": "^18.3.1 || ^19.0.0",
-    "react-native": ">=0.88.0"
+    "react-native": ">=0.88.0",
+    "react-native-svg": ">=15.16.0"
   },
   "peerDependenciesMeta": {
     "expo-sqlite": {
@@ -95,6 +96,9 @@
       "optional": true
     },
     "react-native": {
+      "optional": true
+    },
+    "react-native-svg": {
       "optional": true
     }
   },
