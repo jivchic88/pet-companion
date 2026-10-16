@@ -72,6 +72,28 @@ export default function App() {
     trace(`итог: ${text}`);
     if (important) AccessibilityInfo.announceForAccessibility?.(text);
   }, []);
+  // Сверка после start: перезапуск — сразу по загруженному; переподключение — по первому снимку, где записи ключей
+  // питомца подтверждены (start сам пишет день приветствия — до его подтверждения сверять рано).
+  const settle = useCallback(
+    (state) => {
+      const want = follow.current;
+      if (!want || !state || state.status !== 'running') return;
+      if (want.reason === 'restart') {
+        follow.current = null;
+        const result = restartCheck(want.expected, state);
+        check('Перезапуск с тем же файлом', result);
+        say(`перезапуск: ${result.text}`);
+        return;
+      }
+      const now = confirmed(state);
+      if (!now) return;
+      follow.current = null;
+      const fields = want.reason === 'Следующий день' ? KEEP : undefined;
+      const ok = !want.before || same(want.before, now, fields);
+      check(want.reason === 'Новое ядро' ? 'destroy → load → новое ядро' : `${want.reason}: восстановлено`, { ok, text: `${now.pet} / ${now.name} / ${now.motion} / ${now.coat} / ${now.accessory} / ${now.treat}` });
+    },
+    [check, say],
+  );
   const ready = useNativeLifecycle(core);
   const pet = usePetState(core);
 
@@ -102,21 +124,8 @@ export default function App() {
     if (!core || !ready || core.status !== 'created') return;
     core.start();
     say('start после useNativeLifecycle → ready');
-    const want = follow.current;
-    follow.current = null;
-    if (!want) return;
-    const state = core.getState();
-    if (want.reason === 'restart') {
-      const result = restartCheck(want.expected, state);
-      check('Перезапуск с тем же файлом', result);
-      say(`перезапуск: ${result.text}`);
-      return;
-    }
-    const now = confirmed(state);
-    const fields = want.reason === 'Следующий день' ? KEEP : undefined;
-    const ok = Boolean(now) && (!want.before || same(want.before, now, fields));
-    check(want.reason === 'Новое ядро' ? 'destroy → load → новое ядро' : `${want.reason}: восстановлено`, { ok, text: now ? `${now.pet} / ${now.name} / ${now.motion} / ${now.coat} / ${now.accessory} / ${now.treat}` : 'есть неподтверждённое' });
-  }, [core, ready, say, check]);
+    settle(core.getState());
+  }, [core, ready, say, settle]);
 
   // Журнал переходов: сохранение, видимость, реакция и нарисованная поза; запоминание подтверждённого для сверки после
   // перезапуска.
@@ -133,12 +142,13 @@ export default function App() {
         if (now.reaction !== last.reaction) say(`реакция: ${last.reaction} → ${now.reaction}`);
         if (now.page !== last.page) say(`поза: ${last.page} → ${now.page}`);
         last = now;
+        settle(s);
         const value = confirmed(s);
         if (value) remember(store.db, value).catch((error) => say(`диагностика не записана: ${error?.message ?? error}`));
       },
       { initial: false },
     );
-  }, [core, store, say]);
+  }, [core, store, say, settle]);
 
   // Настоящие события AppState — в журнал экрана (ядро получает их через useNativeLifecycle).
   useEffect(() => {
@@ -391,7 +401,7 @@ export default function App() {
       ))}
       <Group title="Проверки хранения" items={diag} />
       {Object.entries(checks).map(([name, value]) => (
-        <Row key={name} label={`${mark(value)} ${name}`} value={value.text} />
+        <Row key={name} id={`check:${name}`} label={`${mark(value)} ${name}`} value={value.text} />
       ))}
       <Text style={styles.head} accessibilityRole="header">
         Журнал
@@ -439,10 +449,12 @@ function Control({ item }) {
   );
 }
 
-function Row({ label, value }) {
+function Row({ id, label, value }) {
   return (
     <View style={styles.rowText}>
-      <Text style={styles.small}>{label}</Text>
+      <Text style={styles.small} testID={id}>
+        {label}
+      </Text>
       <Text style={styles.value} selectable>
         {String(value)}
       </Text>

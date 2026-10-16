@@ -334,6 +334,8 @@ test('отключение и подключение (PL10.1): «Отключи�
   await act(() => rn.answer(false));
   assert.deepEqual([fresh.status, fresh.getState().look.coat, rn.live(), box.connections], ['running', 'ginger', 4, 1]);
   assert.equal(S.node('pet-art').children.props.coat, 'ginger');
+  await act();
+  assert.match(String(S.node('check:Подключение: восстановлено')?.children), /^✓/, 'сверка — по подтверждённому после записей start, не раньше');
   await S.unmount();
   assert.deepEqual([fresh.status, rn.live(), box.connections], ['destroyed', 0, 0]);
 });
@@ -352,5 +354,7 @@ test('следующий день (PL10.1): сдвиг дня хоста зап�
   const fresh = box.cores.at(-1);
   assert.deepEqual(box.hostWrites.slice(writes), ['INSERT INTO example_clock'], 'сдвиг дня — запись хоста');
   assert.deepEqual([core.status, fresh.status, fresh.getState().treat, fresh.getState().progress.today], ['destroyed', 'running', 'waiting', 0]);
+  await act();
+  assert.match(String(S.node('check:Следующий день: восстановлено')?.children), /^✓/, 'start нового дня пишет день приветствия — сверка ждёт подтверждения, а не даёт ложный ✗');
   await S.unmount();
 });
