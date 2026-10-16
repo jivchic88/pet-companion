@@ -104,15 +104,15 @@ function tailChain(kind, c, P) {
   const tabby = !line && c.marks === 'tabby';
   return h(
     G,
-    { transform: turn(P.t1, 150, 181) },
+    { transform: tf(turn(P.t1, 150, 181)) },
     seg(0),
     tabby ? h(Path, { d: 'M164.2 178.6l-.8 8.6', ...stroke(c.stripe, 2.4, { opacity: 0.75 }) }) : null,
     h(
       G,
-      { transform: turn(P.t2, 178, 180) },
+      { transform: tf(turn(P.t2, 178, 180)) },
       seg(1),
       line ? null : h(Path, { d: 'M184.5 170.5l6.5 3.6', ...stroke(c.stripe, 2.4) }),
-      h(G, { transform: turn(P.t3, 192, 158) }, seg(2), tabby ? h(Path, { d: 'M187.6 151.2l7.4-.6', ...stroke(c.stripe, 2.2, { opacity: 0.75 }) }) : null),
+      h(G, { transform: tf(turn(P.t3, 192, 158)) }, seg(2), tabby ? h(Path, { d: 'M187.6 151.2l7.4-.6', ...stroke(c.stripe, 2.2, { opacity: 0.75 }) }) : null),
     ),
   );
 }
@@ -135,7 +135,7 @@ function leg(p, c, P, side) {
 function sittingBody(p, c, P) {
   return h(
     G,
-    { transform: stretchY(P.sitS, 104, 188) || undefined },
+    { transform: tf(stretchY(P.sitS, 104, 188)) },
     h(G, null, tailChain('line', c, P), tailChain('fur', c, P)),
     h(Path, { d: 'M78 98C66 106 60 120 58 136C46 142 40 158 42 172C43 182 50 188 60 188L142 188C152 188 158 182 159 172C161 158 154 142 142 136C140 120 134 106 122 98Z', ...outline(`url(#${p}-fur)`, c.line, 1.8) }),
     h(Path, { d: 'M60 150C70 152 77 162 77 177M140 150C130 152 123 162 123 177', ...stroke(c.furDark, 2, { opacity: 0.5 }) }),
@@ -216,18 +216,18 @@ function eye(p, side, c, P) {
       { clipPath: `url(#${p}-eye-${side})` },
       h(Path, { d, fill: `url(#${p}-iris)` }),
       h(Path, { d, fill: 'none', stroke: '#2c4a2b', strokeWidth: 2.6, opacity: 0.75 }),
-      h(G, { transform: move(P.lookX, P.lookY) || undefined }, h(Ellipse, { cx, cy: 70.5, rx: 3.4, ry: 8, fill: '#14171a', transform: grow(P.pupilW, P.pupilH, cx, 70.5) || undefined })),
+      h(G, { transform: tf(move(P.lookX, P.lookY)) }, h(Ellipse, { cx, cy: 70.5, rx: 3.4, ry: 8, fill: '#14171a', transform: tf(grow(P.pupilW, P.pupilH, cx, 70.5)) })),
       h(Circle, { cx: hl[0], cy: hl[1], r: 2.7, fill: '#fff' }),
       h(Circle, { cx: hl[2], cy: hl[3], r: 1.15, fill: '#fff', opacity: 0.8 }),
       h(
         G,
-        { transform: move(0, P.lidDown) || undefined },
+        { transform: tf(move(0, P.lidDown)) },
         h(Path, { d: `M${cx - 20} 86Q${cx} 75 ${cx + 20} 86L${cx + 20} 104L${cx - 20} 104Z`, fill: c.lid }),
         h(Path, { d: `M${cx - 14} 83Q${cx} 75.8 ${cx + 14} 83`, ...stroke(c.lidLine, 1.3, { opacity: 0.55 }) }),
       ),
       h(
         G,
-        { transform: move(0, P.lidUp) || undefined },
+        { transform: tf(move(0, P.lidUp)) },
         h(Path, { d: `M${cx - 20} 28L${cx + 20} 28L${cx + 20} 55Q${cx} 62 ${cx - 20} 55Z`, fill: c.lid }),
         h(Path, { d: `M${cx - 20} 55Q${cx} 62 ${cx + 20} 55`, fill: 'none', stroke: c.eyeLine, strokeWidth: 2.6 }),
       ),
@@ -258,14 +258,14 @@ function head(p, c, P) {
     { transform: tf(move(P.headX, P.headY), turn(P.headR, 100, 110)) },
     h(
       G,
-      { transform: turn(P.earL, 70, 53) || undefined },
+      { transform: tf(turn(P.earL, 70, 53)) },
       h(Path, { d: 'M84 43Q69 20 53 10Q48.5 12 48.5 19Q48.5 39 56 61Z', ...outline(`url(#${p}-head)`, c.line, 1.8) }),
       h(Path, { d: 'M78 45Q67 29 55.5 19.5Q54.5 34 59 55Z', fill: `url(#${p}-ear)` }),
       h(Path, { d: 'M66 52Q62 42 57.5 33M71 51Q66 43 61 37', ...stroke(c.tuft, 1.2, { opacity: 0.85 }) }),
     ),
     h(
       G,
-      { transform: turn(P.earR, 130, 52) || undefined },
+      { transform: tf(turn(P.earR, 130, 52)) },
       h(Path, { d: 'M116 42Q130 18 146 8.5Q150.5 10 150.5 16.5Q151 37 144 60Z', ...outline(`url(#${p}-head)`, c.line, 1.8) }),
       h(Path, { d: 'M122 44Q132 27 144 17Q145.5 31 141 54Z', fill: `url(#${p}-ear)` }),
       h(Path, { d: 'M134 51Q138 41 142 32M129 50Q133 42 138 36', ...stroke(c.tuft, 1.2, { opacity: 0.85 }) }),
@@ -304,7 +304,7 @@ function CatFigure({ pose = 'calm', coat = 'smoke', accessory = 'scarf', toward 
     null,
     defs(p, c),
     h(Ellipse, { cx: 104, cy: 189, rx: 72, ry: 7.5, fill: `url(#${p}-ground)` }),
-    h(G, { transform: move(P.allX, P.allY) || undefined }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(c) : null),
+    h(G, { transform: tf(move(P.allX, P.allY)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(c) : null),
     P.bowl ? bowl(P.bowl === 'full') : null,
   );
 }

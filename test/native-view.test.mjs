@@ -124,6 +124,24 @@ test('штатные наборы: проходят проверку проти�
     assert.ok(badge.includes('#4f8a6e') && !scarf.includes('#4f8a6e'), `${kit.pet}: бейдж`);
     assert.ok(!markupOf(kit, { pose: 'calm', accessory: '' }).includes(`url(#q-${kit.pet}-scarf)`), `${kit.pet}: без аксессуара — без платка`);
   }
+  // Суставы — всегда явная строка преобразования (тождество — translate(0, 0)): react-native-svg на Fabric при снятии
+  // свойства transform прежнюю матрицу не сбрасывает (найдено в iOS Simulator: платок оставался опущенным после «ест»).
+  const elements = (node, list = []) => {
+    if (Array.isArray(node)) for (const item of node) elements(item, list);
+    else if (React.isValidElement(node)) {
+      list.push(node);
+      elements(node.props.children, list);
+    }
+    return list;
+  };
+  for (const kit of KITS) {
+    for (const pose of kit.poses) {
+      for (const toward of ['', 'right']) {
+        const bad = elements(kit.Figure({ pose, coat: kit.coats[0], accessory: 'badge', toward, prefix: 'q' })).filter((el) => Object.hasOwn(el.props, 'transform') && (typeof el.props.transform !== 'string' || el.props.transform === ''));
+        assert.deepEqual(bad.map((el) => el.type), [], `${kit.pet} ${pose} ${toward}: transform — непустая строка`);
+      }
+    }
+  }
   assert.ok(markupOf(catNative, { pose: 'calm', coat: 'ginger' }).includes('#e0954f') && markupOf(dogNative, { pose: 'calm', coat: 'blacktan' }).includes('#4d423b'), 'палитры обликов веба');
   assert.ok(markupOf(catNative, { pose: 'feed' }).includes('#b0743f') && !markupOf(catNative, { pose: 'fed' }).includes('#b0743f'), 'лакомство: миска с кормом, после — пустая');
 });

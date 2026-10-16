@@ -95,7 +95,7 @@ function defs(p, c) {
 function tail(p, c, P) {
   return h(
     G,
-    { transform: turn(P.tail, 148, 178) || undefined },
+    { transform: tf(turn(P.tail, 148, 178)) },
     h(Path, {
       d: 'M142 185C156 190 172 187 182 177Q189 176.5 189.5 170C194.5 162 197.5 152 195.5 142Q200.5 135.5 197 127.5Q199 119 192.5 114Q189.5 120.5 184 121Q182.5 128 178 132C176 144 170 154 162 160C155 165 150 167.5 143.5 168Z',
       ...outline(`url(#${p}-tail)`, c.line, 1.7),
@@ -124,7 +124,7 @@ function pawUp(p, c, P) {
   const pad = '#c9877d';
   return h(
     G,
-    { transform: turn(P.paw, 92, 130) || undefined },
+    { transform: tf(turn(P.paw, 92, 130)) },
     h(Path, { d: 'M85 123C80 127 76 131 71 135L82 147C88 143 94 139 100 134Z', ...outline(`url(#${p}-fur)`, c.line, 1.7) }),
     h(Path, { d: 'M59 138C59 129.5 65 124.5 72 124.5C79 124.5 85 129.5 85 138C85 146.5 79 151.5 72 151.5C65 151.5 59 146.5 59 138Z', fill: c.paw, stroke: c.line, strokeWidth: 1.6 }),
     h(Path, { d: 'M66.5 145.5C66.5 141.5 69 139.5 72 139.5C75 139.5 77.5 141.5 77.5 145.5C77.5 148 75 149 72 149C69 149 66.5 148 66.5 145.5Z', fill: pad }),
@@ -138,7 +138,7 @@ function pawUp(p, c, P) {
 function sittingBody(p, c, P) {
   return h(
     G,
-    { transform: stretchY(P.sitS, 102, 188) || undefined },
+    { transform: tf(stretchY(P.sitS, 102, 188)) },
     tail(p, c, P),
     h(Path, { d: 'M76 104C64 112 58 126 56 141C44 147 38 161 40 173C41 183 48 188 58 188L142 188C152 188 159 183 160 173C162 161 156 147 144 141C142 126 136 112 124 104Z', ...outline(`url(#${p}-fur)`, c.line, 1.8) }),
     c.patch ? h(Path, { d: SIDE_PATCH, fill: c.patch }) : null,
@@ -212,18 +212,18 @@ function eye(p, side, c, P) {
       { clipPath: `url(#${p}-eye-${side})` },
       h(Circle, { cx, cy: y, r: EYE_R, fill: `url(#${p}-iris)` }),
       h(Circle, { cx, cy: y, r: EYE_R, fill: 'none', stroke: '#3a2416', strokeWidth: 2.6, opacity: 0.8 }),
-      h(G, { transform: move(P.lookX, P.lookY) || undefined }, h(Circle, { cx, cy: y + 0.4, r: 4.9, fill: '#160d08', transform: grow(P.pupil, P.pupil, cx, y + 0.4) || undefined })),
+      h(G, { transform: tf(move(P.lookX, P.lookY)) }, h(Circle, { cx, cy: y + 0.4, r: 4.9, fill: '#160d08', transform: tf(grow(P.pupil, P.pupil, cx, y + 0.4)) })),
       h(Circle, { cx: cx + 3, cy: y - 3.6, r: 2.7, fill: '#fff' }),
       h(Circle, { cx: cx - 3, cy: y + 3.4, r: 1.1, fill: '#fff', opacity: 0.8 }),
       h(
         G,
-        { transform: move(0, P.lidDown) || undefined },
+        { transform: tf(move(0, P.lidDown)) },
         h(Path, { d: `M${cx - 13} ${y + 11}Q${cx} ${y + 6} ${cx + 13} ${y + 11}L${cx + 13} ${y + 30}L${cx - 13} ${y + 30}Z`, fill: lid }),
         h(Path, { d: `M${cx - 8} ${y + 9.2}Q${cx} ${y + 6} ${cx + 8} ${y + 9.2}`, ...stroke(c.lidLine, 1.2, { opacity: 0.5 }) }),
       ),
       h(
         G,
-        { transform: move(0, P.lidUp) || undefined },
+        { transform: tf(move(0, P.lidUp)) },
         h(Path, { d: `M${cx - 13} ${y - 36}L${cx + 13} ${y - 36}L${cx + 13} ${y - 9.6}Q${cx} ${y - 5} ${cx - 13} ${y - 9.6}Z`, fill: lid }),
         h(Path, { d: `M${cx - 13} ${y - 9.6}Q${cx} ${y - 5} ${cx + 13} ${y - 9.6}`, fill: 'none', stroke: '#3a2416', strokeWidth: 1.8 }),
       ),
@@ -297,13 +297,13 @@ function head(p, c, P) {
     mouth(P.mouth),
     h(
       G,
-      { transform: turn(P.earL, 74, 40) || undefined },
+      { transform: tf(turn(P.earL, 74, 40)) },
       h(Path, { d: 'M80 37C70 31 54 35 46 47C38 59 37 81 41 95C44 105 53 110 59 104C65 98 66 84 66 72C66 58 70 46 80 37Z', ...outline(`url(#${p}-ear)`, c.line, 1.7) }),
       h(Path, { d: 'M57 50Q50 66 52 90M63 56Q59 70 60 86', ...stroke(c.earLine, 1.4, { opacity: 0.55 }) }),
     ),
     h(
       G,
-      { transform: turn(P.earR, 126, 40) || undefined },
+      { transform: tf(turn(P.earR, 126, 40)) },
       h(Path, { d: 'M120 37C130 31 146 35 154 47C162 59 163 81 159 95C156 105 147 110 141 104C135 98 134 84 134 72C134 58 130 46 120 37Z', ...outline(`url(#${p}-ear)`, c.line, 1.7) }),
       h(Path, { d: 'M143 50Q150 66 148 90M137 56Q141 70 140 86', ...stroke(c.earLine, 1.4, { opacity: 0.55 }) }),
     ),
@@ -321,7 +321,7 @@ function DogFigure({ pose = 'calm', coat = 'caramel', accessory = 'scarf', towar
     null,
     defs(p, c),
     h(Ellipse, { cx: 102, cy: 189, rx: 76, ry: 7.5, fill: `url(#${p}-ground)` }),
-    h(G, { transform: move(P.allX, P.allY) || undefined }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(p, c) : null),
+    h(G, { transform: tf(move(P.allX, P.allY)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(p, c) : null),
     P.bowl ? bowl(P.bowl === 'full') : null,
   );
 }

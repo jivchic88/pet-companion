@@ -11,8 +11,11 @@ export const h = createElement;
 
 // Числа преобразований — без длинных хвостов дробей.
 const n = (value) => Math.round(value * 1000) / 1000;
-// Части преобразования: пустая строка — тождество; tf склеивает непустые (undefined — без преобразования).
-export const tf = (...parts) => parts.filter(Boolean).join(' ') || undefined;
+// Части преобразования: пустая строка — тождество; tf склеивает непустые. Тождество — явная строка, не undefined:
+// react-native-svg (Fabric) при снятии свойства transform не сбрасывает прежнюю матрицу — сустав, вернувшийся в исходное
+// положение (платок после позы «ест»), остался бы сдвинутым. Найдено в iOS Simulator (PL10.1).
+export const IDENTITY = 'translate(0, 0)';
+export const tf = (...parts) => parts.filter(Boolean).join(' ') || IDENTITY;
 export const move = (x = 0, y = 0) => (x || y ? `translate(${n(x)}, ${n(y)})` : '');
 export const turn = (angle, cx, cy) => (angle ? `rotate(${n(angle)}, ${cx}, ${cy})` : '');
 export const grow = (sx, sy, cx, cy) => (sx !== 1 || sy !== 1 ? `translate(${cx}, ${cy}) scale(${n(sx)}, ${n(sy)}) translate(${-cx}, ${-cy})` : '');
@@ -59,7 +62,7 @@ export function badge(x, y, angle, cx, cy) {
   const dot = (dx, dy, r) => h(Circle, { cx: n(x + dx), cy: n(y + dy), r, fill: '#c97566' });
   return h(
     G,
-    { transform: turn(angle, cx, cy) },
+    { transform: tf(turn(angle, cx, cy)) },
     h(Rect, { x, y, width: 15, height: 18, rx: 2.5, fill: '#f7f1e6', stroke: '#8b6f5e', strokeWidth: 1.2 }),
     h(Rect, { x, y, width: 15, height: 5, rx: 2, fill: '#4f8a6e' }),
     h(Rect, { x: n(x + 5), y: n(y - 2.5), width: 5, height: 4, rx: 1, fill: '#b9bcc2', stroke: '#7d8189', strokeWidth: 0.8 }),
