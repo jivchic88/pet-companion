@@ -1,0 +1,10 @@
+/* Только QA: страница жизненного цикла React. */
+body {
+  margin: 0;
+  padding: 16px;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+.pet-box {
+  width: min(100%, 300px);
+}

@@ -23,7 +23,13 @@
 // исключения), внутренние файлы веба закрыты, типы /web (положительные и @ts-expect-error); в Chrome под вложенным адресом
 // на установленном архиве — examples/container.html (два контейнера, стили вида из пакета, повторное подключение),
 // examples/extension/container.html (кролик в контейнере, стили набора в теневом дереве) и examples/csp/ с HTTP-заголовком
-// default-src 'self'; style-src 'self' (нарушений нет, стили применены).
+// default-src 'self'; style-src 'self' (нарушений нет, стили применены). PL08: в архиве manifest.json, вход pet-companion/react
+// (pet/react.mjs, типы) и хук pet/hooks/state.mjs; голое имя react — только у них; перечень архива совпадает с собранным по
+// графу самого архива, его файлы — в архиве, версия — пакета; в проекте без React импорт /react честно отказывает (нет
+// react), остальные входы работают; внутренние пути React закрыты (Node и TypeScript). Сайт без сборщика по перечню
+// (examples/manifest): copy.mjs копирует только файлы входа, сервер отдаёт только эту папку под вложенным адресом — браузер
+// загружает ровно файлы перечня входа (./web под CSP и «.» со стилями в порядке перечня), без 404; контроли — без стиля вида
+// и без модуля перечня — 404 и отказ.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -33,6 +39,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
+import { buildManifest, manifestProblems } from '../scripts/manifest.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,13 +55,17 @@ const CORE = ['core/catalog.mjs', 'core/day.mjs', 'core/define.mjs', 'core/direc
 const DEFS = ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs'];
 // PL07: вход веба pet/web.mjs с типами, общая оболочка, места legacy, контейнер и его стиль, указатель, общие мелочи.
 const WEB = ['web/catalog.mjs', 'web/kits.mjs', 'web/legacy/places.mjs', 'web/parts.mjs', 'web/pointer.mjs', 'web/scenes.mjs', 'web/shell.mjs', 'web/storage.mjs', 'web/view.css', 'web/view.mjs'];
-const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
+// PL08: вход React pet/react.mjs с типами и общий хук pet/hooks/state.mjs.
+const REACT = ['hooks/state.mjs', 'react.d.mts', 'react.mjs'];
+const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', ...REACT, 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
 // Пример расширения (вне архива): файлы для Node и для браузера (legacy и контейнер).
 const EXTENSION = ['bunny.mjs', 'bunny-web.mjs', 'bunny.css', 'container.html', 'index.html', 'lively.mjs', 'node.mjs'];
 // CSP-пример контейнера (вне архива): страница, её модуль и стили — файлы; заголовок CSP ставит сервер.
 const CSP_FILES = ['index.html', 'main.mjs', 'site.css'];
 const CSP = "default-src 'self'; style-src 'self'";
-const EXPECTED = ['CHANGELOG.md', 'LICENSE', 'README.md', 'example.html', 'package.json', ...RUNTIME.map((file) => `pet/${file}`)].sort();
+const EXPECTED = ['CHANGELOG.md', 'LICENSE', 'README.md', 'example.html', 'manifest.json', 'package.json', ...RUNTIME.map((file) => `pet/${file}`)].sort();
+// Пример сайта без сборщика по перечню (вне архива): страницы и их модули (скрипт копирования — отдельно).
+const MANIFEST_SITE = ['index.html', 'main.mjs', 'site.css', 'legacy.html', 'legacy.mjs'];
 // Ничего из этого не должно попасть в архив.
 const FORBIDDEN = /(^|\/)(test|tests|fixtures|scripts|examples|node_modules|\.github|\.git)(\/|$)|\.env|secret|token|password|progress|\.tgz$|lock/i;
 const MODULE_NODES = '.cat-dock, .cat-side, .cat-face, .cat-fold, .cat-float, .cat-bar, .cat-sheet, .cat-sections-return, .pet-zones, .pet-ghost, [id^="cat-"]';
@@ -88,6 +99,7 @@ async function pack(dest) {
 function serve(dir, prefix, { csp = null } = {}) {
   const outside = [];
   const served = [];
+  const missing = [];
   const server = createServer(async (req, res) => {
     const { pathname } = new URL(req.url, 'http://site');
     served.push(pathname);
@@ -102,11 +114,12 @@ function serve(dir, prefix, { csp = null } = {}) {
       res.writeHead(200, headers);
       res.end(body);
     } catch {
+      if (pathname !== '/favicon.ico') missing.push(pathname);
       res.writeHead(404);
       res.end();
     }
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ origin: `http://127.0.0.1:${server.address().port}`, outside, served, close: () => new Promise((done) => server.close(done)) })));
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ origin: `http://127.0.0.1:${server.address().port}`, outside, served, missing, close: () => new Promise((done) => server.close(done)) })));
 }
 
 async function open(browser, origin, options) {
@@ -528,6 +541,108 @@ async function cspView(browser, project) {
   }
 }
 
+// Сайт без сборщика по перечню (PL08): copy-pet.mjs (examples/manifest/copy.mjs) копирует из node_modules только файлы
+// входа; сервер отдаёт только папку сайта под вложенным адресом. Браузер загружает ровно файлы перечня входа.
+async function manifestSites(browser, project, manifest) {
+  const copyEntry = async (dir, entry) => {
+    const { stdout } = await run(process.execPath, ['copy-pet.mjs', path.join(dir, 'vendor', 'pet-companion'), entry], { cwd: project });
+    for (const file of MANIFEST_SITE) await cp(path.join(root, 'examples', 'manifest', file), path.join(project, dir, file));
+    return stdout.trim();
+  };
+  const copied = (dir) => files(path.join(project, dir, 'vendor', 'pet-companion'));
+  const vendor = (prefix, server) => [...new Set(server.served.filter((url) => url.startsWith(`${prefix}vendor/pet-companion/`)).map((url) => url.slice(`${prefix}vendor/pet-companion/`.length)))].sort();
+  const web = manifest.entries['./web'];
+  const legacy = manifest.entries['.'];
+  const told = await copyEntry('site', './web');
+  check(`по перечню: copy-pet.mjs скопировал ровно файлы входа ./web (${web.files.length}) с той же структурой — «${told}»`, JSON.stringify(await copied('site')) === JSON.stringify(web.files) && told === `${NAME} ${VERSION}: ${web.files.length} файлов → ${path.join('site', 'vendor', 'pet-companion')}`, told);
+  // Страница legacy подключает стили в порядке перечня (entries["."].styles).
+  const legacyPage = await readFile(path.join(root, 'examples', 'manifest', 'legacy.html'), 'utf8');
+  const order = [...legacyPage.matchAll(/href="\.\/vendor\/pet-companion\/([^"]+)"/g)].map(([, file]) => file);
+  check('по перечню: legacy.html подключает стили входа «.» ссылками в порядке перечня (pet-base.css — по желанию, первым)', JSON.stringify(order) === JSON.stringify(legacy.styles.map((style) => style.file)) && legacy.styles[0].required === false, order.join(', '));
+  for (const [label, options] of [
+    ['1280×900', { viewport: { width: 1280, height: 900 } }],
+    ['390×844', { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }],
+  ]) {
+    const prefix = '/sites/shop/';
+    const server = await serve(path.join(project, 'site'), prefix, { csp: 'index.html' });
+    const { context, page, external } = await open(browser, server.origin, options);
+    await context.addInitScript(() => {
+      window.qaViolations = [];
+      document.addEventListener('securitypolicyviolation', (event) => window.qaViolations.push(`${event.violatedDirective} ${event.blockedURI}`), true);
+    });
+    const touch = Boolean(options.hasTouch);
+    const press = (selector) => (touch ? page.locator(selector).first().tap() : page.locator(selector).first().click());
+    try {
+      const response = await page.goto(`${server.origin}${prefix}index.html`);
+      await page.waitForFunction(() => Boolean(window.manifestDemo?.core));
+      await page.waitForFunction(() => document.querySelector('#pet > [data-pet-view]')?.shadowRoot?.querySelector('.pet-view')?.hidden === false, null, { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(4000);
+      const styled = await page.evaluate(() => {
+        const shadow = document.querySelector('#pet > [data-pet-view]').shadowRoot;
+        const box = shadow.querySelector('.pet-view');
+        return { ready: !box.hidden, box: `${getComputedStyle(box).position} ${getComputedStyle(box).display}`, sheet: getComputedStyle(shadow.querySelector('.cat-sheet')).position, links: [...shadow.querySelectorAll('link')].map((link) => Boolean(link.sheet)) };
+      });
+      await press('#pet .cat-view-btn');
+      const corner = await page.evaluate(() => document.querySelector('#pet > [data-pet-view]').shadowRoot.querySelector('.cat-sheet').open);
+      await press('#pet [data-cat-play]');
+      await press('#pet [data-cat-play-pet]');
+      const hint = await page.evaluate(() => document.querySelector('#pet > [data-pet-view]').shadowRoot.querySelector('[data-cat-play-hint]').textContent);
+      const loaded = vendor(prefix, server);
+      const violations = await page.evaluate(() => window.qaViolations);
+      check(`по перечню ${label}: сервер отдаёт только папку сайта под ${prefix}, CSP ${CSP} — браузер загрузил ровно файлы перечня ./web (${loaded.length}), без 404 и запросов мимо; стили в Shadow DOM применены (.pet-view absolute grid, .cat-sheet fixed); уголок и «Поиграть» — «Марс мурлычет.»`, response.headers()['content-security-policy'] === CSP && JSON.stringify(loaded) === JSON.stringify(web.files) && server.missing.length === 0 && server.outside.length === 0 && external.length === 0 && violations.length === 0 && styled.ready && styled.box === 'absolute grid' && styled.sheet === 'fixed' && styled.links.length === 4 && styled.links.every(Boolean) && corner && hint === 'Марс мурлычет.' && page.qaErrors.length === 0, JSON.stringify({ extra: loaded.filter((file) => !web.files.includes(file)), notLoaded: web.files.filter((file) => !loaded.includes(file)), missing: server.missing, outside: server.outside, violations, styled, corner, hint, errors: page.qaErrors }));
+      await layout(page, `по перечню ${label}`);
+    } catch (error) {
+      check(`по перечню ${label}: сценарий выполнен`, false, error.stack);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  }
+  // Вход «.» (mountPet) по перечню.
+  await copyEntry('site-legacy', '.');
+  check(`по перечню: вход «.» — скопированы ровно его файлы (${legacy.files.length}, со стилями)`, JSON.stringify(await copied('site-legacy')) === JSON.stringify(legacy.files));
+  {
+    const prefix = '/sites/legacy/';
+    const server = await serve(path.join(project, 'site-legacy'), prefix);
+    const { context, page, external } = await open(browser, server.origin, { viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${server.origin}${prefix}legacy.html`);
+      await page.locator('#head .cat-side-face:visible, #head .cat-face:visible').first().waitFor();
+      await page.clock.runFor(3000);
+      await page.locator('#head .cat-side-face:visible, #head .cat-face:visible').first().click();
+      const sheet = await page.evaluate(() => ({ open: document.getElementById('cat-sheet').open, position: getComputedStyle(document.getElementById('cat-sheet')).position }));
+      const loaded = vendor(prefix, server);
+      check('по перечню 1280×900: mountPet — браузер загрузил ровно файлы перечня «.» (модули и стили), без 404 и запросов мимо; уголок открыт, стили применены', JSON.stringify(loaded) === JSON.stringify(legacy.files) && server.missing.length === 0 && server.outside.length === 0 && external.length === 0 && sheet.open && sheet.position === 'fixed' && page.qaErrors.length === 0, JSON.stringify({ extra: loaded.filter((file) => !legacy.files.includes(file)), notLoaded: legacy.files.filter((file) => !loaded.includes(file)), missing: server.missing, sheet, errors: page.qaErrors }));
+    } catch (error) {
+      check('по перечню mountPet: сценарий выполнен', false, `${error.stack}\n${JSON.stringify({ missing: server.missing, outside: server.outside, errors: page.qaErrors, refusals: page.qaRefusals })}`);
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  }
+  // Контроли: перечень без файла — стиль вида (вид отключается) и модуль (граф не загружается); 404 видны.
+  for (const [dir, lost] of [
+    ['site-no-css', 'pet/web/view.css'],
+    ['site-no-module', 'pet/web/pointer.mjs'],
+  ]) {
+    await copyEntry(dir, './web');
+    await rm(path.join(project, dir, 'vendor', 'pet-companion', lost));
+    const prefix = `/sites/${dir}/`;
+    const server = await serve(path.join(project, dir), prefix);
+    const { context, page } = await open(browser, server.origin, { viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${server.origin}${prefix}index.html`);
+      await page.waitForFunction(() => window.manifestDemo === undefined || !window.manifestDemo.mounted, null, { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(1000);
+      const state = await page.evaluate(() => (window.manifestDemo ? { mounted: window.manifestDemo.mounted } : null));
+      check(`контроль по перечню: без ${lost} — 404 этого файла и ${lost.endsWith('.css') ? 'отказ вида («стили не загрузились»)' : 'граф модулей не загрузился (питомца нет)'}`, server.missing.includes(`${prefix}vendor/pet-companion/${lost}`) && (lost.endsWith('.css') ? state?.mounted === false && page.qaErrors.some((text) => text.includes('стили не загрузились')) : state === null), JSON.stringify({ state, missing: server.missing, errors: page.qaErrors }));
+    } finally {
+      await context.close();
+      await server.close();
+    }
+  }
+}
+
 const tmp = await mkdtemp(path.join(tmpdir(), `${NAME}-package-`));
 let browser;
 try {
@@ -556,11 +671,25 @@ try {
   for (const file of RUNTIME.filter((name) => name.endsWith('.mjs'))) {
     const source = await readFile(path.join(unpacked, 'package', 'pet', file), 'utf8');
     for (const [, from, bare] of source.matchAll(/^(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/gm)) {
+      // PL08: голое имя — только react и только у входа React и хука.
+      if ((from ?? bare) === 'react') {
+        if (file !== 'react.mjs' && !file.startsWith('hooks/')) graph.push(`${file} → react`);
+        continue;
+      }
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), from ?? bare));
       if (!RUNTIME.includes(target) || ((file.startsWith('core/') || file === 'core.mjs') && !target.startsWith('core/')) || (defsSide(file) && !target.startsWith('core/') && !target.startsWith('defs/'))) graph.push(`${file} → ${from ?? bare}`);
     }
   }
-  check('архив: импорты — файлы архива внутри pet/; вход ядра core.mjs и ядро core/** импортируют только core/**; определения defs/** и входы pets.mjs, behaviors.mjs — только defs/** и core/**', graph.length === 0, graph.join(', '));
+  check('архив: импорты — файлы архива внутри pet/, голое имя react — только у pet/react.mjs и pet/hooks/** (PL08); вход ядра core.mjs и ядро core/** импортируют только core/**; определения defs/** и входы pets.mjs, behaviors.mjs — только defs/** и core/**', graph.length === 0, graph.join(', '));
+
+  // Перечень (PL08): в архиве, публичным путём; совпадает с собранным по графу самого архива; файлы — в архиве, внутри
+  // пакета, без повторов; версия — пакета; каждый файл исполнения pet/ архива — в перечне хотя бы одного входа.
+  const shipped = JSON.parse(await readFile(path.join(unpacked, 'package', 'manifest.json'), 'utf8'));
+  const rebuilt = await buildManifest(path.join(unpacked, 'package')).catch((error) => ({ error: error.message }));
+  const problems = await manifestProblems(shipped, path.join(unpacked, 'package'));
+  const listedFiles = new Set(Object.values(shipped.entries).flatMap((own) => own.files));
+  const runtimeFiles = inside.filter((file) => /^pet\/.+\.(mjs|css)$/.test(file));
+  check(`архив: manifest.json — версия ${VERSION}, входы ${Object.keys(shipped.entries).join(' ')}; совпадает с собранным по графу архива; ${listedFiles.size} файлов — все в архиве, без повторов и путей за пределы пакета; все файлы исполнения pet/ перечислены, типов и документов нет`, shipped.version === VERSION && JSON.stringify(rebuilt) === JSON.stringify(shipped) && problems.length === 0 && JSON.stringify([...listedFiles].sort()) === JSON.stringify(runtimeFiles), JSON.stringify({ problems, rebuilt: rebuilt.error ?? 'ok' }));
 
   // Чистый проект: установка архива без сети.
   const project = path.join(tmp, 'project');
@@ -580,15 +709,17 @@ try {
     const web = await import('${NAME}/web');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'react', 'native', 'native-sqlite', 'manifest.json'].map((name) => resolve('${NAME}/' + name));
-    console.log(JSON.stringify({ webKeys: Object.keys(web).sort(), webAt: resolve('${NAME}/web').replace(/^.*node_modules\\//, ''), keys: Object.keys(pet).sort(), coreKeys: Object.keys(core).sort(), petsKeys: Object.keys(pets).sort(), behaviorsKeys: Object.keys(behaviors).sort(), petsAt: resolve('${NAME}/pets').replace(/^.*node_modules\\//, ''), behaviorsAt: resolve('${NAME}/behaviors').replace(/^.*node_modules\\//, ''), frozen: Object.isFrozen(pets.cat) && Object.isFrozen(pets.cat.room) && Object.isFrozen(behaviors.calm.reactions.joy), ids: [pets.cat.id, pets.dog.id, behaviors.calm.id], coreAt: resolve('${NAME}/core').replace(/^.*node_modules\\//, ''), sameDay: core.localDay === pet.localDay, sameVersion: core.VERSION === pet.VERSION, version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json') }));`;
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs', 'hooks', 'hooks/state.mjs', 'native', 'native-sqlite'].map((name) => resolve('${NAME}/' + name));
+    const react = await import('${NAME}/react').then(() => 'imported', (error) => ({ code: error.code, message: error.message }));
+    console.log(JSON.stringify({ webKeys: Object.keys(web).sort(), webAt: resolve('${NAME}/web').replace(/^.*node_modules\\//, ''), keys: Object.keys(pet).sort(), coreKeys: Object.keys(core).sort(), petsKeys: Object.keys(pets).sort(), behaviorsKeys: Object.keys(behaviors).sort(), petsAt: resolve('${NAME}/pets').replace(/^.*node_modules\\//, ''), behaviorsAt: resolve('${NAME}/behaviors').replace(/^.*node_modules\\//, ''), frozen: Object.isFrozen(pets.cat) && Object.isFrozen(pets.cat.room) && Object.isFrozen(behaviors.calm.reactions.joy), ids: [pets.cat.id, pets.dog.id, behaviors.calm.id], coreAt: resolve('${NAME}/core').replace(/^.*node_modules\\//, ''), sameDay: core.localDay === pet.localDay, sameVersion: core.VERSION === pet.VERSION, version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json'), manifestAt: resolve('${NAME}/manifest.json').replace(/^.*node_modules\\//, ''), reactAt: resolve('${NAME}/react').replace(/^.*node_modules\\//, ''), react }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: project });
   const node = JSON.parse(stdout);
   check('Node: вход — mountPet, localDay, VERSION; версия пакета', JSON.stringify(node.keys) === '["VERSION","localDay","mountPet"]' && node.version === VERSION && node.day === '2026-10-12', stdout);
   check('Node: вход ядра pet-companion/core — ровно createPetCore, createStorage, defineBehavior, definePet (PL06), PetError, localDay, VERSION из pet/core.mjs; та же граница дня и версия', JSON.stringify(node.coreKeys) === '["PetError","VERSION","createPetCore","createStorage","defineBehavior","definePet","localDay"]' && node.coreAt === `${NAME}/pet/core.mjs` && node.sameDay && node.sameVersion, stdout);
   check('Node: входы pet-companion/pets (cat, dog, corner, cornerItems) и pet-companion/behaviors (calm) — pet/pets.mjs и pet/behaviors.mjs; определения глубоко заморожены', JSON.stringify(node.petsKeys) === '["cat","corner","cornerItems","dog"]' && JSON.stringify(node.behaviorsKeys) === '["calm"]' && node.petsAt === `${NAME}/pet/pets.mjs` && node.behaviorsAt === `${NAME}/pet/behaviors.mjs` && node.frozen && node.ids.join() === 'cat,dog,calm', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
-  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, будущие входы (defs, kits, react, native, native-sqlite, manifest.json) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 43 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, файлы React по внутренним путям (pet/react.mjs, типы, хук), будущие входы (defs, kits, hooks, native, native-sqlite) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 46 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node без React (PL08): pet-companion/manifest.json — публичный путь к manifest.json; pet-companion/react разрешается в pet/react.mjs, а импорт честно отказывает — нет пакета react (необязательный партнёр); остальные входы выше работают', node.manifestAt === `${NAME}/manifest.json` && node.reactAt === `${NAME}/pet/react.mjs` && node.react?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.react.message), stdout);
   check('Node: вход pet-companion/web (PL07) — ровно catWeb, createWebScenes, createWebStorage, dogWeb, mountPetIn из pet/web.mjs', JSON.stringify(node.webKeys) === '["catWeb","createWebScenes","createWebStorage","dogWeb","mountPetIn"]' && node.webAt === `${NAME}/pet/web.mjs`, stdout);
 
   // Импорт без браузера (безопасность серверного рендера без React): оба входа загружаются, не трогая браузерные глобалы
@@ -930,11 +1061,13 @@ import '${NAME}/pet/web/kits.mjs';
 import '${NAME}/kits';
 import '${NAME}/pet/web.mjs';
 import '${NAME}/pet/web/view.mjs';
+import '${NAME}/pet/react.mjs';
+import '${NAME}/pet/hooks/state.mjs';
 import styles from '${NAME}/pet.css';
 export { styles };
 `,
   );
-  const PATH_ERRORS = ['1 TS2307', '2 TS2307', '3 TS2307', '4 TS2307', '5 TS2307', '6 TS2307', '7 TS2307', '8 TS2307', '9 TS2307', '10 TS2307', '11 TS2307', '12 TS2307', '13 TS1192'];
+  const PATH_ERRORS = ['1 TS2307', '2 TS2307', '3 TS2307', '4 TS2307', '5 TS2307', '6 TS2307', '7 TS2307', '8 TS2307', '9 TS2307', '10 TS2307', '11 TS2307', '12 TS2307', '13 TS2307', '14 TS2307', '15 TS1192'];
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
   for (const [module, resolution] of [
     ['nodenext', 'nodenext'],
@@ -957,7 +1090,7 @@ export { styles };
     check(`TypeScript (${resolution}): pet-companion/web — mountPetIn, настройки и вид, веб-адаптеры с публичным createPetCore, наборы и стили набора; неверные настройки, вид, контейнер и поля — ошибки (8 @ts-expect-error)`, web === '', web);
     const closed = await types('paths.mts');
     const errors = [...closed.matchAll(/^paths\.mts\((\d+),\d+\): error (TS\d+)/gm)].map(([, line, code]) => `${line} ${code}`);
-    check(`TypeScript (${resolution}): несуществующий стиль, внутренние пути (в том числе файлы ядра, входов штатных, определений, наборов и веба) и будущий вход kits — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);
+    check(`TypeScript (${resolution}): несуществующий стиль, внутренние пути (в том числе файлы ядра, входов штатных, определений, наборов, веба и React) и будущий вход kits — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);
   }
 
   // Браузер.
@@ -975,6 +1108,9 @@ export { styles };
   await mkdir(path.join(project, 'csp'));
   for (const file of CSP_FILES) await cp(path.join(root, 'examples', 'csp', file), path.join(project, 'csp', file));
   await cspView(browser, project);
+  // PL08: сайт без сборщика — файлы по перечню.
+  await cp(path.join(root, 'examples', 'manifest', 'copy.mjs'), path.join(project, 'copy-pet.mjs'));
+  await manifestSites(browser, project, shipped);
 } catch (error) {
   check('пакет: сценарий выполнен', false, error.stack);
 } finally {

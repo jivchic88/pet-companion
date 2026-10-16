@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- Прежний mountPet без сборщика — файлы входа «.» по перечню пакета (в пакет не входит; README, «Файлы пакета без
+     сборщика»): copy.mjs скопировал в vendor/pet-companion/ файлы entries["."].files; стили — ссылками в порядке
+     entries["."].styles (порядок каскада; pet-base.css — по желанию сайта, required: false). -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mountPet по перечню файлов</title>
+    <link rel="stylesheet" href="./site.css" />
+    <link rel="stylesheet" href="./vendor/pet-companion/pet/pet-base.css" />
+    <link rel="stylesheet" href="./vendor/pet-companion/pet/pet.css" />
+    <link rel="stylesheet" href="./vendor/pet-companion/pet/dog.css" />
+    <script type="module" src="./legacy.mjs"></script>
+  </head>
+  <body>
+    <header id="head"><span id="title">Мой сайт</span></header>
+    <main><button id="done" type="button">Урок пройден</button></main>
+  </body>
+</html>

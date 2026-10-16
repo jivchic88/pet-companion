@@ -23,3 +23,5 @@ jobs:
       # Браузерные проверки — системный Google Chrome раннера (playwright-core, channel: 'chrome').
       - run: npm run test:browser
       - run: npm run test:package
+      # Внешние потребители: архив в чистых проектах с Vite и React 18/19 (нужна сеть npm).
+      - run: npm run test:consumers

@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- Сайт на React с серверным рендером (в пакет не входит; README, «React и серверный рендер»): src/Corner.jsx — питомец
+     через pet-companion/react, src/server.jsx — renderToString, src/client.jsx — hydrateRoot той же разметки. Сборка —
+     vite build клиента и сервера, prerender.mjs подставляет разметку сервера на место метки app внутри #root. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Питомец на React</title>
+    <link rel="stylesheet" href="./site.css" />
+    <script type="module" src="./src/client.jsx"></script>
+  </head>
+  <body>
+    <div id="root"><!--app--></div>
+  </body>
+</html>

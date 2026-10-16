@@ -1,11 +1,15 @@
 // Форма пакета без сборки и сети: одна версия (package.json = VERSION ядра = README = CHANGELOG); публичные входы — только
 // mountPet, localDay, VERSION, вход ядра pet-companion/core (PL05: createPetCore, createStorage, PetError, localDay,
 // VERSION; PL06: definePet, defineBehavior), входы определений pet-companion/pets (cat, dog, corner, cornerItems) и
-// /behaviors (calm) и три стиля; модуль замкнут (импорты — только относительные пути внутри pet/, в том числе вложенные
-// core/, defs/ и web/, без сети и динамических импортов); граф ядра (pet/core.mjs и pet/core/**) — только pet/core/**, без
+// /behaviors (calm), веб (PL07), React (PL08: PetCompanion, usePetState) и три стиля; модуль замкнут (импорты — только
+// относительные пути внутри pet/, в том числе вложенные core/, defs/, web/ и hooks/, без сети и динамических импортов; голое
+// имя — только react и только в pet/react.mjs и pet/hooks/**); граф React — хук только react, обёртка — веб, ядро, хук и
+// react, остальные входы React не достигают; граф ядра (pet/core.mjs и pet/core/**) — только pet/core/**, без
 // ID штатных питомцев вне formats/legacy.mjs; определения (pet/defs/**) — только проверка ядра и defs/**; CSS без внешних
-// файлов, переменные темы с рабочими значениями; package.json без зависимостей и скриптов установки, exports и files
-// согласованы; пример README = example.html; ссылки руководства — только на файлы пакета; типы описывают те же экспорты,
+// файлов, переменные темы с рабочими значениями; package.json без зависимостей и скриптов установки (кроме необязательного
+// партнёра react, PL08), средства проверки — точными версиями, exports и files согласованы (manifest.json — PL08); пример
+// README = example.html, копирование по перечню в README = examples/manifest/copy.mjs; ссылки руководства — только на файлы
+// пакета; типы описывают те же экспорты,
 // у стилей — своя декларация без значений; лицензия заполнена; в файлах пакета нет следов приложения-источника.
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
@@ -15,6 +19,7 @@ import * as Behaviors from '../pet/behaviors.mjs';
 import * as Core from '../pet/core.mjs';
 import * as Pet from '../pet/pet.mjs';
 import * as Pets from '../pet/pets.mjs';
+import * as ReactEntry from '../pet/react.mjs';
 import * as Web from '../pet/web.mjs';
 import * as R from './legacy-rules.mjs';
 
@@ -30,7 +35,8 @@ async function imports(file) {
   return [...source.matchAll(IMPORT)].map(([, from, bare]) => {
     const spec = from ?? bare;
     const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
-    return { spec, resolved: resolved.startsWith('../') || path.posix.isAbsolute(resolved) ? null : resolved };
+    const external = !spec.startsWith('./') && !spec.startsWith('../');
+    return { spec, resolved: external || resolved.startsWith('../') || path.posix.isAbsolute(resolved) ? null : resolved, external };
   });
 }
 
@@ -49,9 +55,10 @@ test('версия одна: package.json = VERSION = README = CHANGELOG', async
   for (const file of await runtime('.mjs')) if (file !== 'core/version.mjs') assert.doesNotMatch(await read(`pet/${file}`), /VERSION = '\d/, `${file}: второй версии нет`);
 });
 
-test('публичные входы: mountPet, localDay, VERSION; ядро (PL05, PL06) — createPetCore, createStorage, definePet, defineBehavior, PetError, localDay, VERSION; определения — cat, dog, corner, cornerItems и calm; веб (PL07) — mountPetIn, createWebStorage, createWebScenes, catWeb, dogWeb; localDay — одна граница дня', () => {
+test('публичные входы: mountPet, localDay, VERSION; ядро (PL05, PL06) — createPetCore, createStorage, definePet, defineBehavior, PetError, localDay, VERSION; определения — cat, dog, corner, cornerItems и calm; веб (PL07) — mountPetIn, createWebStorage, createWebScenes, catWeb, dogWeb; React (PL08) — PetCompanion, usePetState; localDay — одна граница дня', () => {
   assert.deepEqual(Object.keys(Pet).sort(), ['VERSION', 'localDay', 'mountPet']);
   assert.deepEqual(Object.keys(Web).sort(), ['catWeb', 'createWebScenes', 'createWebStorage', 'dogWeb', 'mountPetIn']);
+  assert.deepEqual(Object.keys(ReactEntry).sort(), ['PetCompanion', 'usePetState']);
   assert.deepEqual(Object.keys(Core).sort(), ['PetError', 'VERSION', 'createPetCore', 'createStorage', 'defineBehavior', 'definePet', 'localDay']);
   assert.deepEqual(Object.keys(Pets).sort(), ['cat', 'corner', 'cornerItems', 'dog']);
   assert.deepEqual(Object.keys(Behaviors).sort(), ['calm']);
@@ -64,11 +71,15 @@ test('публичные входы: mountPet, localDay, VERSION; ядро (PL05
   assert.match(Pet.localDay(), /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test('модуль замкнут: импорты — только относительные пути к файлам pet/ (и вложенных папок); без сети, динамических импортов и внешних адресов', async () => {
+test('модуль замкнут: импорты — только относительные пути к файлам pet/ (и вложенных папок), голое имя — только react в pet/react.mjs и pet/hooks/** (PL08); без сети, динамических импортов и внешних адресов', async () => {
   const files = await runtime('.mjs');
-  assert.ok(files.includes('core/index.mjs') && files.includes('web/storage.mjs'), files.join(', '));
+  assert.ok(files.includes('core/index.mjs') && files.includes('web/storage.mjs') && files.includes('hooks/state.mjs'), files.join(', '));
   for (const file of files) {
-    for (const { spec, resolved } of await imports(file)) {
+    for (const { spec, resolved, external } of await imports(file)) {
+      if (external) {
+        assert.ok(spec === 'react' && (file === 'react.mjs' || file.startsWith('hooks/')), `${file}: ${spec} — внешний пакет вне слоя React`);
+        continue;
+      }
       assert.match(spec, /^(?:\.\/|(?:\.\.\/)+)(?:[\w-]+\/)*[\w-]+\.mjs$/, `${file}: ${spec} — относительный путь к .mjs`);
       assert.ok(resolved && files.includes(resolved), `${file}: ${spec} — файл внутри pet/`);
     }
@@ -137,6 +148,31 @@ test('граф веба (PL07): вход pet/web.mjs — контейнер, в�
   }
 });
 
+test('граф React (PL08): хук pet/hooks/** — только react (ядро — аргументом, ни DOM, ни веба); обёртка pet/react.mjs — react, веб, ядро и хук; legacy, ядро, определения и веб React не достигают', async () => {
+  const hooks = (await runtime('.mjs')).filter((file) => file.startsWith('hooks/'));
+  assert.deepEqual(hooks, ['hooks/state.mjs']);
+  for (const file of hooks) {
+    assert.deepEqual((await imports(file)).map(({ spec }) => spec), ['react'], file);
+    assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|HTMLElement)\b/, file);
+  }
+  for (const { spec, resolved, external } of await imports('react.mjs')) assert.ok((external && spec === 'react') || resolved?.startsWith('web/') || resolved?.startsWith('core/') || resolved?.startsWith('hooks/'), `react.mjs: ${spec}`);
+  assert.match(await read('pet/react.mjs'), /^'use client';\n/, "вход React — граница клиентских компонентов ('use client')");
+  // От каждого другого входа: ни pet/react.mjs, ни pet/hooks/**, ни голого react.
+  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'web.mjs']) {
+    const seen = new Set();
+    const walk = async (file) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const { spec, resolved, external } of await imports(file)) {
+        assert.ok(!external, `${entry} → ${file}: ${spec}`);
+        await walk(resolved);
+      }
+    };
+    await walk(entry);
+    assert.ok(![...seen].some((file) => file === 'react.mjs' || file.startsWith('hooks/')), `${entry} достигает React`);
+  }
+});
+
 test('граф определений (PL06): pet/defs/** — только проверка ядра (core/define.mjs и её зависимости) и defs/**; входы pets.mjs и behaviors.mjs — только defs/**; ядро определения не импортирует', async () => {
   const defs = (await runtime('.mjs')).filter((file) => file.startsWith('defs/'));
   assert.deepEqual(defs, ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs']);
@@ -199,34 +235,45 @@ test('CSS контейнера (PL07): view.css переносит каждую 
   assert.doesNotMatch(view, /(^|[\s,}])(html|body|:root)\b/m, 'без правил для html, body и :root');
 });
 
-test('package.json: без зависимостей и скриптов установки; exports — публичные входы с типами, их файлы в files; стили — sideEffects', async () => {
-  for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies']) assert.equal(pkg[field], undefined, field);
+test('package.json: без зависимостей и скриптов установки; react — только необязательный партнёр (PL08); средства проверки — точные версии; exports — публичные входы с типами, их файлы в files; стили — sideEffects', async () => {
+  for (const field of ['dependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies']) assert.equal(pkg[field], undefined, field);
+  // PL08: react нужен только входу pet-companion/react — необязательный партнёр; npm его не ставит сам.
+  assert.deepEqual(pkg.peerDependencies, { react: '^18.3.1 || ^19.0.0' });
+  assert.deepEqual(pkg.peerDependenciesMeta, { react: { optional: true } });
+  for (const [name, version] of Object.entries(pkg.devDependencies)) assert.match(version, /^\d+\.\d+\.\d+$/, `${name}: точная версия`);
   for (const script of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack', 'preuninstall', 'uninstall', 'postuninstall']) assert.equal(pkg.scripts?.[script], undefined, script);
   assert.equal(pkg.type, 'module');
-  // PL05: вход ядра ./core; PL06: входы определений ./pets и ./behaviors; PL07: вход веба ./web; внутренние pet/core/**,
-  // pet/defs/**, pet/web/** и будущие входы (react, native, manifest) закрыты.
-  assert.deepEqual(Object.keys(pkg.exports), ['.', './core', './pets', './behaviors', './web', './pet.css', './dog.css', './pet-base.css', './package.json']);
+  // PL05: вход ядра ./core; PL06: входы определений ./pets и ./behaviors; PL07: вход веба ./web; PL08: вход React ./react и
+  // перечень ./manifest.json; внутренние pet/core/**, pet/defs/**, pet/web/**, pet/hooks/** и будущие входы (native) закрыты.
+  assert.deepEqual(Object.keys(pkg.exports), ['.', './core', './pets', './behaviors', './web', './react', './pet.css', './dog.css', './pet-base.css', './manifest.json', './package.json']);
   assert.deepEqual(pkg.exports['.'], { types: './pet/pet.d.mts', default: './pet/pet.mjs' });
   assert.deepEqual(pkg.exports['./core'], { types: './pet/core.d.mts', default: './pet/core.mjs' });
   assert.deepEqual(pkg.exports['./pets'], { types: './pet/pets.d.mts', default: './pet/pets.mjs' });
   assert.deepEqual(pkg.exports['./behaviors'], { types: './pet/behaviors.d.mts', default: './pet/behaviors.mjs' });
   assert.deepEqual(pkg.exports['./web'], { types: './pet/web.d.mts', default: './pet/web.mjs' });
+  assert.deepEqual(pkg.exports['./react'], { types: './pet/react.d.mts', default: './pet/react.mjs' });
+  assert.equal(pkg.exports['./manifest.json'], './manifest.json');
   assert.equal(pkg.main, './pet/pet.mjs');
   assert.equal(pkg.types, './pet/pet.d.mts');
   // Стиль: TypeScript берёт декларацию (условие types — первым), сборщик и Node — сам файл .css.
   for (const name of ['pet.css', 'dog.css', 'pet-base.css']) assert.deepEqual(pkg.exports[`./${name}`], { types: './pet/css.d.mts', default: `./pet/${name}` });
   for (const [entry, target] of Object.entries(pkg.exports)) if (typeof target === 'object') assert.deepEqual(Object.keys(target), ['types', 'default'], entry);
-  assert.deepEqual(pkg.files, ['pet/', 'example.html', 'CHANGELOG.md']);
+  assert.deepEqual(pkg.files, ['pet/', 'manifest.json', 'example.html', 'CHANGELOG.md']);
   assert.deepEqual(pkg.sideEffects, ['*.css']);
   assert.ok(pkg.license && pkg.license !== 'UNLICENSED', 'license');
 });
 
-test('руководство: пример = example.html; импорты — имя пакета; ссылки — только на файлы пакета и https', async () => {
+test('руководство: пример = example.html; импорты — имя пакета; старты PL08 (React, копирование по перечню) = проверенные файлы примеров; ссылки — только на файлы пакета и https', async () => {
   const readme = await read('README.md');
   const example = /```html\n([\s\S]*?)\n```/.exec(readme)?.[1];
   assert.equal(await read('example.html'), `${example}\n`);
   assert.match(example, /^<!doctype html>[\s\S]*<meta name="viewport"[\s\S]*href="\.\/pet\/pet\.css"[\s\S]*from '\.\/pet\/pet\.mjs'[\s\S]*storage: '[\w-]+'[\s\S]*notify\('saved'/);
-  for (const [, spec] of readme.matchAll(/from '([^'.][^']*)'/g)) assert.ok([pkg.name, `${pkg.name}/core`, `${pkg.name}/pets`, `${pkg.name}/behaviors`, `${pkg.name}/web`].includes(spec), `импорт ${spec}`);
+  // PL08: вход React и пакет сайта в его примере (react), node: — в скрипте копирования по перечню.
+  for (const [, spec] of readme.matchAll(/from '([^'.][^']*)'/g)) assert.ok([pkg.name, `${pkg.name}/core`, `${pkg.name}/pets`, `${pkg.name}/behaviors`, `${pkg.name}/web`, `${pkg.name}/react`, 'react'].includes(spec) || spec.startsWith('node:'), `импорт ${spec}`);
+  // Короткие старты PL08 — те же файлы, что проверяют test:consumers и test:package: компонент React и копирование по перечню.
+  const block = (lang, start) => [...readme.matchAll(new RegExp(`\`\`\`${lang}\\n([\\s\\S]*?)\\n\`\`\``, 'g'))].map((match) => `${match[1]}\n`).find((text) => text.startsWith(start));
+  assert.equal(block('jsx', "import { useState } from 'react';"), await read('examples/react/src/Corner.jsx'), 'README: пример React = examples/react/src/Corner.jsx');
+  assert.equal(block('js', '// Файлы питомца для сайта без сборщика'), await read('examples/manifest/copy.mjs'), 'README: копирование по перечню = examples/manifest/copy.mjs');
   for (const [, spec] of readme.matchAll(/import '([^'.][^']*)'/g)) assert.ok([`${pkg.name}/pet.css`, `${pkg.name}/dog.css`, `${pkg.name}/pet-base.css`].includes(spec), spec);
   assert.ok(readme.includes(`npm install ${pkg.name}`), 'установка по имени пакета');
   for (const doc of ['README.md', 'CHANGELOG.md']) {
@@ -234,13 +281,14 @@ test('руководство: пример = example.html; импорты — и
   }
 });
 
-test('типы: pet.d.mts, core.d.mts, pets.d.mts, behaviors.d.mts и web.d.mts объявляют те же экспорты значений, что их входы; css.d.mts — стиль без значений', async () => {
+test('типы: pet.d.mts, core.d.mts, pets.d.mts, behaviors.d.mts, web.d.mts и react.d.mts объявляют те же экспорты значений, что их входы; css.d.mts — стиль без значений', async () => {
   const values = (text) => [...text.matchAll(/^export declare (?:const|function|class) (\w+)/gm)].map((match) => match[1]).filter((name, i, all) => all.indexOf(name) === i).sort();
   assert.deepEqual(values(await read('pet/pet.d.mts')), Object.keys(Pet).sort());
   assert.deepEqual(values(await read('pet/core.d.mts')), Object.keys(Core).sort());
   assert.deepEqual(values(await read('pet/pets.d.mts')), Object.keys(Pets).sort());
   assert.deepEqual(values(await read('pet/behaviors.d.mts')), Object.keys(Behaviors).sort());
   assert.deepEqual(values(await read('pet/web.d.mts')), Object.keys(Web).sort());
+  assert.deepEqual(values(await read('pet/react.d.mts')), Object.keys(ReactEntry).sort());
   // Декларации ядра и определений не тянут DOM (ядро — и для Node без lib dom).
   for (const file of ['pet/core.d.mts', 'pet/pets.d.mts', 'pet/behaviors.d.mts']) assert.doesNotMatch(strip(await read(file)), /\bHTML\w*Element\b|\bDocument\b|\bWindow\b|\bEvent\b/, file);
   // Ни default, ни имён классов (это не CSS Modules), ни declare module '*.css' для всего проекта сайта.
@@ -251,6 +299,6 @@ test('лицензия заполнена; в файлах пакета нет �
   const license = await read('LICENSE');
   assert.match(license, /^MIT License/);
   assert.doesNotMatch(license, /<[^>]+>|\[[^\]]+\]/, 'правообладатель и год заполнены');
-  const files = ['README.md', 'CHANGELOG.md', 'example.html', ...(await runtime('')).filter((file) => /\.\w+$/.test(file)).map((file) => `pet/${file}`)];
+  const files = ['README.md', 'CHANGELOG.md', 'example.html', 'manifest.json', ...(await runtime('')).filter((file) => /\.\w+$/.test(file)).map((file) => `pet/${file}`)];
   for (const file of files) assert.doesNotMatch(await read(file), /trainer\/|pet-study|cat-ui|progress\.md|ADR \d|docs\/adr|Team Lead|cloudflare|wrangler/i, file);
 });

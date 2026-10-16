@@ -1,0 +1,18 @@
+/* Стили страницы примера со сборщиком. Питомцу в контейнере они не нужны; стили прежнего mountPet — импортом в main.js. */
+body {
+  margin: 0;
+  padding: 0 16px 16px;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+#head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+}
+
+#pet {
+  width: min(100%, 300px);
+}

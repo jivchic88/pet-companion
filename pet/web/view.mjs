@@ -31,7 +31,15 @@ const views = new WeakMap();
 let busy = 0;
 
 // Стили вида — файлы пакета рядом с этим модулем (адрес установленного пакета, не страницы и не cwd) и стили наборов.
-const packageStyles = () => ['../pet-base.css', '../pet.css', '../dog.css', './view.css'].map((file) => new URL(file, import.meta.url).href);
+// Каждый адрес — отдельный литерал new URL('…', import.meta.url): так его находит и переносит сборщик (Vite, PL08), а без
+// сборщика он указывает на файл пакета; перечисление через map сборщик не распознаёт. Список — и в manifest.json
+// (scripts/manifest.mjs находит эти литералы).
+const packageStyles = () => [
+  new URL('../pet-base.css', import.meta.url).href,
+  new URL('../pet.css', import.meta.url).href,
+  new URL('../dog.css', import.meta.url).href,
+  new URL('./view.css', import.meta.url).href,
+];
 
 const isElement = (value) => Boolean(value) && typeof value === 'object' && value.nodeType === 1 && typeof value.append === 'function';
 const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;

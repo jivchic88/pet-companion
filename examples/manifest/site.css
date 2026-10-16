@@ -1,0 +1,19 @@
+/* Стили страниц примера по перечню — файлом того же источника. Питомцу в контейнере они не нужны (свои стили вид
+   подключает сам); mountPet (legacy.html) получает стили пакета ссылками в порядке перечня. */
+body {
+  margin: 0;
+  padding: 16px;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+#pet {
+  width: min(100%, 300px);
+}
+
+#head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+}

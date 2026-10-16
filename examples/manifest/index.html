@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- Питомец в контейнере без сборщика — файлы по перечню пакета (в пакет не входит; README, «Файлы пакета без сборщика»):
+     copy.mjs скопировал в vendor/pet-companion/ только файлы входа ./web из manifest.json (та же структура папок), сервер
+     отдаёт только эту папку — ни node_modules, ни исходников пакета. Модуль страницы (main.mjs) импортирует файл входа по
+     его пути из перечня: vendor/pet-companion/ + entries["./web"].module. Стили питомца вид загружает сам. Встроенных
+     скриптов и стилей нет — страница работает и под строгим CSP (default-src 'self'; style-src 'self'). -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Питомец по перечню файлов</title>
+    <link rel="stylesheet" href="./site.css" />
+    <script type="module" src="./main.mjs"></script>
+  </head>
+  <body>
+    <h1>Мой сайт</h1>
+    <p><button id="done" type="button">Урок пройден</button></p>
+    <div id="pet"></div>
+    <p id="status" role="status"></p>
+  </body>
+</html>

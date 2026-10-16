@@ -46,6 +46,10 @@
       "types": "./pet/web.d.mts",
       "default": "./pet/web.mjs"
     },
+    "./react": {
+      "types": "./pet/react.d.mts",
+      "default": "./pet/react.mjs"
+    },
     "./pet.css": {
       "types": "./pet/css.d.mts",
       "default": "./pet/pet.css"
@@ -58,25 +62,41 @@
       "types": "./pet/css.d.mts",
       "default": "./pet/pet-base.css"
     },
+    "./manifest.json": "./manifest.json",
     "./package.json": "./package.json"
   },
   "files": [
     "pet/",
+    "manifest.json",
     "example.html",
     "CHANGELOG.md"
   ],
   "sideEffects": [
     "*.css"
   ],
+  "peerDependencies": {
+    "react": "^18.3.1 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:browser": "node test/browser.mjs",
     "test:package": "node test/package.mjs",
-    "version": "node scripts/sync-version.mjs && git add pet/core/version.mjs README.md CHANGELOG.md",
+    "test:consumers": "node test/consumers.mjs",
+    "manifest": "node scripts/manifest.mjs",
+    "version": "node scripts/sync-version.mjs && node scripts/manifest.mjs && git add pet/core/version.mjs README.md CHANGELOG.md manifest.json",
     "prepublishOnly": "npm test"
   },
   "devDependencies": {
+    "@types/react": "19.3.0",
     "playwright-core": "1.63.0",
-    "typescript": "5.9.3"
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
   }
 }

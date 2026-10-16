@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Сайт со сборщиком Vite (в пакет не входит; README, «Со сборщиком»): main.js импортирует публичные входы пакета, сборка —
+     npx vite build (vite.config.js рядом), на сервер — только папка dist/. Питомец в контейнере подключает свои стили сам
+     (сборщик переносит их файлами), прежний mountPet — стилями пакета импортом (sideEffects сохраняет их при tree shaking).
+     Кролик — свой питомец примера расширения со своими стилями (styles набора). Встроенных скриптов и стилей нет. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Питомец со сборщиком</title>
+    <link rel="stylesheet" href="./site.css" />
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <header id="head"><span id="title">Мой сайт</span></header>
+    <main>
+      <p>
+        <button id="done" type="button">Урок пройден</button>
+        <button id="bunny" type="button">Кролик</button>
+        <button id="cat" type="button">Кот</button>
+      </p>
+      <div id="pet"></div>
+    </main>
+  </body>
+</html>
