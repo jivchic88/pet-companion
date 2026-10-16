@@ -13,8 +13,9 @@
 // isReduceMotionEnabled, но событие reduceMotionChanged, пришедшее раньше ответа, главнее: поздний ответ его не затирает.
 // ready() — один раз, когда начальное «уменьшить движение» известно (ответ, событие или отказ чтения): хост может вызвать
 // start() после него. Отключение (stop, внешний core.destroy) снимает все слушатели этой привязки, поздние ответы и события
-// ничего не вызывают; соседние привязки не затрагиваются. Отказы системного API — предупреждение журнала, без
-// необработанных отклонений.
+// ничего не вызывают, ended() — один раз (привязки больше нет: готовность, если была, ей больше не принадлежит); соседние
+// привязки не затрагиваются. Отказы системного API и исключения ready/ended — предупреждение журнала, без необработанных
+// отклонений.
 
 import { systemLog } from '../core/ports.mjs';
 
@@ -45,7 +46,7 @@ export function interrupt(core) {
 }
 
 // Привязать ядро core к системе { AppState, AccessibilityInfo }. Возвращает { stop } — снять всё (идемпотентно).
-export function bindLifecycle(core, { AppState, AccessibilityInfo }, { ready = noop, log = systemLog } = {}) {
+export function bindLifecycle(core, { AppState, AccessibilityInfo }, { ready = noop, ended = noop, log = systemLog } = {}) {
   let live = true;
   let motionKnown = false;
   let readied = false;
@@ -60,6 +61,11 @@ export function bindLifecycle(core, { AppState, AccessibilityInfo }, { ready = n
       unsubscribe();
     } catch {
       // ядро уже отключено
+    }
+    try {
+      ended();
+    } catch (error) {
+      say(log, 'жизненный цикл: ended() бросил', error);
     }
   };
   if (!alive()) return { stop };

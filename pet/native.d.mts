@@ -6,8 +6,9 @@ import type { PetCore, PetSnapshot } from './core.mjs';
 
 /**
  * Жизненный цикл приложения для ядра: `AppState` (`active` / `background`, iOS `inactive` и Android `blur` — отмена жеста)
- * и системное «уменьшить движение». `true` — начальная настройка движения известна (можно вызвать `core.start()`);
- * `null` — ничего не подключает.
+ * и системное «уменьшить движение». `true` — начальная настройка движения известна текущей привязке (можно вызвать
+ * `core.start()`); с другим `core` (в том числе снова тем же после `null`) — `false` уже в этой отрисовке, до свежего
+ * ответа системы; после внешнего `core.destroy()` — `false`. `null` — ничего не подключает.
  */
 export declare function useNativeLifecycle(core: PetCore | null): boolean;
 

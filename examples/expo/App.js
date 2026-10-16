@@ -10,37 +10,57 @@ import { busyProbe, confirmed, MOTIONS, NAMES, newCore, openStore, remember, res
 const time = () => new Date().toTimeString().slice(0, 8);
 const next = (list, value) => list[(list.indexOf(value) + 1) % list.length];
 
+// Владение ядром: у подключённого экрана — запись own { live, core, turn }: текущее ядро и номер последнего создания.
+// Созданное ядро принимается, только если экран ещё подключён и создание — последнее; иначе (размонтирован, опередило
+// более новое «Новое ядро») уничтожается сразу — ядра без владельца не остаётся.
+function adopt(own, turn, core) {
+  if (own.live && own.turn === turn) {
+    own.core = core;
+    return true;
+  }
+  core.destroy();
+  return false;
+}
+
 export default function App() {
   const [store, setStore] = useState(null);
   const [core, setCore] = useState(null);
   const [lines, setLines] = useState([]);
   const [checks, setChecks] = useState({});
   const marks = useRef(0);
-  const say = useCallback((text) => setLines((list) => [`${time()} ${text}`, ...list].slice(0, 60)), []);
-  const check = useCallback((name, value) => setChecks((all) => ({ ...all, [name]: value })), []);
+  // Запись владения подключённого экрана (null — экран не подключён): после размонтирования экран своё состояние не меняет.
+  const owner = useRef(null);
+  const say = useCallback((text) => {
+    if (owner.current) setLines((list) => [`${time()} ${text}`, ...list].slice(0, 60));
+  }, []);
+  const check = useCallback((name, value) => {
+    if (owner.current) setChecks((all) => ({ ...all, [name]: value }));
+  }, []);
   const progress = useCallback(() => ({ marks: marks.current, today: marks.current, limit: null }), []);
   const ready = useNativeLifecycle(core);
   const pet = usePetState(core);
 
-  // Запуск: база примера, барьер загрузки, ядро; сверка подтверждённого прошлого запуска.
+  // Запуск: база примера, барьер загрузки, ядро; сверка подтверждённого прошлого запуска. Размонтирование уничтожает
+  // текущее ядро (и первое, и созданное «Новое ядро»); ядро, созданное после него, уничтожает adopt.
   useEffect(() => {
-    let live = true;
-    let made = null;
+    const own = { live: true, core: null, turn: 1 };
+    owner.current = own;
     (async () => {
       const opened = await openStore();
       const { core: first, status } = await newCore(opened, progress);
-      if (!live) return first.destroy();
-      made = first;
+      if (!adopt(own, 1, first)) return;
       setStore(opened);
       setCore(first);
       say(`хранилище: ${status}`);
       const result = restartCheck(opened.expected, first.getState());
       check('Перезапуск с тем же файлом', result);
       say(`перезапуск: ${result.text}`);
-    })().catch((error) => say(`ошибка запуска: ${error?.message ?? error}`));
+    })().catch((error) => own.live && say(`ошибка запуска: ${error?.message ?? error}`));
     return () => {
-      live = false;
-      made?.destroy();
+      own.live = false;
+      if (owner.current === own) owner.current = null;
+      own.core?.destroy();
+      own.core = null;
     };
   }, [check, progress, say]);
 
@@ -84,15 +104,26 @@ export default function App() {
     result.save?.done?.then((done) => say(`${title}: done → ${done}`));
   };
 
+  // «Новое ядро»: прежнее уничтожается до барьера загрузки (load ждёт его принятых операций), новое — во владение экрана.
+  // Каждое нажатие получает свой номер: результат более раннего (в том числе нажатого, пока предыдущее ещё грузится)
+  // уничтожается и экран не трогает.
   const renew = async () => {
-    if (!store || !core) return;
-    core.destroy();
+    const own = owner.current;
+    if (!own || !store) return;
+    const turn = ++own.turn;
+    own.core?.destroy();
+    own.core = null;
     setCore(null);
-    const { core: fresh, status } = await newCore(store, progress);
-    setCore(fresh);
-    const value = confirmed(fresh.getState());
-    say(`новое ядро после load (${status}): ${fresh.getState().name.display} / ${fresh.getState().prefs.motion}`);
-    check('destroy → load → новое ядро', { ok: Boolean(value), text: value ? `подтверждённое: ${value.name} / ${value.motion}` : 'есть неподтверждённое' });
+    try {
+      const { core: fresh, status } = await newCore(store, progress);
+      if (!adopt(own, turn, fresh)) return;
+      setCore(fresh);
+      const value = confirmed(fresh.getState());
+      say(`новое ядро после load (${status}): ${fresh.getState().name.display} / ${fresh.getState().prefs.motion}`);
+      check('destroy → load → новое ядро', { ok: Boolean(value), text: value ? `подтверждённое: ${value.name} / ${value.motion}` : 'есть неподтверждённое' });
+    } catch (error) {
+      if (own.live) say(`новое ядро не создано: ${error?.message ?? error}`);
+    }
   };
 
   const reserve = async () => {

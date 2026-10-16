@@ -4,7 +4,9 @@
 // независимое соединение приложения к тому же файлу). Интерфейс стенда: storage (загруженный координатор), core() — ядро
 // проверок, put(key, value) — запись мимо координатора (другой процесс, соединение или вкладка), raw(key) / json(key) —
 // сохранённое, failRead(key) / failWrite(key) — следующий отказ чтения или записи ключа, idle() — все принятые операции
-// выполнены, close(). Подделка React Native — system(): AppState и AccessibilityInfo с ручными событиями. Данные синтетические.
+// выполнены, close(). Подделка React Native — system(): AppState и AccessibilityInfo с ручными событиями; nodeRoot() —
+// настоящий React 19 в Node с контейнером-заглушкой. Данные синтетические.
+import { createRequire } from 'node:module';
 import { coordinatorOf, createCoordinator } from '../pet/core/storage.mjs';
 import { fileTail, sqliteScenes, sqliteStorage } from '../pet/storage/sqlite.mjs';
 import { CORE_KEYS, journal, make } from './core-kit.mjs';
@@ -182,5 +184,38 @@ export function system({ state = 'active' } = {}) {
       if (event === 'change') AppState.currentState = value;
       for (const handler of [...listeners[event]]) handler(value);
     },
+    // Ответить на все ещё не отвеченные начальные чтения «уменьшить движение».
+    answered: 0,
+    answer(value) {
+      while (this.answered < asks.length) asks[this.answered++].resolve(value);
+    },
+  };
+}
+
+// Настоящий React 19 в Node: react-dom/client с контейнером-заглушкой (хуки и экраны проверок ничего не рисуют в DOM, DOM
+// не нужен). act(fn) — fn и затем несколько оборотов цикла событий внутри act (без пауз): цепочки обещаний компонента,
+// которые ничто не держит, доходят до конца, эффекты и смены состояния применены. Обещание, которое держит управляемая
+// точка проверки, fn не возвращает. render и unmount — через act; один корень на вызов.
+const require = createRequire(import.meta.url);
+const turns = async () => {
+  for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setImmediate(resolve));
+};
+export function nodeRoot() {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window ??= { event: undefined, HTMLIFrameElement: class {} };
+  const React = require('react');
+  const { createRoot } = require('react-dom/client');
+  const doc = { nodeType: 9, addEventListener() {}, removeEventListener() {}, defaultView: globalThis.window, activeElement: null };
+  const root = createRoot({ nodeType: 1, nodeName: 'DIV', tagName: 'DIV', ownerDocument: doc, addEventListener() {}, removeEventListener() {}, childNodes: [], firstChild: null, textContent: '' });
+  const act = (fn = () => {}) =>
+    React.act(async () => {
+      await fn();
+      await turns();
+    });
+  return {
+    React,
+    act,
+    render: (element) => act(() => root.render(element)),
+    unmount: () => act(() => root.unmount()),
   };
 }

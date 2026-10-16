@@ -2,7 +2,7 @@
 // подделке AppState и AccessibilityInfo (test/native-kit.mjs system) и настоящем публичном ядре с ручными часами,
 // планировщиком и случайностью (core-kit life). active / background / iOS inactive / Android blur, начальное unknown, null,
 // extension; фон снимает реакцию, попытку сценки, жест и задачи, возврат ничего не доигрывает и пересчитывает день;
-// системное «уменьшить движение» не переписывает выбор владельца; гонка начального ответа с событием; ready; cleanup,
+// системное «уменьшить движение» не переписывает выбор владельца; гонка начального ответа с событием; ready и ended; cleanup,
 // смена core, повторное подключение (как StrictMode), внешний destroy и destroy при ожидающем ответе; слушатели сняты
 // полностью, соседняя привязка не затронута; отказы системного API — журнал, без необработанных отклонений. Это подделка
 // React Native: настоящие AppState и AccessibilityInfo — только в Expo-примере на устройстве. Данные синтетические.
@@ -208,6 +208,36 @@ test('cleanup, повторное подключение (StrictMode), смен�
   assert.deepEqual([B.calls.setVisible, neighbour.calls.setVisible], [[true, false], [true, false, true]], 'соседняя привязка работает');
   side.stop();
   assert.equal(rn.live(), 0);
+});
+
+test('ended — один раз, когда привязки больше нет: stop (повторный — ничего) или внешний destroy; соседняя не получает; после ended — ни ready, ни команд; исключение ended — журнал', async () => {
+  const A = made();
+  const B = made();
+  const rn = system();
+  const ends = { a: 0, b: 0 };
+  let readyA = 0;
+  const a = bindLifecycle(A.core, rn, { ready: () => readyA++, ended: () => ends.a++ });
+  const b = bindLifecycle(B.core, rn, { ended: () => ends.b++ });
+  a.stop();
+  a.stop();
+  assert.deepEqual(ends, { a: 1, b: 0 });
+  rn.asks[0].resolve(true);
+  await flush();
+  assert.deepEqual([readyA, A.calls.setReducedMotion], [0, []], 'после ended ответ ничего не вызывает');
+  B.core.destroy();
+  b.stop();
+  assert.deepEqual([ends, rn.live()], [{ a: 1, b: 1 }, 0]);
+  const C = made();
+  const log = journal();
+  bindLifecycle(C.core, rn, {
+    ended: () => {
+      throw new Error('бросил');
+    },
+    log: log.port,
+  }).stop();
+  assert.ok(log.list.some((line) => line.includes('ended() бросил')), log.list.join(' | '));
+  await flush();
+  assert.deepEqual(rejections, []);
 });
 
 test('внешний core.destroy(): слушатели системы сняты сразу; destroy при ожидающем начальном ответе — ответ проигнорирован, ready не вызывается; привязка к уже отключённому — ничего', async () => {
