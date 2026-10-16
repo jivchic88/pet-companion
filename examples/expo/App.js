@@ -9,6 +9,10 @@ import { busyProbe, confirmed, MOTIONS, NAMES, newCore, openStore, remember, res
 
 const time = () => new Date().toTimeString().slice(0, 8);
 const next = (list, value) => list[(list.indexOf(value) + 1) % list.length];
+// В разработке (Expo Go, __DEV__) журнал, проверки и смены строк состояния дублируются в консоль — Expo CLI печатает их в
+// терминале Metro: доказательство запуска на устройстве без снимков экрана. В Node-проверке __DEV__ нет — консоль молчит.
+const trace = (text) => globalThis.__DEV__ && console.log(`[PL09] ${text}`);
+const mark = (value) => (value.ok === true ? '✓' : value.ok === false ? '✗' : '·');
 
 // Владение ядром: у подключённого экрана — запись own { live, core, turn }: текущее ядро и номер последнего создания.
 // Созданное ядро принимается, только если экран ещё подключён и создание — последнее; иначе (размонтирован, опередило
@@ -31,10 +35,15 @@ export default function App() {
   // Запись владения подключённого экрана (null — экран не подключён): после размонтирования экран своё состояние не меняет.
   const owner = useRef(null);
   const say = useCallback((text) => {
-    if (owner.current) setLines((list) => [`${time()} ${text}`, ...list].slice(0, 60));
+    if (!owner.current) return;
+    const line = `${time()} ${text}`;
+    trace(line);
+    setLines((list) => [line, ...list].slice(0, 60));
   }, []);
   const check = useCallback((name, value) => {
-    if (owner.current) setChecks((all) => ({ ...all, [name]: value }));
+    if (!owner.current) return;
+    trace(`проверка «${name}»: ${mark(value)} ${value.text}`);
+    setChecks((all) => ({ ...all, [name]: value }));
   }, []);
   const progress = useCallback(() => ({ marks: marks.current, today: marks.current, limit: null }), []);
   const ready = useNativeLifecycle(core);
@@ -140,27 +149,60 @@ export default function App() {
   };
 
   const state = pet;
+  const rows = [
+    ['Хранилище', store ? store.storage.status : '…'],
+    ['Ядро', core ? `${core.status}${ready ? ', ready' : ''}` : 'нет'],
+    ['AppState / visible', `${AppState.currentState} / ${state ? state.visible : '—'}`],
+    ['Имя', state ? state.name.display : '—'],
+    ['Движение: владелец / система / итог', state ? `${state.prefs.motion} / ${state.prefs.reducedMotion} / ${state.prefs.effectiveMotion}` : '—'],
+    ['cat: статус, pending, unsaved', state ? `${state.save.cat.status}, [${state.save.cat.pending}], [${state.save.cat.unsaved}]` : '—'],
+    ['Реакция', state?.pose.reaction?.type ?? '—'],
+  ];
+  const summary = rows.map(([label, value]) => `${label}: ${value}`).join(' | ');
+  useEffect(() => {
+    if (owner.current) trace(`экран — ${summary}`);
+  }, [summary]);
+  const buttons = [
+    ['Имя', command('setName', (c) => c.setName(next(NAMES, c.getState().name.display)))],
+    ['Движение', command('setPreferences', (c) => c.setPreferences({ motion: next(MOTIONS, c.getState().prefs.motion) }))],
+    ['Подтверждённое занятие', command('notify saved', (c) => ((marks.current += 1), c.notify('saved', { key: `k${Date.now()}`, counted: true })))],
+    ['Новое ядро', renew],
+    ['Резервирование дня', reserve],
+    ['Занятый файл', busy],
+  ];
+  // Мост диагностики (только разработка, __DEV__): инспектор Metro вызывает те же функции, что отданы кнопкам последнего
+  // смонтированного экрана, и читает показанные строки; своих действий у моста нет. Снимается при размонтировании. В
+  // Node-проверке __DEV__ нет — моста нет.
+  useEffect(() => {
+    if (!globalThis.__DEV__) return undefined;
+    const bridge = {
+      titles: buttons.map(([title]) => title),
+      press: (title) => {
+        const found = buttons.find(([name]) => name === title);
+        if (!found) throw new Error(`нет кнопки «${title}»`);
+        return found[1]();
+      },
+      screen: () => ({ rows: Object.fromEntries(rows), checks, lines }),
+    };
+    globalThis.__PL09__ = bridge;
+    return () => {
+      if (globalThis.__PL09__ === bridge) delete globalThis.__PL09__;
+    };
+  });
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.title}>pet-companion · PL09 · диагностика</Text>
-      <Row label="Хранилище" value={store ? store.storage.status : '…'} />
-      <Row label="Ядро" value={core ? `${core.status}${ready ? ', ready' : ''}` : 'нет'} />
-      <Row label="AppState / visible" value={`${AppState.currentState} / ${state ? state.visible : '—'}`} />
-      <Row label="Имя" value={state ? state.name.display : '—'} />
-      <Row label="Движение: владелец / система / итог" value={state ? `${state.prefs.motion} / ${state.prefs.reducedMotion} / ${state.prefs.effectiveMotion}` : '—'} />
-      <Row label="cat: статус, pending, unsaved" value={state ? `${state.save.cat.status}, [${state.save.cat.pending}], [${state.save.cat.unsaved}]` : '—'} />
-      <Row label="Реакция" value={state?.pose.reaction?.type ?? '—'} />
+      {rows.map(([label, value]) => (
+        <Row key={label} label={label} value={value} />
+      ))}
       <View style={styles.buttons}>
-        <Button title="Имя" onPress={command('setName', (c) => c.setName(next(NAMES, c.getState().name.display)))} />
-        <Button title="Движение" onPress={command('setPreferences', (c) => c.setPreferences({ motion: next(MOTIONS, c.getState().prefs.motion) }))} />
-        <Button title="Подтверждённое занятие" onPress={command('notify saved', (c) => ((marks.current += 1), c.notify('saved', { key: `k${Date.now()}`, counted: true })))} />
-        <Button title="Новое ядро" onPress={renew} />
-        <Button title="Резервирование дня" onPress={reserve} />
-        <Button title="Занятый файл" onPress={busy} />
+        {buttons.map(([title, onPress]) => (
+          <Button key={title} title={title} onPress={onPress} />
+        ))}
       </View>
       <Text style={styles.head}>Проверки</Text>
       {Object.entries(checks).map(([name, value]) => (
-        <Row key={name} label={`${value.ok === true ? '✓' : value.ok === false ? '✗' : '·'} ${name}`} value={value.text} />
+        <Row key={name} label={`${mark(value)} ${name}`} value={value.text} />
       ))}
       <Text style={styles.head}>Журнал</Text>
       {lines.map((line, index) => (
