@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { catNative, dogNative, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
-import { busyProbe, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck, same } from './diagnostics.mjs';
+import { busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
 
 const KITS = [catNative, dogNative];
 const MOTION_TITLES = [
@@ -17,7 +17,6 @@ const MOTION_TITLES = [
 ];
 const SAVE = { none: 'без изменений', pending: 'сохраняется…', saved: 'сохранено', failed: 'не сохранилось', partial: 'сохранено частично' };
 const TREAT = { waiting: 'Покормить (сначала занятие)', ready: 'Покормить', fed: 'Покормить (сегодня уже угостили)' };
-const KEEP = ['pet', 'name', 'motion', 'coat', 'accessory'];
 
 const time = () => new Date().toTimeString().slice(0, 8);
 const next = (list, value) => list[(list.indexOf(value) + 1) % list.length];
@@ -25,6 +24,10 @@ const next = (list, value) => list[(list.indexOf(value) + 1) % list.length];
 // терминале Metro: доказательство запуска на устройстве вместе со снимками экрана. В Node-проверке __DEV__ нет.
 const trace = (text) => globalThis.__DEV__ && console.log(`[PET] ${text}`);
 const mark = (value) => (value.ok === true ? '✓' : value.ok === false ? '✗' : '·');
+// Черновик имени принадлежит паре «ядро и показанный питомец» (draft — { core, pet, text }): для другой пары его нет. Смена
+// питомца (кнопкой, прямой командой ядра, записью из хранилища) или ядра (отключение, подключение, «Новое ядро», следующий
+// день) его не переносит — поле показывает сохранённое имя, «Сохранить имя» чужой черновик не применит.
+const draftOf = (draft, core, state) => (draft && core && state && draft.core === core && draft.pet === state.pet.shown ? draft.text : null);
 
 // Владение ядром: у подключённого экрана — запись own { live, core, turn, before }: текущее ядро, номер последнего создания
 // и подтверждённое на момент отключения. Созданное ядро принимается, только если экран ещё подключён и создание — последнее;
@@ -44,6 +47,7 @@ export default function App() {
   const [lines, setLines] = useState([]);
   const [checks, setChecks] = useState({});
   const [note, setNote] = useState('');
+  // Несохранённый ввод имени: { core, pet, text } — см. draftOf.
   const [draft, setDraft] = useState(null);
   // Запись владения подключённого экрана (null — экран не подключён): после размонтирования экран своё состояние не меняет.
   const owner = useRef(null);
@@ -72,25 +76,26 @@ export default function App() {
     trace(`итог: ${text}`);
     if (important) AccessibilityInfo.announceForAccessibility?.(text);
   }, []);
-  // Сверка после start: перезапуск — сразу по загруженному; переподключение — по первому снимку, где записи ключей
-  // питомца подтверждены (start сам пишет день приветствия — до его подтверждения сверять рано).
+  // Сверка после start по дню хоста (want.host — его часы; лакомство сверяется только в тот же день): перезапуск — сразу
+  // по загруженному; переподключение — по первому снимку, где записи ключей питомца подтверждены (start сам пишет день
+  // приветствия — до его подтверждения сверять рано).
   const settle = useCallback(
     (state) => {
       const want = follow.current;
       if (!want || !state || state.status !== 'running') return;
+      const day = want.host.today();
       if (want.reason === 'restart') {
         follow.current = null;
-        const result = restartCheck(want.expected, state);
+        const result = restartCheck(want.expected, state, day);
         check('Перезапуск с тем же файлом', result);
         say(`перезапуск: ${result.text}`);
         return;
       }
-      const now = confirmed(state);
+      const now = confirmed(state, day);
       if (!now) return;
       follow.current = null;
-      const fields = want.reason === 'Следующий день' ? KEEP : undefined;
-      const ok = !want.before || same(want.before, now, fields);
-      check(want.reason === 'Новое ядро' ? 'destroy → load → новое ядро' : `${want.reason}: восстановлено`, { ok, text: `${now.pet} / ${now.name} / ${now.motion} / ${now.coat} / ${now.accessory} / ${now.treat}` });
+      const result = want.before ? compare(want.before, now, day) : { ok: true, text: `${now.pet} / ${now.name} / ${now.motion} / ${now.coat} / ${now.accessory} / ${now.treat}` };
+      check(want.reason === 'Новое ядро' ? 'destroy → load → новое ядро' : `${want.reason}: восстановлено`, result);
     },
     [check, say],
   );
@@ -106,7 +111,7 @@ export default function App() {
       const opened = await openStore();
       const { core: first, status } = await newCore(opened);
       if (!adopt(own, 1, first)) return;
-      follow.current = { reason: 'restart', expected: opened.expected };
+      follow.current = { reason: 'restart', expected: opened.expected, host: opened.host };
       setStore(opened);
       setCore(first);
       say(`хранилище: ${status}; день хоста ${opened.host?.today?.() ?? '—'}`);
@@ -143,7 +148,7 @@ export default function App() {
         if (now.page !== last.page) say(`поза: ${last.page} → ${now.page}`);
         last = now;
         settle(s);
-        const value = confirmed(s);
+        const value = confirmed(s, store.host.today());
         if (value) remember(store.db, value).catch((error) => say(`диагностика не записана: ${error?.message ?? error}`));
       },
       { initial: false },
@@ -155,6 +160,17 @@ export default function App() {
     const subscription = AppState.addEventListener('change', (state) => say(`AppState: ${state}`));
     return () => subscription.remove();
   }, [say]);
+
+  // Черновик другой пары (draftOf) снимается, а не откладывается: вернувшись к прежнему питомцу, поле покажет его
+  // сохранённое имя.
+  useEffect(() => {
+    if (!draft || draftOf(draft, core, pet) !== null) return;
+    setDraft(null);
+    say(`черновик имени «${draft.text}» (${draft.pet}) снят: ${draft.core === core ? `показан ${pet?.pet.shown}` : 'ядро сменилось'}`);
+  }, [draft, core, pet, say]);
+  // Смена ядра заканчивает ввод: поле теряет фокус, его onBlur снимает тишину ввода; у нового ядра её нет, пока владелец
+  // снова не начнёт ввод.
+  useEffect(() => () => nameField.current?.blur?.(), [core]);
 
   // Итог команды ядра: отказ — его текст (ядро пишет по-русски), успех — судьба записи; поздний итог — тоже.
   const report = (title, result) => {
@@ -181,14 +197,14 @@ export default function App() {
     const own = owner.current;
     if (!own || !store) return;
     const turn = ++own.turn;
-    const before = own.core ? confirmed(own.core.getState()) : own.before;
+    const before = own.core ? confirmed(own.core.getState(), store.host.today()) : own.before;
     own.core?.destroy();
     own.core = null;
     setCore(null);
     try {
       const { core: fresh, status } = await newCore(store);
       if (!adopt(own, turn, fresh)) return;
-      follow.current = { reason, before };
+      follow.current = { reason, before, host: store.host };
       setCore(fresh);
       say(`${reason}: новое ядро после load (${status}): ${fresh.getState().name.display} / ${fresh.getState().prefs.motion}`);
       tell(reason === 'Подключение' ? 'Питомец подключён' : `${reason}: ядро заново`);
@@ -200,7 +216,7 @@ export default function App() {
     const own = owner.current;
     if (!own?.core) return;
     own.turn += 1;
-    own.before = confirmed(own.core.getState());
+    own.before = confirmed(own.core.getState(), store.host.today());
     own.core.destroy();
     own.core = null;
     setCore(null);
@@ -210,7 +226,7 @@ export default function App() {
   const nextDay = async () => {
     const own = owner.current;
     if (!own || !store) return;
-    own.before = own.core ? confirmed(own.core.getState()) : own.before;
+    own.before = own.core ? confirmed(own.core.getState(), store.host.today()) : own.before;
     own.turn += 1;
     own.core?.destroy();
     own.core = null;
@@ -257,10 +273,13 @@ export default function App() {
     say(`повтор notify ${lastKey.current}: ${result.ok ? `reacted ${result.reacted}, duplicate ${result.duplicate}` : result.error.code}`);
     tell(result.ok && result.duplicate ? 'Повтор того же занятия: реакции и знака нет' : 'Повтор: ' + (result.ok ? 'принят' : result.error.message), true);
   };
+  // Черновик сверяется с ядром и питомцем в момент нажатия (команда могла сменить питомца после отрисовки): чужой не
+  // применяется — тогда setName текущего имени, без изменений.
   const saveName = () => {
     const live = owner.current?.core;
     if (!live) return;
-    report('Имя', live.setName(draft ?? live.getState().name.value));
+    const now = live.getState();
+    report('Имя', live.setName(draftOf(draft, live, now) ?? now.name.value));
     setDraft(null);
     nameField.current?.blur?.();
   };
@@ -377,12 +396,12 @@ export default function App() {
           style={styles.input}
           accessibilityLabel="Имя питомца"
           accessibilityLabelledBy="name-label"
-          value={draft ?? state?.name.value ?? ''}
+          value={draftOf(draft, core, state) ?? state?.name.value ?? ''}
           placeholder={def.names.default}
           maxLength={40}
           editable={running}
           returnKeyType="done"
-          onChangeText={setDraft}
+          onChangeText={(text) => setDraft(core && state ? { core, pet: state.pet.shown, text } : null)}
           onFocus={() => typing(true)}
           onBlur={() => typing(false)}
           onSubmitEditing={saveName}

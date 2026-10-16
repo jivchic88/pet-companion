@@ -3,9 +3,11 @@
 // подделки system() из test/native-kit.mjs, которую проверка кладёт в globalThis.__petRN до импорта. Компоненты ничего не
 // рисуют: View, ScrollView, Pressable и Animated.View — только дети, Text и TextInput — ничего; каждый записывает свои
 // последние свойства по testID в записи своего экрана (test/fakes/expo-screen.mjs), Button — ещё и обработчик по
-// заголовку. Animated — Value (setValue, значение в value) и анимации timing / sequence / loop с учётом в
-// system().animations: start, stop, сама закончилась (end). Это не React Native и не устройство.
-import { createElement, Fragment, useContext } from 'react';
+// заголовку. TextInput по ref — focus(), blur() и isFocused(), как у настоящего поля: фокус меняется только через них, и
+// только смена фокуса вызывает onFocus / onBlur (blur без фокуса — ничего). Animated — Value (setValue, значение в value) и
+// анимации timing / sequence / loop с учётом в system().animations: start, stop, сама закончилась (end). Это не React
+// Native и не устройство.
+import { createElement, Fragment, useContext, useImperativeHandle, useRef } from 'react';
 import { Screen, screen, useRecord } from './expo-screen.mjs';
 
 const system = globalThis.__petRN;
@@ -26,6 +28,25 @@ export function Text(props) {
   return null;
 }
 export function TextInput(props) {
+  const field = useRef({ focused: false, props });
+  field.current.props = props;
+  useImperativeHandle(
+    props.ref,
+    () => ({
+      focus() {
+        if (field.current.focused) return;
+        field.current.focused = true;
+        field.current.props.onFocus?.();
+      },
+      blur() {
+        if (!field.current.focused) return;
+        field.current.focused = false;
+        field.current.props.onBlur?.();
+      },
+      isFocused: () => field.current.focused,
+    }),
+    [],
+  );
   useRecord('TextInput', props);
   return null;
 }

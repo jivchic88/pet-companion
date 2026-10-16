@@ -789,11 +789,13 @@ try {
   const extensionNode = await run(process.execPath, [path.join('extension', 'node.mjs')], { cwd: project }).then(({ stdout }) => JSON.parse(stdout.trim().split('\n').at(-1)), (error) => ({ failed: error.stderr || error.message }));
   check('Node: внешний пример расширения examples/extension/node.mjs на установленном архиве — кролик и живая модель через definePet/defineBehavior, ext:v1, лапы нет, лимит модели, сценка hop, запасной показ без определения, ошибочные ссылки отклонены', extensionNode.ok === true && extensionNode.pets?.join() === 'cat,dog,example.bunny' && extensionNode.ext?.pet?.id === 'example.bunny' && extensionNode.ext?.behavior === 'example.lively' && extensionNode.stored?.every((key) => key.startsWith('demo-ext:')) && extensionNode.warnings === 1, JSON.stringify(extensionNode));
   // PL09, PL10.1: логика мобильного примера (examples/expo/diagnostics.mjs) на установленном архиве; expo-sqlite — замена
-  // загрузчиком (тестовый драйвер node:sqlite, та же сигнатура openDatabaseAsync), три процесса подряд с одним файлом:
+  // загрузчиком (тестовый драйвер node:sqlite, та же сигнатура openDatabaseAsync), четыре процесса подряд с одним файлом:
   // первый — занятие хоста (запись, затем notify), кормление, собака, имя и облик, резервирование, занятый файл, новое
-  // ядро после load; второй — восстановление подтверждённого (питомец, имя, облик, лакомство дня и счёт хоста), повтор
-  // кормления — отказ ядра, сдвиг дня хоста — новое ядро ждёт занятия; третий — сдвиг дня сохранён. Не устройство: React
-  // Native, Metro и настоящий expo-sqlite здесь не участвуют.
+  // ядро после load; второй — тот же день: восстановление подтверждённого (питомец, имя, облик, лакомство дня и счёт
+  // хоста), повтор кормления — отказ ядра, сдвиг дня хоста — новое ядро ждёт занятия; третий — следующий день, сдвиг
+  // сохранён: подтверждённое первого дня восстановлено, лакомство нового дня (waiting) не сверяется (доработка PL10.1),
+  // затем занятие этого дня — запись подтверждённого; четвёртый — тот же следующий день: сверено целиком, ready. Не
+  // устройство: React Native, Metro и настоящий expo-sqlite здесь не участвуют.
   await mkdir(path.join(project, 'expo', 'fake'), { recursive: true });
   await cp(path.join(root, 'examples', 'expo', 'diagnostics.mjs'), path.join(project, 'expo', 'diagnostics.mjs'));
   for (const file of ['sqlite-driver.mjs', 'sqlite-worker.mjs']) await cp(path.join(root, 'test', file), path.join(project, 'expo', 'fake', file));
@@ -820,7 +822,12 @@ const store = await D.openStore();
 const made = await D.newCore(store);
 const core = made.core;
 core.start();
-const out = { mode, status: made.status, restart: D.restartCheck(store.expected, core.getState()), shift: store.host.shift, today: store.host.progress().today, treat: core.getState().treat };
+const out = { mode, status: made.status, restart: D.restartCheck(store.expected, core.getState(), store.host.today()), shift: store.host.shift, today: store.host.progress().today, treat: core.getState().treat };
+// Подтверждённое — когда записи ключей дошли (start пишет день приветствия).
+const settled = async () => {
+  for (let i = 0; i < 100 && !D.confirmed(core.getState(), store.host.today()); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  return D.confirmed(core.getState(), store.host.today());
+};
 if (mode === 'first') {
   await store.host.save('k1');
   out.reacted = core.notify('saved', { key: 'k1', counted: true }).reacted;
@@ -828,7 +835,7 @@ if (mode === 'first') {
   out.pet = await core.setPet('dog').save.done;
   out.saved = await core.setName('Пиксель').save.done;
   out.coat = await core.setAppearance({ coat: 'spotted' }).save.done;
-  out.kept = D.confirmed(core.getState());
+  out.kept = await settled();
   await D.remember(store.db, out.kept);
   out.reserve = await D.reserveProbe(store.scenes, '2026-10-16');
   const busy = await D.busyProbe(store.db, core, 'Дымок');
@@ -844,6 +851,11 @@ if (mode === 'first') {
   const next = await D.newCore(store);
   next.core.start();
   out.next = { treat: next.core.getState().treat, today: next.core.getState().progress.today, pet: next.core.getState().pet.shown };
+} else if (mode === 'third') {
+  await store.host.save('k2');
+  out.reacted = core.notify('saved', { key: 'k2', counted: true }).reacted;
+  out.kept = await settled();
+  await D.remember(store.db, out.kept);
 }
 console.log(JSON.stringify(out));
 process.exit(0);
@@ -854,13 +866,17 @@ process.exit(0);
   const firstRun = await expo('first');
   const secondRun = await expo('second');
   const thirdRun = await expo('third');
+  const fourthRun = await expo('fourth');
+  const skipped = (run) => /; лакомство не сверяется/.test(run.restart?.text ?? '');
   check(
-    'Node: логика мобильного примера examples/expo/diagnostics.mjs на установленном архиве (expo-sqlite — замена на node:sqlite): занятие хоста — запись, затем notify и реакция; кормление, собака, имя и облик — saved; резервирование дня — shown, затем skip; занятый файл — failed после ожидания; новое ядро после load — подтверждённое; второй процесс — «восстановлено» (собака, Пиксель, облик, лакомство дня, счёт хоста), повтор кормления — treat-fed, сдвиг дня — новое ядро ждёт занятия; третий процесс — сдвиг сохранён',
+    'Node: логика мобильного примера examples/expo/diagnostics.mjs на установленном архиве (expo-sqlite — замена на node:sqlite): занятие хоста — запись, затем notify и реакция; кормление, собака, имя и облик — saved, подтверждённое — с днём хоста; резервирование дня — shown, затем skip; занятый файл — failed после ожидания; новое ядро после load — подтверждённое; второй процесс (тот же день) — «восстановлено» вместе с лакомством (собака, Пиксель, облик, fed, счёт хоста), повтор кормления — treat-fed, сдвиг дня — новое ядро ждёт занятия; третий (следующий день, сдвиг сохранён) — «восстановлено», лакомство нового дня (waiting) не сверяется, занятие — ready записано; четвёртый (тот же следующий день) — сверено целиком',
     firstRun.status === 'ready' && firstRun.restart?.ok === null && firstRun.treat === 'waiting' && firstRun.reacted === true && firstRun.fed === 'saved' && firstRun.pet === 'saved' && firstRun.saved === 'saved' && firstRun.coat === 'saved' &&
-      firstRun.kept?.pet === 'dog' && firstRun.kept.name === 'Пиксель' && firstRun.kept.coat === 'spotted' && firstRun.kept.treat === 'fed' && firstRun.reserve?.ok && firstRun.reserve.first === 'shown' && firstRun.busy?.ok && firstRun.busy.slow &&
-      firstRun.renewed?.status === 'ready' && firstRun.renewed.name === 'Пиксель' && secondRun.restart?.ok === true && secondRun.today === 1 && secondRun.treat === 'fed' && secondRun.reserve?.first === 'skip' && secondRun.reserve.ok && secondRun.again === 'treat-fed' &&
-      secondRun.shifted === 1 && secondRun.next?.treat === 'waiting' && secondRun.next.today === 0 && secondRun.next.pet === 'dog' && thirdRun.shift === 1 && thirdRun.today === 0 && thirdRun.treat === 'waiting',
-    JSON.stringify({ firstRun, secondRun, thirdRun }),
+      firstRun.kept?.v === 3 && /^\d{4}-\d\d-\d\d$/.test(firstRun.kept.day) && firstRun.kept.pet === 'dog' && firstRun.kept.name === 'Пиксель' && firstRun.kept.coat === 'spotted' && firstRun.kept.treat === 'fed' && firstRun.reserve?.ok && firstRun.reserve.first === 'shown' && firstRun.busy?.ok && firstRun.busy.slow &&
+      firstRun.renewed?.status === 'ready' && firstRun.renewed.name === 'Пиксель' && secondRun.restart?.ok === true && !skipped(secondRun) && secondRun.today === 1 && secondRun.treat === 'fed' && secondRun.reserve?.first === 'skip' && secondRun.reserve.ok && secondRun.again === 'treat-fed' &&
+      secondRun.shifted === 1 && secondRun.next?.treat === 'waiting' && secondRun.next.today === 0 && secondRun.next.pet === 'dog' && thirdRun.shift === 1 && thirdRun.today === 0 && thirdRun.treat === 'waiting' &&
+      thirdRun.restart?.ok === true && skipped(thirdRun) && thirdRun.reacted === true && thirdRun.kept?.treat === 'ready' && thirdRun.kept.day !== firstRun.kept.day && thirdRun.kept.name === 'Пиксель' &&
+      fourthRun.restart?.ok === true && !skipped(fourthRun) && fourthRun.shift === 1 && fourthRun.today === 1 && fourthRun.treat === 'ready',
+    JSON.stringify({ firstRun, secondRun, thirdRun, fourthRun }),
   );
   await rm(expoDir, { recursive: true, force: true });
 

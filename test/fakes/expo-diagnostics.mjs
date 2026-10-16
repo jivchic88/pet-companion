@@ -9,11 +9,15 @@
 // (кладёт проверка). Записи хоста (example_marks, example_clock) — box.hostWrites; отказ записи хоста — box.hostFail.
 // Экрану отдаётся то же ядро через делегирующую обёртку (ядро заморожено): каждый notify записывается в box.notifies вместе
 // со счётом хоста в момент вызова — так видно, что подтверждённое занятие сначала записано хостом, а затем сообщено.
+// Файл примера между запусками экрана — по желанию проверки: box.disk = { days, shift, diag } — счёт и сдвиг дня хоста и
+// последняя диагностическая запись переживают размонтирование, как таблицы example_marks, example_clock и example_diag
+// настоящей базы, и openStore читает их, как настоящий; без box.disk — хост с нуля и без записи.
 import { createCoordinator, publicStorage } from '../../pet/core/storage.mjs';
 import { createHost, newCore as realNewCore } from '../../examples/expo/diagnostics.mjs';
 import { CORE_KEYS } from '../core-kit.mjs';
 
-export { busyProbe, confirmed, MOTIONS, NAMES, PETS, reserveProbe, restartCheck, same } from '../../examples/expo/diagnostics.mjs';
+// Остальное (confirmed, сверки, пробы, имена) — настоящее; свои openStore, newCore и remember ниже заменяют одноимённые.
+export * from '../../examples/expo/diagnostics.mjs';
 
 const box = globalThis.__petExample;
 const data = new Map();
@@ -58,14 +62,17 @@ const storage = publicStorage(
 export async function openStore() {
   box.opens += 1;
   await null;
+  const disk = box.disk;
   const db = {
-    async runAsync(sql) {
+    async runAsync(sql, params = []) {
       await null;
       if (box.hostFail) throw new Error('запись хоста: отказ проверки');
       box.hostWrites.push(sql.split(' ').slice(0, 3).join(' '));
+      if (sql.startsWith('INSERT INTO example_marks') && disk) disk.days[params[1]] = (disk.days[params[1]] ?? 0) + 1;
+      if (sql.startsWith('INSERT INTO example_clock') && disk) disk.shift = params[0];
     },
   };
-  return { db, expected: null, storage, scenes: null, host: createHost(db) };
+  return { db, expected: disk?.diag ?? null, storage, scenes: null, host: createHost(db, disk ? { days: disk.days, shift: disk.shift } : {}) };
 }
 
 function watched(core, store) {
@@ -87,6 +94,7 @@ export async function newCore(store, progress) {
   return { ...made, core };
 }
 
-export async function remember() {
+export async function remember(db, value) {
   box.remembered += 1;
+  if (box.disk) box.disk.diag = JSON.parse(JSON.stringify(value));
 }

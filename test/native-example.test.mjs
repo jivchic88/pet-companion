@@ -9,18 +9,23 @@
 // состояния экрана после размонтирования (обычный запуск, «Новое ядро», размонтирование при ожидающей загрузке, два
 // конкурирующих «Новое ядро», команда в полёте, StrictMode, соседний экран). PL10.1 — хост и питомец: подтверждённое
 // занятие сначала в счёте хоста, затем notify и реакция на рисунке; отказ хоста — без знака; повтор — без новой реакции;
-// кормление по ядру и его повтор; ввод имени (тишина ввода); отключение и подключение; следующий день.
+// кормление по ядру и его повтор; ввод имени (тишина ввода); отключение и подключение; следующий день. Доработка PL10.1 —
+// черновик имени принадлежит ядру и показанному питомцу (смена кнопкой, прямой командой ядра, в такте нажатия, отключение
+// и подключение, «Новое ядро»; фокус и тишина ввода); сверка перезапуска по дню хоста — через экран (файл примера между
+// запусками, box.disk) и на настоящей логике примера с публичным ядром (тот же и следующий день, потерянная запись,
+// прежние форматы записи).
 // Это Node и подделки React Native, не устройство: запуск на телефоне — examples/expo/README.md.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire, registerHooks } from 'node:module';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { calendar, flush, host as counter } from './core-kit.mjs';
 import { nodeRoot, system } from './native-kit.mjs';
 
 const rn = system();
 globalThis.__petRN = rn;
-const box = { cores: [], opens: 0, connections: 0, saved: 0, remembered: 0, manual: false, waiting: [], holdWrites: null, hostWrites: [], hostFail: false, notifies: [] };
+const box = { cores: [], opens: 0, connections: 0, saved: 0, remembered: 0, manual: false, waiting: [], holdWrites: null, hostWrites: [], hostFail: false, notifies: [], disk: null };
 globalThis.__petExample = box;
 
 const require = createRequire(import.meta.url);
@@ -47,16 +52,22 @@ registerHooks({
 const { default: App } = await import(APP);
 const { Screen, screen } = await import(fake('expo-screen.mjs'));
 const { catNative, dogNative } = await import('../pet/native.mjs');
+const D = await import('../examples/expo/diagnostics.mjs');
+const { createStorage } = await import('../pet/core.mjs');
 
 const { act } = nodeRoot();
 // Изоляция и после упавшей проверки: корни размонтированы, удержания отпущены, оставшиеся ядра уничтожены — следующая
 // проверка начинает без чужих слушателей, подключений и стоящей очереди ключа.
 const roots = [];
 const held = [];
+// Ядра сверки перезапуска (files() ниже): у них настоящий планировщик — уничтожаются и после упавшей проверки.
+const opened = [];
 test.afterEach(async () => {
+  for (const core of opened.splice(0)) core.destroy();
   for (const R of roots.splice(0)) await R.unmount();
   box.manual = false;
   box.hostFail = false;
+  box.disk = null;
   await act(() => {
     for (const open of held.splice(0)) open();
     for (const gate of box.waiting.splice(0)) gate.resolve();
@@ -357,4 +368,303 @@ test('следующий день (PL10.1): сдвиг дня хоста зап�
   await act();
   assert.match(String(S.node('check:Следующий день: восстановлено')?.children), /^✓/, 'start нового дня пишет день приветствия — сверка ждёт подтверждения, а не даёт ложный ✗');
   await S.unmount();
+});
+
+// Черновик имени (доработка PL10.1 по независимой проверке Codex): имена обоих питомцев в ядре — [кот, собака]; поле
+// имени — его последние свойства (value, editable, ref подделки с focus / blur / isFocused).
+const names = (core) => ['cat', 'dog'].map((id) => core.getState().pets[id].name.display);
+const field = (S) => S.node('name-input');
+// Питомец id с сохранённым именем name — обычным вводом и «Сохранить имя».
+async function named(S, id, name) {
+  await S.press(`kind-${id}`);
+  await act();
+  await S.type('name-input', name);
+  await S.press('name-save');
+  await act();
+}
+
+test('черновик имени: обычное редактирование — имя своему питомцу; несохранённый ввод кота при выборе собаки кнопкой к ней не переходит — в поле имя собаки, «Сохранить имя» и Enter не меняют ни одного имени; у кота черновик снят, а не отложен', async () => {
+  const { S, core } = await running('draft-pick');
+  await S.press('kind-cat');
+  await act();
+  await act(() => field(S).ref.current.focus());
+  assert.deepEqual(core.getState().context.quiet, ['typing'], 'фокус поля — тишина ввода');
+  await S.type('name-input', 'Барсик');
+  await S.press('name-save');
+  await act();
+  assert.deepEqual([field(S).ref.current.isFocused(), core.getState().context.quiet], [false, []], 'сохранение снимает фокус и тишину ввода');
+  await S.press('kind-dog');
+  await act();
+  await S.type('name-input', 'Рекс');
+  await act(() => field(S).onSubmitEditing());
+  await act();
+  assert.deepEqual(names(core), ['Барсик', 'Рекс'], 'обычное редактирование: каждому — своё имя');
+
+  await S.press('kind-cat');
+  await act();
+  await act(() => field(S).ref.current.focus());
+  await S.type('name-input', 'CatDraft');
+  assert.equal(field(S).value, 'CatDraft');
+  await S.press('kind-dog');
+  await act();
+  assert.deepEqual([core.getState().pet.shown, field(S).value], ['dog', 'Рекс'], 'в поле — имя собаки, не черновик кота');
+  assert.deepEqual(core.getState().context.quiet, ['typing'], 'поле по-прежнему в фокусе — тишина ввода остаётся');
+  await S.press('name-save');
+  await act();
+  assert.deepEqual(names(core), ['Барсик', 'Рекс'], '«Сохранить имя» не переименовало собаку черновиком кота');
+  await act(() => field(S).onSubmitEditing());
+  await act();
+  assert.deepEqual(names(core), ['Барсик', 'Рекс'], 'Enter — тоже');
+  await S.press('kind-cat');
+  await act();
+  assert.equal(field(S).value, 'Барсик');
+  // Без сохранения: черновик кота → собака → снова кот.
+  await S.type('name-input', 'CatDraft');
+  await S.press('kind-dog');
+  await act();
+  await S.press('kind-cat');
+  await act();
+  assert.equal(field(S).value, 'Барсик', 'у кота — сохранённое имя: черновик снят при смене, а не отложен');
+  await S.press('name-save');
+  await act();
+  assert.deepEqual(names(core), ['Барсик', 'Рекс']);
+  await S.unmount();
+});
+
+test('черновик имени: смена питомца прямой командой ядра (не кнопкой экрана) — черновик не переходит; «Сохранить имя» в одном такте со сменой (обработчик отрисовки с черновиком кота) сверяет черновик с питомцем ядра в момент нажатия', async () => {
+  const { S, core } = await running('draft-direct');
+  await named(S, 'cat', 'Барсик');
+  await named(S, 'dog', 'Рекс');
+  await act(() => core.setPet('cat'));
+  await S.type('name-input', 'CatDraft');
+  await act(() => core.setPet('dog'));
+  assert.equal(field(S).value, 'Рекс');
+  await S.press('name-save');
+  await act();
+  assert.deepEqual(names(core), ['Барсик', 'Рекс']);
+
+  await act(() => core.setPet('cat'));
+  await S.type('name-input', 'CatDraft');
+  const save = S.node('name-save').onPress;
+  await act(() => {
+    core.setPet('dog');
+    save();
+  });
+  await act();
+  assert.deepEqual(names(core), ['Барсик', 'Рекс'], 'черновик кота не сохранён собаке');
+  await act(() => core.setPet('cat'));
+  assert.equal(field(S).value, 'Барсик');
+  await S.unmount();
+});
+
+test('черновик имени: отключение и подключение, «Новое ядро» — несохранённый ввод не переходит в новое ядро; смена ядра снимает фокус поля, у нового ядра тишины ввода нет; сохранение имени после этого — прежним setName текущему питомцу', async () => {
+  const { S, core } = await running('draft-core');
+  await named(S, 'dog', 'Рекс');
+  await named(S, 'cat', 'Барсик');
+  await act(() => field(S).ref.current.focus());
+  await S.type('name-input', 'CatDraft');
+  assert.deepEqual(core.getState().context.quiet, ['typing']);
+  await S.press('pet-off');
+  assert.deepEqual([field(S).ref.current.isFocused(), field(S).value, field(S).editable], [false, '', false], 'ядра нет: фокус снят, поле пустое и недоступно');
+  await S.press('pet-on');
+  await act(() => rn.answer(false));
+  const fresh = box.cores.at(-1);
+  assert.deepEqual([fresh.status, field(S).value, fresh.getState().context.quiet], ['running', 'Барсик', []], 'новое ядро: сохранённое имя, тишины ввода нет');
+  await S.press('name-save');
+  await act();
+  assert.deepEqual(names(fresh), ['Барсик', 'Рекс']);
+
+  await act(() => field(S).ref.current.focus());
+  await S.type('name-input', 'CatDraft');
+  await S.press('diag-renew');
+  await act(() => rn.answer(false));
+  const renewed = box.cores.at(-1);
+  assert.deepEqual([renewed.status, field(S).ref.current.isFocused(), field(S).value, renewed.getState().context.quiet], ['running', false, 'Барсик', []]);
+  await S.press('name-save');
+  await act();
+  assert.deepEqual(names(renewed), ['Барсик', 'Рекс'], 'черновик прежнего ядра не сохранён');
+  await S.type('name-input', 'Дымок');
+  await S.press('name-save');
+  await act();
+  assert.deepEqual([names(renewed), renewed.getState().save.cat.status], [['Дымок', 'Рекс'], 'saved'], 'имя текущему питомцу — как раньше');
+  await S.unmount();
+});
+
+// Сверка перезапуска (доработка PL10.1): лакомство — производное ядра (записанный день кормления, счёт хоста, текущий
+// день), поэтому сравнимо только в тот же день хоста. Через экран: файл примера между запусками (box.disk), сдвиг дня —
+// календарь хоста ушёл вперёд, пока процесса не было; строка проверки — «✓ …» или «✗ …».
+const restartMark = (S) => String(S.node('check:Перезапуск с тем же файлом')?.children);
+
+test('перезапуск экрана по дню хоста: тот же день после кормления — ✓; следующий день без занятия (ядро: waiting) — ✓, а не ложное «НЕ совпало»; тот же следующий день после занятия — ✓', async () => {
+  // Свой день хоста (+30) — без лакомства прежних проверок этого файла.
+  box.disk = { days: {}, shift: 30, diag: null };
+  const first = await running('restart-day');
+  assert.match(restartMark(first.S), /^· /, 'первый запуск — сверять не с чем');
+  await first.S.press('host-save');
+  await act();
+  await first.S.press('pet-feed');
+  await act();
+  assert.deepEqual([first.core.getState().treat, box.disk.diag?.treat], ['fed', 'fed'], 'кормление подтверждено и записано диагностикой');
+  const fedDay = box.disk.diag.day;
+  await first.S.unmount();
+
+  const same = await running('restart-same');
+  assert.match(restartMark(same.S), /^✓ /, 'тот же день');
+  await same.S.unmount();
+
+  box.disk.shift += 1;
+  const next = await running('restart-next');
+  assert.equal(next.core.getState().treat, 'waiting', 'ядро: лакомство нового дня ждёт занятия');
+  assert.match(restartMark(next.S), /^✓ /, 'следующий день без занятия — не потеря данных');
+  await next.S.press('host-save');
+  await act();
+  assert.deepEqual([next.core.getState().treat, box.disk.diag?.treat], ['ready', 'ready']);
+  assert.notEqual(box.disk.diag.day, fedDay, 'запись — уже за следующий день');
+  await next.S.unmount();
+
+  const after = await running('restart-after');
+  assert.match(restartMark(after.S), /^✓ /, 'следующий день после занятия');
+  await after.S.unmount();
+});
+
+// Настоящая логика примера (newCore, confirmed, restartCheck) и публичное ядро: «файл» — записи ключей в Map, процесс —
+// новое хранилище над ними (барьер загрузки) и новое ядро; часы и счёт хоста — ручные (core-kit), день хоста — день этих
+// часов. Потерянная запись — файл, откатившийся к прежнему снимку после того, как ядро её подтвердило.
+function files() {
+  const data = new Map();
+  const time = calendar();
+  const counts = counter(0, 0);
+  const today = () => time.day(time.state.now);
+  return {
+    data,
+    time,
+    counts,
+    today,
+    nextDay: () => (time.state.now += 86_400_000),
+    restore: (copy) => {
+      data.clear();
+      for (const [key, value] of copy) data.set(key, value);
+    },
+    async open() {
+      const storage = createStorage({ backend: { async: true, get: async (key) => (data.has(key) ? data.get(key) : null), set: async (key, value) => void data.set(key, value) } });
+      const { core, status } = await D.newCore({ storage, host: { clock: time.port, progress: counts.progress } });
+      opened.push(core);
+      assert.equal(status, 'ready');
+      core.start();
+      return core;
+    },
+    // Подтверждённое в день хоста — когда записи ключей дошли; как его хранит пример (JSON).
+    async confirm(core) {
+      for (let i = 0; i < 20 && !D.confirmed(core.getState(), today()); i += 1) await flush();
+      const value = D.confirmed(core.getState(), today());
+      assert.ok(value, 'подтверждено');
+      return JSON.parse(JSON.stringify(value));
+    },
+  };
+}
+
+test('сверка перезапуска (diagnostics): тот же день после кормления — лакомство сверено; следующий день без занятия — восстановлено, лакомство нового дня (waiting) не сверяется; следующий день после занятия — восстановлено, подтверждённое того дня — сверено целиком', async () => {
+  const F = files();
+  let core = await F.open();
+  F.counts.set(1, 1);
+  assert.equal(core.notify('saved', { key: 'd1', counted: true }).ok, true);
+  assert.equal(await core.feed().save.done, 'saved');
+  const fed = await F.confirm(core);
+  assert.deepEqual([fed.v, fed.day, fed.treat], [3, F.today(), 'fed']);
+  core.destroy();
+
+  core = await F.open();
+  let result = D.restartCheck(fed, core.getState(), F.today());
+  assert.equal(result.ok, true, result.text);
+  assert.match(result.text, /^восстановлено: подтверждено .+ \/ fed, загружено .+ \/ fed$/, 'тот же день: лакомство сверено');
+  core.destroy();
+
+  F.nextDay();
+  F.counts.set(1, 0);
+  core = await F.open();
+  assert.equal(core.getState().treat, 'waiting');
+  result = D.restartCheck(fed, core.getState(), F.today());
+  assert.equal(result.ok, true, result.text);
+  assert.match(result.text, new RegExp(`^восстановлено: .+; лакомство не сверяется — подтверждено fed за ${fed.day}, сегодня ${F.today()}: waiting`));
+  core.destroy();
+
+  F.counts.set(2, 1);
+  core = await F.open();
+  assert.equal(core.getState().treat, 'ready');
+  result = D.restartCheck(fed, core.getState(), F.today());
+  assert.equal(result.ok, true, result.text);
+  const ready = await F.confirm(core);
+  assert.deepEqual([ready.day, ready.treat], [F.today(), 'ready']);
+  core.destroy();
+  core = await F.open();
+  result = D.restartCheck(ready, core.getState(), F.today());
+  assert.equal(result.ok, true, result.text);
+  assert.match(result.text, /\/ ready, загружено .+ \/ ready$/, 'подтверждённое этого дня сверено вместе с лакомством');
+  core.destroy();
+});
+
+test('сверка перезапуска (diagnostics): настоящее несовпадение обнаруживается — потерянные имя и кормление в тот же день, потерянное имя на следующий день, потерянное только кормление в тот же день', async () => {
+  const F = files();
+  let core = await F.open();
+  F.counts.set(1, 1);
+  core.notify('saved', { key: 'd1', counted: true });
+  await F.confirm(core);
+  const before = new Map(F.data);
+  assert.equal(await core.setName('Дымок').save.done, 'saved');
+  assert.equal(await core.feed().save.done, 'saved');
+  const expected = await F.confirm(core);
+  assert.deepEqual([expected.name, expected.treat], ['Дымок', 'fed']);
+  core.destroy();
+
+  F.restore(before);
+  core = await F.open();
+  let result = D.restartCheck(expected, core.getState(), F.today());
+  assert.equal(result.ok, false, result.text);
+  assert.match(result.text, /^НЕ совпало: подтверждено .+ \/ Дымок \/ .+ \/ fed, загружено .+ \/ ready$/);
+  core.destroy();
+
+  F.nextDay();
+  F.counts.set(1, 0);
+  core = await F.open();
+  result = D.restartCheck(expected, core.getState(), F.today());
+  assert.equal(result.ok, false, 'следующий день: лакомство не сверяется, сохранённые настройки — сверяются');
+  assert.match(result.text, /^НЕ совпало: подтверждено .+ \/ Дымок \/ .+; лакомство не сверяется/);
+  core.destroy();
+
+  const G = files();
+  core = await G.open();
+  G.counts.set(1, 1);
+  core.notify('saved', { key: 'd1', counted: true });
+  assert.equal(await core.setName('Дымок').save.done, 'saved');
+  await G.confirm(core);
+  const unfed = new Map(G.data);
+  assert.equal(await core.feed().save.done, 'saved');
+  const fed = await G.confirm(core);
+  core.destroy();
+  G.restore(unfed);
+  core = await G.open();
+  result = D.restartCheck(fed, core.getState(), G.today());
+  assert.equal(result.ok, false, 'потерянное кормление в тот же день');
+  assert.match(result.text, /\/ Дымок \/ .+ \/ fed, загружено .+ \/ Дымок \/ .+ \/ ready$/);
+  core.destroy();
+});
+
+test('сверка перезапуска (diagnostics): прежние записи читаются — v2 без дня сверяет настройки, лакомство без дня не сверяет; PL09 — имя и движение; без дня хоста confirmed и restartCheck отказывают TypeError', async () => {
+  const F = files();
+  const core = await F.open();
+  const now = await F.confirm(core);
+  const state = core.getState();
+  const v2 = { v: 2, pet: now.pet, name: now.name, motion: now.motion, coat: now.coat, accessory: now.accessory, treat: 'fed' };
+  let result = D.restartCheck(v2, state, F.today());
+  assert.equal(result.ok, true, result.text);
+  assert.match(result.text, /; лакомство не сверяется — в записи нет дня \(прежний формат\)$/);
+  result = D.restartCheck({ ...v2, coat: v2.coat === 'smoke' ? 'ginger' : 'smoke' }, state, F.today());
+  assert.equal(result.ok, false, 'v2: облик сверяется');
+  const pl09 = { name: state.name.display, motion: state.prefs.motion };
+  assert.equal(D.restartCheck(pl09, state, F.today()).ok, true);
+  assert.equal(D.restartCheck({ ...pl09, motion: pl09.motion === 'calm' ? 'normal' : 'calm' }, state, F.today()).ok, false);
+  assert.deepEqual(D.restartCheck(null, state, F.today()), { ok: null, text: 'первый запуск: сверять не с чем' });
+  assert.throws(() => D.confirmed(state), TypeError);
+  assert.throws(() => D.restartCheck(now, state), TypeError);
+  core.destroy();
 });

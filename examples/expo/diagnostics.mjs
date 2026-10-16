@@ -1,5 +1,6 @@
 // Логика мобильного примера без интерфейса (PL09, PL10.1): своя тестовая база и namespace, загрузка координатора перед
-// каждым новым ядром, счёт хоста, сверка подтверждённого после перезапуска, пробы резервирования дня и занятого файла.
+// каждым новым ядром, счёт хоста, сверка подтверждённого после перезапуска по дню хоста, пробы резервирования дня и
+// занятого файла.
 // Только публичные входы пакета и expo-sqlite; данные синтетические. Экран — App.js; та же логика проверяется в Node на
 // установленном архиве (test:package, expo-sqlite — замена на node:sqlite) — это не заменяет запуск на устройстве.
 //
@@ -90,28 +91,45 @@ export async function newCore(store, progress = store.host?.progress) {
 }
 
 // Подтверждённое (ключи cat, companion, look и treat без своих неразрешённых и несохранённых правок; счёт уже прочитан —
-// ядро запущено) или null: питомец, имя, движение, облик, аксессуар, лакомство дня.
+// ядро запущено) или null: питомец, имя, движение, облик, аксессуар, лакомство дня и day — день хоста, к которому
+// относится лакомство (store.host.today(): у ядра те же часы). Лакомство — не настройка, а вывод ядра из записанного дня
+// кормления, счёта хоста и текущего дня: то же сохранённое в другой день даёт другое лакомство, поэтому без дня его не с
+// чем сравнить. Без дня confirmed и сверки отказывают — проверка не ослабляется молча.
 const KEYS = ['cat', 'companion', 'look', 'treat'];
-export const confirmed = (snapshot) =>
-  snapshot && snapshot.treat !== null && KEYS.every((key) => snapshot.save[key].status === 'saved')
-    ? { v: 2, pet: snapshot.pet.shown, name: snapshot.name.display, motion: snapshot.prefs.motion, coat: snapshot.look.coat, accessory: snapshot.look.accessory, treat: snapshot.treat }
-    : null;
+const hostDay = (day) => {
+  if (typeof day !== 'string' || day === '') throw new TypeError('Нужен день хоста «ГГГГ-ММ-ДД» (store.host.today()).');
+};
+const loaded = (snapshot) => ({ pet: snapshot.pet.shown, name: snapshot.name.display, motion: snapshot.prefs.motion, coat: snapshot.look.coat, accessory: snapshot.look.accessory, treat: snapshot.treat });
+export const confirmed = (snapshot, day) => {
+  hostDay(day);
+  return snapshot && snapshot.treat !== null && KEYS.every((key) => snapshot.save[key].status === 'saved') ? { v: 3, day, ...loaded(snapshot) } : null;
+};
 
 export const remember = (db, value) => db.runAsync('INSERT INTO example_diag (id, value) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET value = excluded.value', [JSON.stringify(value)]);
 
-const FIELDS = ['pet', 'name', 'motion', 'coat', 'accessory', 'treat'];
+const SETTINGS = ['pet', 'name', 'motion', 'coat', 'accessory'];
 const show = (value, fields) => fields.map((field) => value[field]).join(' / ');
-// Совпадают ли два подтверждённых по полям fields (по умолчанию все).
-export const same = (a, b, fields = FIELDS) => Boolean(a && b) && fields.every((field) => a[field] === b[field]);
 
-// Сверка после перезапуска: загруженное и запущенное ядро — то, что было подтверждено до завершения процесса. Запись
-// прежнего формата PL09 (только имя и движение) сверяется по своим полям.
-export function restartCheck(expected, snapshot) {
+// Сверка подтверждённого expected с got (поля того же вида) в день хоста day. Сохранённые настройки сверяются всегда;
+// лакомство — только когда expected относится к этому же дню. В другой день лакомство нового дня решает ядро (его правил
+// здесь нет) — значение не сверяется, и итог об этом говорит. Записи прежних форматов читаются: v2 (без дня) — день
+// неизвестен, лакомство не сверяется; PL09 (без v) — только имя и движение.
+export function compare(expected, got, day) {
+  hostDay(day);
+  const known = expected.v === 2 || expected.v === 3;
+  const sameDay = expected.v === 3 && expected.day === day;
+  const fields = !known ? ['name', 'motion'] : sameDay ? [...SETTINGS, 'treat'] : SETTINGS;
+  const ok = fields.every((field) => expected[field] === got[field]);
+  let text = `${ok ? 'восстановлено' : 'НЕ совпало'}: подтверждено ${show(expected, fields)}, загружено ${show(got, fields)}`;
+  if (known && !sameDay) text += expected.v === 3 ? `; лакомство не сверяется — подтверждено ${expected.treat} за ${expected.day}, сегодня ${day}: ${got.treat} (новый день решает ядро)` : '; лакомство не сверяется — в записи нет дня (прежний формат)';
+  return { ok, text };
+}
+
+// Сверка после перезапуска: загруженное и запущенное ядро — то, что было подтверждено до завершения процесса (compare).
+export function restartCheck(expected, snapshot, day) {
+  hostDay(day);
   if (!expected) return { ok: null, text: 'первый запуск: сверять не с чем' };
-  const fields = expected.v === 2 ? FIELDS : ['name', 'motion'];
-  const got = { pet: snapshot.pet.shown, name: snapshot.name.display, motion: snapshot.prefs.motion, coat: snapshot.look.coat, accessory: snapshot.look.accessory, treat: snapshot.treat };
-  const ok = same(expected, got, fields);
-  return { ok, text: `${ok ? 'восстановлено' : 'НЕ совпало'}: подтверждено ${show(expected, fields)}, загружено ${show(got, fields)}` };
+  return compare(expected, loaded(snapshot), day);
 }
 
 // Резервирование дня (диагностика, своё пространство): две попытки подряд — не больше одного показа за день.
