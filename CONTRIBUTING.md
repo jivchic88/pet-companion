@@ -54,7 +54,7 @@ npm run test:package   # упакованный архив, установка, 
 npm run test:consumers # архив в чистых проектах: Vite, React 18 и 19, SSR и гидратация (сеть или кэш npm)
 ```
 
-Те же четыре команды выполняет CI (`.github/workflows/ci.yml`) на каждый push и pull request. Нативную платформу эти команды не проверяют: Node с подделками React Native и `react-native-svg` подтверждает контракт отображения, а запуск на iOS и Android — пример `examples/expo/` (его README: запуск в iOS Simulator, касания XCUITest, матрица доказательств; симулятор, эмулятор и телефон — разные отметки). Перечень файлов: `npm run manifest` — пересобрать после изменения состава модулей, `node scripts/manifest.mjs --check` — сверить (то же делает `npm test`).
+Те же четыре команды выполняет CI (`.github/workflows/ci.yml`) на каждый push и pull request. Нативную платформу эти команды не проверяют: Node с подделками React Native и `react-native-svg` подтверждает контракт отображения, а запуск на iOS и Android — пример `examples/expo/` (его README: запуск в iOS Simulator — касания XCUITest, запуск в Android-эмуляторе — касания `adb` по дереву UI Automator, матрица доказательств; симулятор, эмулятор и телефон — разные отметки). Перечень файлов: `npm run manifest` — пересобрать после изменения состава модулей, `node scripts/manifest.mjs --check` — сверить (то же делает `npm test`).
 
 ## Правила изменений
 
