@@ -6,7 +6,8 @@
 // копии пакета: новый модуль и новый стиль в графе — перечень устарел (для /web и /react, не для /core); импорт
 // несуществующего файла, путь за пределы пакета, необъявленная зависимость и адрес стиля не литералом (как в 290e949 —
 // перечисление через map) — перечень не собирается; испорченные перечни — каждая ошибка названа; стиль из комментария —
-// не ресурс.
+// не ресурс. PL09: входы /native (react, react-native) и /native-sqlite (expo-sqlite) — без веба, DOM и CSS; в загрузчике
+// react-native и expo-sqlite — заглушки (в devDependencies их нет), граф файлов пакета — настоящий.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -22,7 +23,7 @@ const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const stored = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
-const JS_ENTRIES = ['.', './core', './pets', './behaviors', './web', './react'];
+const JS_ENTRIES = ['.', './core', './pets', './behaviors', './web', './react', './native', './native-sqlite'];
 
 // Копия пакета (package.json, manifest.json, pet/) во временной папке; правка files: { путь: текст | (текст) => текст }.
 async function copy(edits = {}) {
@@ -57,13 +58,19 @@ test('перечень — только файлы исполнения внут
   for (const file of listed) assert.match(file, /^pet\/[\w/-]+\.(mjs|css)$/, file);
 });
 
-test('входы: стили страницы — только у mountPet (порядок каскада, pet-base.css по желанию); контейнер (/web, /react) — свои стили в files; peers — только react у /react; ядро и определения — без веба, React и CSS', () => {
+test('входы: стили страницы — только у mountPet (порядок каскада, pet-base.css по желанию); контейнер (/web, /react) — свои стили в files; peers — react у /react, react и react-native у /native, expo-sqlite у /native-sqlite; ядро, определения и натив — без веба и CSS', () => {
   const { entries } = stored;
   assert.deepEqual(entries['.'].styles, PAGE_STYLES['.'].map((style) => ({ ...style })));
   assert.deepEqual(entries['.'].styles.map((style) => [style.file, style.required]), [['pet/pet-base.css', false], ['pet/pet.css', true], ['pet/dog.css', true]]);
-  for (const entry of ['./core', './pets', './behaviors', './web', './react']) assert.deepEqual(entries[entry].styles, [], entry);
+  for (const entry of ['./core', './pets', './behaviors', './web', './react', './native', './native-sqlite']) assert.deepEqual(entries[entry].styles, [], entry);
   for (const entry of ['./web', './react']) for (const file of ['pet/pet-base.css', 'pet/pet.css', 'pet/dog.css', 'pet/web/view.css']) assert.ok(entries[entry].files.includes(file), `${entry}: ${file}`);
   assert.deepEqual(entries['./react'].peers, { react: pkg.peerDependencies.react });
+  // PL09: натив — только свой слой, общий хук и ядро; SQLite — только адаптер и ядро.
+  assert.deepEqual(entries['./native'].peers, { react: pkg.peerDependencies.react, 'react-native': pkg.peerDependencies['react-native'] });
+  assert.deepEqual(entries['./native-sqlite'].peers, { 'expo-sqlite': pkg.peerDependencies['expo-sqlite'] });
+  assert.ok(entries['./native'].files.every((file) => file === 'pet/native.mjs' || /^pet\/(native|hooks|core)\//.test(file)), `/native: ${entries['./native'].files.join(', ')}`);
+  assert.ok(entries['./native-sqlite'].files.every((file) => file === 'pet/native-sqlite.mjs' || /^pet\/(storage|core)\//.test(file)), `/native-sqlite: ${entries['./native-sqlite'].files.join(', ')}`);
+  for (const entry of ['.', './core', './pets', './behaviors', './web', './react']) assert.ok(!entries[entry].files.some((file) => /^pet\/(native|storage)(\/|\.|-)/.test(file)), `${entry} не достигает натива`);
   for (const entry of ['.', './core', './pets', './behaviors', './web']) {
     assert.deepEqual(entries[entry].peers, {}, entry);
     assert.ok(!entries[entry].files.some((file) => file === 'pet/react.mjs' || file.startsWith('pet/hooks/')), `${entry} без React`);
@@ -77,17 +84,22 @@ test('входы: стили страницы — только у mountPet (по
 // Модули, которые действительно загружает импорт входа (загрузчик Node, отдельный процесс на вход).
 async function loaded(module) {
   const base = pathToFileURL(`${root}${path.sep}`).href;
+  // react-native и expo-sqlite (партнёры /native и /native-sqlite) в проверках не установлены — заглушки загрузчика.
+  const stub = 'data:text/javascript,export const AppState = {}; export const AccessibilityInfo = {}; export function openDatabaseAsync() {}';
   const probe = `
     import { registerHooks } from 'node:module';
     const seen = new Set();
-    registerHooks({ load(url, context, next) { if (url.startsWith(${JSON.stringify(`${base}pet/`)})) seen.add(url.slice(${base.length})); return next(url, context); } });
+    registerHooks({
+      resolve(specifier, context, next) { return specifier === 'react-native' || specifier === 'expo-sqlite' ? { url: ${JSON.stringify(stub)}, shortCircuit: true } : next(specifier, context); },
+      load(url, context, next) { if (url.startsWith(${JSON.stringify(`${base}pet/`)})) seen.add(url.slice(${base.length})); return next(url, context); },
+    });
     await import(${JSON.stringify(new URL(module, base).href)});
     console.log(JSON.stringify([...seen].sort()));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: root });
   return JSON.parse(stdout);
 }
 
-test('загрузчик Node: импорт каждого входа загружает ровно JS-файлы его перечня (react — из node_modules, вне перечня)', async () => {
+test('загрузчик Node: импорт каждого входа загружает ровно JS-файлы его перечня (react — из node_modules, react-native и expo-sqlite — заглушки, вне перечня)', async () => {
   for (const entry of JS_ENTRIES) {
     const own = stored.entries[entry];
     assert.deepEqual(await loaded(own.module), own.files.filter((file) => file.endsWith('.mjs')), entry);

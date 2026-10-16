@@ -239,6 +239,40 @@
         "pet/web/view.css",
         "pet/web/view.mjs"
       ]
+    },
+    "./native": {
+      "module": "pet/native.mjs",
+      "styles": [],
+      "peers": {
+        "react": "^18.3.1 || ^19.0.0",
+        "react-native": ">=0.88.0"
+      },
+      "files": [
+        "pet/core/day.mjs",
+        "pet/core/ports.mjs",
+        "pet/hooks/state.mjs",
+        "pet/native.mjs",
+        "pet/native/lifecycle.mjs"
+      ]
+    },
+    "./native-sqlite": {
+      "module": "pet/native-sqlite.mjs",
+      "styles": [],
+      "peers": {
+        "expo-sqlite": ">=58.0.0"
+      },
+      "files": [
+        "pet/core/day.mjs",
+        "pet/core/errors.mjs",
+        "pet/core/formats/legacy.mjs",
+        "pet/core/pets.mjs",
+        "pet/core/ports.mjs",
+        "pet/core/round.mjs",
+        "pet/core/stages.mjs",
+        "pet/core/storage.mjs",
+        "pet/native-sqlite.mjs",
+        "pet/storage/sqlite.mjs"
+      ]
     }
   }
 }

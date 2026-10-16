@@ -5,8 +5,11 @@
 // участка → build(current) → запись или её отсутствие → фиксация (сверка кэша с прочитанным, своя запись, settle автора) →
 // следующая операция того же ключа.
 // Платформенная часть — backend { async, get(key), set(key, text) }: синхронный (веб, localStorage) выполняет операцию и
-// фиксацию в том же вызове write; асинхронный — обещаниями, фиксация — отдельным раундом (в серии — тестовый механизм с
-// ручным подтверждением; SQLite — этап PL09).
+// фиксацию в том же вызове write; асинхронный — обещаниями, фиксация — отдельным раундом (тестовый механизм с ручным
+// подтверждением, хранилище интегратора createStorage). [PL09] Асинхронная платформа может вместо пары get/set выполнять
+// весь участок сама — transact(key, plan): блокировка записи до чтения, чтение, plan(current) синхронно, запись или её
+// отсутствие, подтверждение (SQLite: BEGIN IMMEDIATE → SELECT → plan → INSERT/COMMIT либо ROLLBACK, pet/storage/sqlite.mjs).
+// Это внутренняя возможность адаптера, не публичного backend: очередь, кэш, сверка, фиксация и settle — те же.
 
 import { PetError } from './errors.mjs';
 import { isRecord, STORAGE_NAMES, storageKeys } from './formats/legacy.mjs';
@@ -153,6 +156,7 @@ export function createCoordinator({ keys, backend, opened = () => {}, closed = (
   }
 
   async function stepAsync(key, op) {
+    if (backend.transact) return transactAsync(key, op);
     let current;
     try {
       current = text(await backend.get(key));
@@ -167,6 +171,32 @@ export function createCoordinator({ keys, backend, opened = () => {}, closed = (
     } catch {
       return { read: true, current, ok: false };
     }
+  }
+
+  // [PL09] Участок целиком у платформы (§ 8.3, § 8.10): plan(current) она вызывает ровно один раз — после своего чтения
+  // внутри блокировки записи — и получает строку для записи либо null (писать нечего или build отказал); итог
+  // transact — true, только если поставленная запись подтверждена (COMMIT). Решение об исходе — здесь, тем же attempt, что
+  // у пары get/set: plan не вызван — ничего не прочитано (без сверки, отказ); без записи — подтверждено прочитанным даже при
+  // ошибке завершения транзакции (успех), а исключение build — отказ; запись — успех только с подтверждением. Прочитанное
+  // сверяется при любом исходе. Отклонение transact — как false.
+  async function transactAsync(key, op) {
+    let plan = null;
+    let current = null;
+    let committed = false;
+    try {
+      committed =
+        (await backend.transact(key, (value) => {
+          if (plan) throw new Error('участок вызвал plan повторно');
+          current = text(value);
+          plan = attempt(op, current, null);
+          return plan.pending ? plan.next : null;
+        })) === true;
+    } catch {
+      committed = false;
+    }
+    if (!plan) return { read: false, ok: false };
+    if (!plan.pending) return plan;
+    return committed ? { read: true, current, next: plan.next, wrote: true, ok: true } : { read: true, current, ok: false };
   }
 
   // build — сразу после чтения; next === current — писать нечего, подтверждено прочитанным (§ 8.3, шаг 3).
