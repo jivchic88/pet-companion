@@ -74,6 +74,7 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const nameRef = useRef(null);
   const scrollRef = useRef(null);
   const nameY = useRef(0);
+  const rowY = useRef(0);
   const typing = useRef(null);
   const nameFocused = useRef(false);
   const treatFocus = useRef(false);
@@ -139,21 +140,33 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
     return () => clearTimeout(id);
   }, [open, focusBack, release]);
 
-  // Клавиатура, пока окно открыто: её верх — для отступа под полем имени; поле в фокусе — прокрутка к нему.
+  // Клавиатура, пока окно открыто: её верх — для отступа под полем имени; поле в фокусе и клавиатура показана — прокрутка к
+  // строке поля (поле и «Сохранить имя»), а не к заголовку блока: над клавиатурой в альбомной ориентации остаётся меньше
+  // высоты блока имени. Оба порядка событий: на iOS keyboardWillShow приходит раньше onFocus поля (найдено в iOS
+  // Simulator, PL10.2.1), на Android keyboardDidShow — после.
+  const keyboardShown = useRef(false);
+  const toName = useCallback(() => {
+    if (nameFocused.current && keyboardShown.current) scrollRef.current?.scrollTo?.({ y: Math.max(0, nameY.current + rowY.current - 12), animated: !still.current });
+  }, []);
   useEffect(() => {
     if (!open) return undefined;
     const ios = Platform.OS === 'ios';
     const shown = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', (event) => {
       const top = event?.endCoordinates?.screenY;
+      keyboardShown.current = true;
       setKeyboardTop(Number.isFinite(top) ? top : null);
-      if (nameFocused.current) scrollRef.current?.scrollTo?.({ y: Math.max(0, nameY.current - 12), animated: !still.current });
+      toName();
     });
-    const hidden = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardTop(null));
+    const hidden = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', () => {
+      keyboardShown.current = false;
+      setKeyboardTop(null);
+    });
     return () => {
+      keyboardShown.current = false;
       shown.remove();
       hidden.remove();
     };
-  }, [open]);
+  }, [open, toName]);
 
   // Фокус после кормления — на новом состоянии лакомства.
   const treat = snapshot?.treat ?? 'waiting';
@@ -276,9 +289,11 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
         nameFocused.current = true;
         typing.current = core;
         core.setContext({ typing: true });
+        toName();
       },
       onBlur: release,
       onLayout: (event) => (nameY.current = event?.nativeEvent?.layout?.y ?? 0),
+      onRow: (event) => (rowY.current = event?.nativeEvent?.layout?.y ?? 0),
       nameRef,
       running,
     }),
@@ -313,7 +328,10 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
       {
         visible: open,
         animationType: motion === 'none' ? 'none' : motion === 'calm' ? 'fade' : 'slide',
-        presentationStyle: 'fullScreen',
+        // iOS: окно поверх экрана хоста, а не вместо него — экран хоста остаётся в иерархии и при повороте пересчитывает свои
+        // отступы (insets хоста обновляются и для открытого уголка). При fullScreen они оставались портретными (найдено в
+        // iOS Simulator, PL10.2.1).
+        presentationStyle: 'overFullScreen',
         supportedOrientations: ORIENTATIONS,
         statusBarTranslucent: edge,
         navigationBarTranslucent: edge,
@@ -331,15 +349,11 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
           accessibilityViewIsModal: true,
           onAccessibilityEscape: close,
         },
+        // Закреплена только кнопка «Закрыть»: заголовок с именем прокручивается вместе с уголком — длинное имя и крупный
+        // системный текст не вытесняют сцену и настройки (найдено в iOS Simulator, PL10.2.1: шапка занимала весь экран).
         h(
           View,
-          { style: styles.head },
-          h(
-            View,
-            { style: styles.titles },
-            h(Text, { testID: `${testID}-title`, style: styles.title, accessibilityRole: 'header' }, name),
-            h(Text, { testID: `${testID}-stage`, style: styles.sub }, `Ступень «${STAGES[stage]?.title ?? ''}»`),
-          ),
+          { style: styles.bar },
           h(Pressable, { ref: closeRef, testID: `${testID}-close`, onPress: close, accessibilityRole: 'button', accessibilityLabel: 'Закрыть уголок', style: ({ pressed }) => [styles.close, pressed && styles.pressed] }, h(Text, { style: styles.closeText }, 'Закрыть')),
         ),
         h(
@@ -349,6 +363,12 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
           h(
             ScrollView,
             { ref: scrollRef, testID: `${testID}-scroll`, style: styles.scroll, contentContainerStyle: [styles.content, { paddingBottom: bottom }], keyboardShouldPersistTaps: 'handled' },
+            h(
+              View,
+              { style: styles.titles },
+              h(Text, { testID: `${testID}-title`, style: styles.title, accessibilityRole: 'header' }, name),
+              h(Text, { testID: `${testID}-stage`, style: styles.sub }, `Ступень «${STAGES[stage]?.title ?? ''}»`),
+            ),
             !wide && scene ? h(View, { style: styles.sceneTop }, scene) : null,
             ...sections,
           ),
@@ -458,14 +478,14 @@ function ProgressBox({ snapshot, who, name, catalog, testID }) {
   );
 }
 
-function NameBox({ snapshot, who, testID, draft, page, onPage, onDraft, onPick, onSave, onFocus, onBlur, onLayout, nameRef, running }) {
+function NameBox({ snapshot, who, testID, draft, page, onPage, onDraft, onPick, onSave, onFocus, onBlur, onLayout, onRow, nameRef, running }) {
   const presets = who.names.presets;
   const shown = snapshot.name.display;
   const chips = namePage(presets, page);
   const count = namePageCount(presets);
   return h(
     View,
-    { style: styles.group, onLayout },
+    { testID: `${testID}-name`, style: styles.group, onLayout },
     h(Text, { style: styles.label, accessibilityRole: 'header', nativeID: `${testID}-name-label` }, `Имя ${who.forms.gen}`),
     snapshot.name.chosen
       ? null
@@ -488,7 +508,7 @@ function NameBox({ snapshot, who, testID, draft, page, onPage, onDraft, onPick, 
     ),
     h(
       View,
-      { style: styles.row },
+      { testID: `${testID}-name-row`, style: styles.row, onLayout: onRow },
       h(TextInput, {
         ref: nameRef,
         testID: `${testID}-name-input`,
@@ -549,11 +569,11 @@ const styles = StyleSheet.create({
   entry: { minHeight: 48, minWidth: 48, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24, borderWidth: 1, borderColor: ACCENT, backgroundColor: '#ffffff', justifyContent: 'center' },
   entryText: { fontSize: 16, color: ACCENT, fontWeight: '600', textAlign: 'center' },
   sheet: { flex: 1, backgroundColor: '#f6f2ea' },
-  head: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
-  titles: { flex: 1, flexShrink: 1, gap: 2 },
+  bar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  titles: { gap: 2 },
   title: { fontSize: 22, lineHeight: 28, fontWeight: '700', color: INK, flexShrink: 1 },
   sub: { fontSize: 15, lineHeight: 20, color: '#5b574f' },
-  close: { minHeight: 48, minWidth: 48, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: ACCENT, justifyContent: 'center', backgroundColor: '#ffffff' },
+  close: { minHeight: 48, minWidth: 48, maxWidth: '100%', paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: ACCENT, justifyContent: 'center', backgroundColor: '#ffffff' },
   closeText: { fontSize: 16, color: ACCENT, fontWeight: '600' },
   body: { flex: 1 },
   bodyWide: { flexDirection: 'row' },

@@ -597,6 +597,7 @@ test('раскладка: без измерения сцены нет; порт�
   await V.press('corner-open');
   assert.equal(V.has('corner-scene'), false, 'нулевой размер — сцены нет');
   assert.equal(V.node('corner-modal').statusBarTranslucent, true, 'с insets хоста — сквозной режим Android');
+  assert.equal(V.node('corner-modal').presentationStyle, 'overFullScreen', 'iOS: экран хоста под окном — его отступы обновляются при повороте');
   assert.deepEqual([V.node('corner-sheet').style[1].paddingTop, V.node('corner-sheet').style[1].paddingLeft], [59, 0]);
   await V.fire('corner-sheet', 'onLayout', layout(390, 844));
   await V.fire('corner-body', 'onLayout', layout(390, 700));
@@ -612,11 +613,23 @@ test('раскладка: без измерения сцены нет; порт�
   await V.render(tree(L, { insets }));
   await V.fire('corner-sheet', 'onLayout', layout(390, 844));
   await V.fire('corner-body', 'onLayout', layout(390, 700));
+  // Блок имени на y 600 прокрутки, строка поля в нём — на y 140: прокрутка — к строке поля.
+  const nameAt = 600;
+  await V.fire('corner-name', 'onLayout', { nativeEvent: { layout: { x: 0, y: nameAt, width: 358, height: 300 } } });
+  await V.fire('corner-name-row', 'onLayout', { nativeEvent: { layout: { x: 0, y: 140, width: 358, height: 48 } } });
   await V.fire('corner-name-input', 'onFocus');
   rn.keyboard('keyboardWillShow', { endCoordinates: { screenY: 508, height: 336 } });
   await V.act(() => {});
   assert.equal(V.node('corner-scroll').contentContainerStyle[1].paddingBottom, 336 + 16);
   assert.deepEqual([rn.scrolls.at(-1)?.testID, rn.scrolls.at(-1)?.animated], ['corner-scroll', true]);
+  assert.equal(rn.scrolls.at(-1).y, nameAt + 140 - 12, 'к строке поля, а не к заголовку блока');
+  // iOS: клавиатура раньше фокуса поля — прокрутка при фокусе.
+  await V.fire('corner-name-input', 'onBlur');
+  rn.scrolls.length = 0;
+  rn.keyboard('keyboardWillShow', { endCoordinates: { screenY: 508, height: 336 } });
+  assert.equal(rn.scrolls.length, 0, 'поле не в фокусе — не прокручивать');
+  await V.fire('corner-name-input', 'onFocus');
+  assert.equal(rn.scrolls.at(-1)?.y, nameAt + 140 - 12, 'фокус после клавиатуры — прокрутка к полю');
   await V.act(() => L.core.setReducedMotion(true));
   rn.keyboard('keyboardWillShow', { endCoordinates: { screenY: 508, height: 336 } });
   assert.equal(rn.scrolls.at(-1)?.animated, false, 'уменьшение движения — прокрутка без анимации');
