@@ -12,15 +12,17 @@ export function screen(name) {
   if (!screens.has(name)) screens.set(name, { buttons: new Map(), nodes: new Map(), writes: 0 });
   return screens.get(name);
 }
-// Хук подделок: записать свойства узла type своего экрана по testID; при размонтировании узла — убрать.
+// Хук подделок: записать свойства узла type своего экрана по testID; при размонтировании узла — убрать. Запись — и при
+// подключении: StrictMode проверяет новый узел пробным отключением и повторным подключением без новой отрисовки (без этого
+// узел, смонтированный под StrictMode, пропадал из записей).
 export function useRecord(type, props) {
   const own = screen(useContext(Screen));
   const id = props.testID;
   if (id) own.nodes.set(id, { type, props });
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    if (id && !own.nodes.has(id)) own.nodes.set(id, { type, props });
+    return () => {
       if (id && own.nodes.get(id)?.props === props) own.nodes.delete(id);
-    },
-    [own, id, props],
-  );
+    };
+  }, [own, id, type, props]);
 }

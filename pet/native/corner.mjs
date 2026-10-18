@@ -6,18 +6,23 @@
 //
 // Внутри — только снимок и эффекты ядра: комната 400×250 (общий уголок room.mjs, вещи ступени по определению, свои вещи —
 // Item набора, места — room.pos, сдвиг к миске — room.feedShift) и питомец по size определения (pose.shown.page); имя
-// (клавиатура и готовые — names определения; черновик принадлежит паре «ядро и показанный питомец»), выбор питомца,
-// облик, аксессуары (открытые — progress.accessories), движение и реплики, «Погладить», «Дай лапу» (actions.paw.ask),
-// кормление (treat снимка, решение — feed() ядра), счёт, ступени и подарки (progress, STAGES ядра), праздник и «Новое в
-// уголке» (эффекты celebrate и seen, пока уголок на виду; иначе progress.unseen), состояние записи (save). Правил нет:
-// команды проходят проверки ядра, отказ показывается его текстом. «Поиграть» и «Обустроить уголок» — PL10.2.2–PL10.2.3:
-// их кнопок здесь нет. Сценок нет (scenes: {} у координатора).
+// (клавиатура и готовые — names определения), выбор питомца, облик, аксессуары (открытые — progress.accessories),
+// движение и реплики, «Погладить», «Дай лапу» (actions.paw.ask), кормление (treat снимка, решение — feed() ядра), счёт,
+// ступени и подарки (progress, STAGES ядра), праздник и «Новое в уголке» (эффекты celebrate и seen показанного питомца,
+// пока уголок на виду; иначе progress.unseen), состояние записи (save). Правил нет: команды проходят проверки ядра, отказ
+// показывается его текстом. «Поиграть» и «Обустроить уголок» — PL10.2.2–PL10.2.3: их кнопок здесь нет. Сценок нет
+// (scenes: {} у координатора).
+//
+// Привязка окна — пара «ядро и показанный питомец» (доработка PL10.2.1): черновик имени, страница готовых имён, отказ и
+// «Новое в уголке» принадлежат ей; смена питомца (по любому обновлению ядра) или ядра их снимает — возврат к прежней паре
+// их не возвращает. Обработчик прежней привязки (замыкание прежней отрисовки) ничего не пишет и не применяет; смена ядра
+// снимает тишину ввода прежнего и фокус поля.
 //
 // Раскладка — по onLayout окна и отступам хоста insets (безопасные области; без них — системные отступы окна): портрет —
 // сцена сверху в прокрутке, широкий экран — сцена слева, настройки справа; клавиатура не закрывает поле имени (отступ по
 // её рамке, прокрутка к полю). Движение окна и питомца — по prefs.effectiveMotion. Объявления скринридеру — у координатора.
 
-import { createElement as h, Fragment, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createElement as h, Fragment, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg from 'react-native-svg';
 import { NAME_MAX, namePage, namePageCount, namePageOf } from '../core/pets.mjs';
@@ -38,7 +43,8 @@ const MOTIONS = [
 const SAVE_KEYS = ['cat', 'companion', 'look', 'treat', 'ext'];
 const ORIENTATIONS = ['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right'];
 
-// Черновик имени: { core, pet, text } — виден и применяется только для того же ядра и показанного питомца.
+// Черновик имени: { core, pet, text } — виден и применяется только для того же ядра и показанного питомца (смена пары его
+// снимает — см. подписку в PetCorner; фильтр — защита до обновления состояния).
 const draftOf = (draft, core, state) => (draft && core && state && draft.core === core && draft.pet === state.pet.shown ? draft.text : null);
 const number = (value) => (Number.isFinite(value) && value > 0 ? value : 0);
 const insetsOf = (value) => ({ top: number(value?.top), right: number(value?.right), bottom: number(value?.bottom), left: number(value?.left) });
@@ -48,6 +54,14 @@ const focusOn = (node) => {
     AccessibilityInfo.sendAccessibilityEvent?.(node, 'focus');
   } catch (error) {
     systemLog.warn('PetCorner: фокус не перенесён', error);
+  }
+};
+const quiet = (what, fn) => {
+  try {
+    return fn();
+  } catch (error) {
+    systemLog.warn(`PetCorner: ${what}`, error);
+    return null;
   }
 };
 
@@ -61,6 +75,8 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const prefix = useId().replace(/[^a-z0-9]/gi, '');
   const open = Boolean(snapshot && snapshot.status !== 'destroyed' && snapshot.view.open === 'corner');
 
+  // Принадлежат привязке окна — паре «ядро и показанный питомец»: «Новое в уголке» { core, pet, … }, черновик имени
+  // { core, pet, text }, страница готовых имён { core, pet, value }, отказ { core, text }.
   const [news, setNews] = useState(null);
   const [draft, setDraft] = useState(null);
   const [page, setPage] = useState(null);
@@ -90,18 +106,43 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   // Поверхность уголка — у координатора, пока она годна: вид 'corner' объявлен ядру ровно на это время.
   useEffect(() => (register && !problem ? register('corner') : undefined), [register, problem]);
 
-  // Праздник и «Новое в уголке» — эффекты ядра, пришедшие, пока уголок на виду (одно на ступень, вещи — объединением).
+  // Ядро последней фиксации — для проверки обработчиков (замыканий отрисовки) в момент вызова.
+  const bound = useRef(null);
+  useLayoutEffect(() => {
+    bound.current = core;
+    return () => {
+      bound.current = null;
+    };
+  }, [core]);
+
+  // Смена привязки снимает её состояние, а не прячет: другое ядро — при подписке, другой показанный питомец — по любому
+  // обновлению ядра (не только по отрисовке: смена туда и обратно в одном такте тоже снимает); возврат к прежней паре его
+  // не возвращает. Праздник и «Новое в уголке» — эффекты ядра, пришедшие, пока уголок на виду, — принадлежат питомцу,
+  // показанному в этом обновлении (одно на ступень, вещи — объединением; вещи — его определения).
   useEffect(() => {
+    const forget = () => {
+      setNews(null);
+      setDraft(null);
+      setPage(null);
+      setNote(null);
+    };
+    forget();
     if (!core) return undefined;
+    let pet = quiet('снимок не прочитан', () => core.getState().pet.shown);
     return core.subscribe(
       ({ snapshot: s, effects }) => {
+        if (s.pet?.shown !== pet) {
+          pet = s.pet?.shown ?? null;
+          forget();
+        }
         if (s.view.open !== 'corner') return;
         for (const effect of effects) {
           if (effect.type !== 'celebrate' && effect.type !== 'seen') continue;
           setNews((was) => {
-            const same = was && was.core === core && was.stage === effect.stage;
+            const same = was && was.core === core && was.pet === pet && was.stage === effect.stage;
             return {
               core,
+              pet,
               stage: effect.stage,
               celebrate: effect.type === 'celebrate' || Boolean(same && was.celebrate),
               items: [...new Set([...(same ? was.items : []), ...effect.items])],
@@ -114,14 +155,21 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
     );
   }, [core]);
 
-  // Тишина ввода снимается, когда поле больше не в работе: закрытие уголка, смена ядра, размонтирование.
+  // Тишина ввода снимается, когда поле больше не в работе: закрытие уголка, смена ядра, размонтирование. Смена ядра при
+  // открытом уголке ещё и снимает фокус поля: ввод для нового ядра начинается заново (его фокус — его тишина).
   const release = useCallback(() => {
     const was = typing.current;
     typing.current = null;
     nameFocused.current = false;
     if (was && was.status !== 'destroyed') was.setContext({ typing: false });
   }, []);
-  useEffect(() => release, [core, release]);
+  useEffect(
+    () => () => {
+      release();
+      quiet('фокус поля не снят', () => nameRef.current?.blur?.());
+    },
+    [core, release],
+  );
 
   // Возврат фокуса ко входу (или к returnFocus хоста) после закрытия окна.
   const focusBack = useCallback(() => focusOn(returnFocus?.current ?? entryRef.current), [returnFocus]);
@@ -190,24 +238,31 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const stage = progress?.stage ?? 0;
   const motion = snapshot.prefs.effectiveMotion;
   const running = snapshot.status !== 'destroyed';
+  const shown = snapshot.pet.shown;
 
+  // Обработчики этой отрисовки годны, пока её привязка текущая: то же ядро (последней фиксации) и — для действий с
+  // питомцем — тот же показанный питомец (по ядру в момент вызова). Устаревший обработчик (замыкание прежней отрисовки
+  // после смены питомца или ядра) ничего не пишет и не применяет: ни черновика, ни имени, ни команды другому питомцу или
+  // ядру.
+  const ours = () => bound.current === core && core.status !== 'destroyed';
+  const mine = () => ours() && core.getState().pet.shown === shown;
   const say = (text) => setNote({ core, text });
   const run = (title, fn) => () => {
-    if (!running) return;
+    if (!mine()) return;
     core.activity();
     const result = fn(core);
     if (result && !result.ok) say(`${title}: ${result.error.message}`);
     return result;
   };
   const openCorner = () => {
-    if (!running) return;
+    if (!ours()) return;
     setNote(null);
     core.activity();
     const result = core.open('corner');
     if (!result.ok) say(result.error.message);
   };
   const close = () => {
-    if (core.status !== 'destroyed') core.close();
+    if (ours()) core.close();
   };
 
   // ---------- вход ----------
@@ -249,11 +304,13 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const keyboard = keyboardTop !== null && frame ? Math.max(0, frame.height - keyboardTop) : 0;
   const bottom = Math.max(pad.bottom, keyboard) + 16;
 
-  const fresh = news && news.core === core ? news.items : progress?.unseen ? progress.fresh : [];
-  const freshAccessories = news && news.core === core ? news.accessories : progress?.unseen ? progress.freshAccessories : [];
-  const itemName = (id) => who.items.list.find((item) => item.id === id)?.title ?? who.accessories.find((item) => item.id === id)?.title ?? who.room.toys.find((toy) => toy.id === id)?.title ?? id;
-  const freshNames = [...fresh, ...freshAccessories].map(itemName);
-  const newsText = `${news && news.core === core && news.celebrate ? `Новая ступень «${STAGES[news.stage]?.title ?? ''}»! ` : ''}${freshNames.length ? `Новое в уголке: ${freshNames.join(', ')}.` : ''}`.trim();
+  // Новости — только показанного питомца (его вещи по его определению); неизвестный ему ID не выводится.
+  const told = news && news.core === core && news.pet === shown ? news : null;
+  const fresh = told ? told.items : progress?.unseen ? progress.fresh : [];
+  const freshAccessories = told ? told.accessories : progress?.unseen ? progress.freshAccessories : [];
+  const itemName = (id) => who.items.list.find((item) => item.id === id)?.title ?? who.accessories.find((item) => item.id === id)?.title ?? who.room.toys.find((toy) => toy.id === id)?.title ?? null;
+  const freshNames = [...fresh, ...freshAccessories].map(itemName).filter(Boolean);
+  const newsText = `${told?.celebrate ? `Новая ступень «${STAGES[told.stage]?.title ?? ''}»! ` : ''}${freshNames.length ? `Новое в уголке: ${freshNames.join(', ')}.` : ''}`.trim();
 
   const scene = sceneWidth > 0 ? h(Scene, { width: sceneWidth, def, kit, who, snapshot, stage, fresh, prefix, core, testID, name }) : null;
   const sections = [
@@ -271,21 +328,25 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
       core,
       testID,
       draft: draftOf(draft, core, snapshot),
-      page: page && page.core === core && page.pet === snapshot.pet.shown ? page.value : namePageOf(who.names.presets, name),
-      onPage: (value) => setPage({ core, pet: snapshot.pet.shown, value }),
-      onDraft: (text) => setDraft({ core, pet: snapshot.pet.shown, text }),
+      page: page && page.core === core && page.pet === shown ? page.value : namePageOf(who.names.presets, name),
+      onPage: (value) => mine() && setPage({ core, pet: shown, value }),
+      onDraft: (text) => mine() && setDraft({ core, pet: shown, text }),
       onPick: (value) => {
+        if (!mine()) return;
         setDraft(null);
         run('Имя', (c) => c.setName(value))();
       },
       onSave: () => {
+        if (!mine()) return;
         const now = core.getState();
         const text = draftOf(draft, core, now);
         setDraft(null);
         nameRef.current?.blur?.();
         run('Имя', (c) => c.setName(text ?? now.name.value))();
       },
+      // Тишина ввода — у ядра, а не у питомца: фокус после смены питомца того же ядра остаётся в работе.
       onFocus: () => {
+        if (!ours()) return;
         nameFocused.current = true;
         typing.current = core;
         core.setContext({ typing: true });

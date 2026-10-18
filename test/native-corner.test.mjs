@@ -297,6 +297,76 @@ test('снятие поверхности: уголок размонтирова
   M.core.destroy();
 });
 
+test('замена координатора: другой PetProvider (новый React key) на том же живом ядре получает объявление без сброса — views ["corner"], открытый уголок показывает новая поверхность, open работает без повторной отрисовки; у нового без уголка — вид закрыт; StrictMode; окончательное размонтирование — снятие; другое ядро не тронуто', async (t) => {
+  const warned = t.mock.method(console, 'warn', () => {});
+  for (const strict of [false, true]) {
+    const L = await lab();
+    const O = await lab();
+    const other = mount(`swap-other-${strict}`, tree(O));
+    await other.render();
+    const element = (key, corner = true) => h(PetProvider, { key, core: L.spy, pets: PETS, kits: KITS }, h(PetView), corner ? h(PetCorner) : null);
+    const V = mount(`swap-${strict}`, element('first'), { strict });
+    await V.render();
+    await started(L, V);
+    await opened(L, V);
+    await V.render(element('second'));
+    await V.act(() => {});
+    assert.deepEqual(L.core.getState().display.views, ['corner'], `strict ${strict}: объявление нового владельца не снято`);
+    assert.deepEqual(L.of('setDisplay').map(([display]) => display.views), [['corner'], ['corner']], 'новый объявил, прежний не снимал');
+    assert.deepEqual([L.core.getState().view.open, V.node('corner-modal').visible, L.of('close').length], ['corner', true, 0], 'открытый уголок — у новой поверхности');
+    let reopened = null;
+    await V.press('corner-close');
+    await V.act(() => (reopened = L.core.open('corner')));
+    assert.equal(reopened.ok, true, 'уголок открывается без повторной отрисовки');
+    assert.equal(V.node('corner-modal').visible, true);
+    // Новый координатор без уголка при открытом уголке: поверхности нет — вид закрыт, вида нет.
+    await V.render(element('third', false));
+    await V.act(() => {});
+    assert.deepEqual([L.core.getState().view.open, L.core.getState().display.views], [null, []]);
+    assert.equal(L.core.open('corner').error?.code, 'unsupported');
+    // Снова с уголком — объявлен; окончательное размонтирование — снятие.
+    await V.render(element('fourth'));
+    assert.deepEqual(L.core.getState().display.views, ['corner']);
+    await V.act(() => L.core.open('corner'));
+    await V.unmount();
+    assert.deepEqual([L.core.getState().view.open, L.core.getState().display.views, L.live()], [null, [], 0], 'отключён последний — объявление снято');
+    assert.deepEqual([O.core.getState().display.views, O.of('setDisplay').length, O.of('close').length], [['corner'], 1, 0], 'другое ядро не тронуто');
+    await other.unmount();
+    L.core.destroy();
+    O.core.destroy();
+  }
+  assert.equal(warned.mock.callCount(), 0, 'замена — без предупреждений');
+});
+
+test('координаторы одного ядра на двух экранах (новый поверх прежнего): объявляет последний подключённый (открытый вид без его поверхности закрыт), его снятие возвращает объявление прежнему — с его видами; объявления скринридеру — одно на эффект; без живых координаторов — снятие', async (t) => {
+  const warned = t.mock.method(console, 'warn', () => {});
+  const L = await lab();
+  const X = mount('stack-x', tree(L));
+  await X.render();
+  await started(L, X);
+  await opened(L, X);
+  const Y = mount('stack-y', h(PetProvider, { core: L.spy, pets: PETS, kits: KITS }, h(PetView)));
+  await Y.render();
+  assert.deepEqual([L.core.getState().view.open, L.core.getState().display.views], [null, []], 'верхний без уголка: вид закрыт');
+  assert.equal(X.node('corner-modal').visible, false);
+  rn.announced.length = 0;
+  L.effects.length = 0;
+  await Y.act(() => L.core.setName('Пельмень'));
+  assert.deepEqual(rn.announced, L.effects.filter((effect) => effect.type === 'announce').map((effect) => effect.text));
+  assert.equal(rn.announced.length, 1, 'одно объявление на эффект, не по одному на координатор');
+  // Верхний экран снят — объявление снова у прежнего: уголок открывается.
+  await Y.unmount();
+  assert.deepEqual(L.core.getState().display.views, ['corner']);
+  let reopened = null;
+  await X.act(() => (reopened = L.core.open('corner')));
+  assert.equal(reopened.ok, true);
+  assert.equal(X.node('corner-modal').visible, true);
+  await X.unmount();
+  assert.deepEqual([L.core.getState().view.open, L.core.getState().display.views, L.live()], [null, [], 0]);
+  assert.equal(warned.mock.callCount(), 0);
+  L.core.destroy();
+});
+
 test('отказы до побочных действий: неверный набор у координатора — ни подписок, ни объявления, ни команд, читаемый отказ PetView и уголка; минимальный набор PL10.1 — PetView рисует, уголок отказывает, вида corner у ядра нет', async () => {
   const L = await lab();
   const V = mount('refuse', h(PetProvider, { core: L.spy, pets: PETS, kits: [{ ...catNative, coats: ['smoke'] }, dogNative] }, h(PetView), h(PetCorner)));
@@ -454,9 +524,35 @@ test('подтверждённое занятие хоста при открыт
   await opened(L, V);
   assert.equal(V.text('corner-news'), 'Новое в уголке: Кружка, Блокнот.');
   assert.equal(L.core.getState().progress.unseen, false);
+  // Следующая ступень при открытом уголке — своя новость, без вещей прежней ступени.
+  L.counts.set(18, 3);
+  await V.act(() => L.core.notify('saved', { key: 'k2', counted: true }));
+  assert.equal(V.text('corner-news'), 'Новая ступень «Уютный штаб»! Новое в уголке: Лежанка, Лампа.');
   // Объявления скринридеру — ровно эффекты announce ядра, по одному (композиция и уголок не дублируют).
   const said = L.effects.filter((effect) => effect.type === 'announce').map((effect) => effect.text);
   assert.deepEqual(rn.announced, said);
+  await V.act(() => L.core.destroy());
+});
+
+test('«Новое в уголке» принадлежит показанному питомцу: новости собаки при смене на кота сняты — ни её игрушки, ни внутренних ID; возврат к собаке их не возвращает; у своего питомца — снова по эффекту', async () => {
+  const L = await lab();
+  const V = mount('news-pet', tree(L));
+  await V.render();
+  await started(L, V);
+  await opened(L, V);
+  await V.press('corner-kind-dog');
+  await V.act(() => L.plan.advance(8000));
+  L.counts.set(9, 1);
+  await V.act(() => L.core.refresh());
+  assert.equal(V.text('corner-news'), 'Новое в уголке: Кружка, Блокнот, Мячик, Клетчатый платок.');
+  await V.press('corner-kind-cat');
+  assert.equal(V.has('corner-news'), false, 'у кота — ни вещей собаки, ни «ball»');
+  await V.press('corner-kind-dog');
+  assert.equal(V.has('corner-news'), false, 'вернулись к собаке — прежние новости сняты');
+  // Новая ступень при показанной собаке — снова её новости (праздник и вещи ступени).
+  L.counts.set(18, 2);
+  await V.act(() => L.core.notify('saved', { key: 'news-k1', counted: true }));
+  assert.equal(V.text('corner-news'), 'Новая ступень «Уютный штаб»! Новое в уголке: Лежанка, Лампа.');
   await V.act(() => L.core.destroy());
 });
 
@@ -513,11 +609,18 @@ test('имя: черновик принадлежит паре «ядро и п�
   await V.act(() => L.plan.advance(8000));
   assert.equal(L.core.getState().pet.shown, 'dog');
   assert.equal(V.node('corner-name-input').value, '', 'у собаки — её сохранённое (пустое) имя, а не черновик кота');
+  // Назад к коту без «Сохранить имя»: черновик снят сменой питомца, а не спрятан.
+  await V.press('corner-kind-cat');
+  assert.equal(V.node('corner-name-input').value, '', 'черновик кота снят');
+  // «Сохранить имя» у собаки после черновика кота — чужой не применит.
+  await V.fire('corner-name-input', 'onChangeText', 'КотДраф');
+  await V.press('corner-kind-dog');
+  await V.act(() => L.plan.advance(8000));
   await V.press('corner-name-save');
   assert.deepEqual(L.of('setName').at(-1), ['']);
   assert.equal(L.core.getState().pets.dog.name.display, 'Тоби');
   await V.press('corner-kind-cat');
-  assert.equal(V.node('corner-name-input').value, '', 'черновик кота снят');
+  assert.equal(V.node('corner-name-input').value, '');
   assert.equal(L.core.getState().pets.cat.name.display, 'Марс');
   // Готовое имя — тот же путь ядра; объявление — одно, от ядра через координатор.
   rn.announced.length = 0;
@@ -541,6 +644,112 @@ test('имя: черновик принадлежит паре «ядро и п�
   await V.press('corner-close');
   assert.equal(L.core.getState().context.quiet.includes('typing'), false);
   await V.act(() => L.core.destroy());
+});
+
+// Черновик имени при смене привязки (без «Сохранить имя» — сохранение само очистило бы проверяемый черновик).
+const field = (V) => () => V.node('corner-name-input');
+const typing = (L) => L.core.getState().context.quiet.includes('typing');
+// Открыть уголок ядра L прямыми командами хоста (объявление — как у координатора; координатор его потом примет).
+const reopen = (V, L) =>
+  V.act(async () => {
+    L.core.setDisplay(DISPLAY(['corner']));
+    if (L.core.status !== 'running') await L.core.start();
+    L.core.open('corner');
+  });
+
+test('черновик имени снимается сменой питомца, а не прячется: кот → собака → кот и собака → кот → собака без «Сохранить имя»; смена командами ядра туда и обратно в одном такте; имени без «Сохранить» нет', async () => {
+  const L = await lab();
+  const V = mount('draft-pet', tree(L));
+  await V.render();
+  await started(L, V);
+  await opened(L, V);
+  const input = field(V);
+  await V.fire('corner-name-input', 'onChangeText', 'OldCatDraft');
+  await V.press('corner-kind-dog');
+  assert.equal(input().value, '');
+  await V.press('corner-kind-cat');
+  assert.equal(input().value, '', 'вернулись к коту — прежний черновик снят');
+  await V.press('corner-kind-dog');
+  await V.fire('corner-name-input', 'onChangeText', 'OldDogDraft');
+  await V.press('corner-kind-cat');
+  await V.press('corner-kind-dog');
+  assert.equal(input().value, '', 'вернулись к собаке — прежний черновик снят');
+  // Собака → кот → собака командами ядра в одном такте: кот не отрисовывался, но привязка сменилась.
+  await V.fire('corner-name-input', 'onChangeText', 'HostDraft');
+  await V.act(() => {
+    L.core.setPet('cat');
+    L.core.setPet('dog');
+  });
+  assert.equal(input().value, '', 'смена по обновлению ядра, а не только по отрисовке');
+  assert.equal(L.of('setName').length, 0, 'ни одного имени без «Сохранить»');
+  L.core.destroy();
+});
+
+test('обработчики прежнего питомца после смены ничего не пишут и не применяют: ни черновика, ни имени, ни готового имени, ни облика другому питомцу; фокус поля — у ядра (смена питомца его не снимает)', async () => {
+  const L = await lab();
+  const V = mount('draft-stale', tree(L));
+  await V.render();
+  await started(L, V);
+  await opened(L, V);
+  const input = field(V);
+  await V.fire('corner-name-input', 'onChangeText', 'OldCatDraft');
+  const cat = input();
+  const catPick = V.node('corner-name-pick-0');
+  const catCoat = V.node('corner-coat-ginger');
+  await V.act(() => cat.ref.current.focus());
+  await V.press('corner-kind-dog');
+  assert.equal(typing(L), true, 'тишина ввода — у ядра: смена питомца её не снимает');
+  const before = L.calls.list.length;
+  await V.act(() => cat.onChangeText('Чужое'));
+  await V.act(() => cat.onSubmitEditing());
+  await V.act(() => catPick.onPress());
+  await V.act(() => catCoat.onPress());
+  assert.equal(input().value, '', 'у собаки — не текст из обработчика кота');
+  assert.deepEqual(L.calls.list.slice(before), [], 'ни setName, ни setAppearance, ни activity от устаревших обработчиков');
+  assert.equal(L.core.getState().pets.dog.name.display, 'Тоби');
+  await V.press('corner-close');
+  assert.equal(typing(L), false);
+  L.core.destroy();
+});
+
+test('ядро A → B → A при открытых уголках без «Сохранить имя»: черновик A не возвращается; смена ядра снимает фокус поля и тишину ввода прежнего, у нового ввод начинается заново; обработчики A у B ничего не пишут и не применяют', async () => {
+  const A = await lab();
+  const B = await lab();
+  const V = mount('draft-core', tree(A));
+  await V.render();
+  await started(A, V);
+  await opened(A, V);
+  const input = field(V);
+  await V.fire('corner-name-input', 'onChangeText', 'OldCoreDraft');
+  await reopen(V, B);
+  await V.render(tree(B));
+  assert.equal(V.node('corner-modal').visible, true, 'уголок B открыт');
+  assert.equal(input().value, '');
+  await reopen(V, A);
+  await V.render(tree(A));
+  assert.equal(V.node('corner-modal').visible, true, 'уголок A снова открыт');
+  assert.equal(input().value, '', 'вернулись к A — его прежний черновик снят');
+  // Поле в фокусе (настоящий фокус подделки — через ref), смена ядра A → B.
+  await V.act(() => input().ref.current.focus());
+  assert.equal(typing(A), true);
+  const old = input();
+  await reopen(V, B);
+  await V.render(tree(B));
+  assert.equal(input().ref.current.isFocused(), false, 'поле без фокуса: ввод для B начинается заново');
+  assert.deepEqual([typing(A), typing(B)], [false, false], 'тишина ввода A снята, у B не начиналась');
+  await V.act(() => old.onChangeText('Чужое'));
+  await V.act(() => old.onFocus());
+  await V.act(() => old.onSubmitEditing());
+  assert.equal(input().value, '');
+  assert.deepEqual([typing(A), typing(B), A.of('setName').length, B.of('setName').length], [false, false, 0, 0], 'обработчики A — ни тишины, ни имени');
+  // Свой ввод у B: тишина и имя по «Сохранить» (оно же снимает фокус и тишину).
+  await V.act(() => input().ref.current.focus());
+  assert.equal(typing(B), true);
+  await V.fire('corner-name-input', 'onChangeText', 'Новое');
+  await V.press('corner-name-save');
+  assert.deepEqual([B.of('setName'), typing(B), A.of('setName').length], [[['Новое']], false, 0]);
+  A.core.destroy();
+  B.core.destroy();
 });
 
 test('облик, аксессуары, движение и реплики: команды ядра и состояние из снимка; закрытый ступенью аксессуар недоступен с подсказкой; «без анимации» и системное «уменьшить движение» — окно и питомец без анимации', async () => {
