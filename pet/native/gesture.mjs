@@ -15,7 +15,8 @@
 // Геометрия (playLayout): сцена — прямоугольник, измеренный onLayout; питомец — рамка определения (size), по ширине сцены и
 // свободной высоте (88 % ширины, не больше 440 точек — как веб), под ним полоса пола (20…64 точки) и строка реплики;
 // пол ядру — [l, t, r, b] в единицах рисунка (рамка питомца — начало координат) и радиус касания лапы в тех же единицах.
-// Нулевой, скрытый или неизмеренный размер — null: ни пола, ни ввода по прежней геометрии.
+// Нулевой, скрытый, неизмеренный или переходный (питомец уже PET_MIN_PT) размер — null: ни пола, ни ввода по прежней
+// геометрии.
 
 import { SIZE } from '../core/toys.mjs';
 
@@ -31,6 +32,9 @@ export const EDGE_PT = 8;
 const FLOOR = [20, 64];
 const PET_SHARE = 0.88;
 const PET_MAX = 440;
+// Наименьшая ширина питомца: мельче — замер переходный (поворот, первая раскладка окна), пол по нему не объявляется
+// (найдено в iOS Simulator, PL10.2.2: в повороте сцена на кадр получала ширину питомца 39 точек).
+export const PET_MIN_PT = 80;
 const GAP = 4;
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -49,7 +53,7 @@ export function playLayout(box, def, phrase = 0) {
   const wide = Math.min(width * PET_SHARE, PET_MAX);
   const floor = Math.min(FLOOR[1], Math.max(FLOOR[0], room - (wide * dh) / dw));
   const w = Math.min(wide, ((room - floor) * dw) / dh);
-  if (!finite(w) || w <= 0) return null;
+  if (!finite(w) || w < PET_MIN_PT) return null;
   const h = (w * dh) / dw;
   const s = w / dw;
   const top = Math.max(0, (height - (h + floor + GAP + line)) / 2);

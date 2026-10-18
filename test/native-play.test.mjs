@@ -787,6 +787,17 @@ test('уменьшение движения и раскладка: окно бе
   assert.equal(V.node('play-modal').animationType, 'none');
   assert.equal(V.node('play-modal').statusBarTranslucent, true);
   assert.deepEqual(V.node('play-sheet').style.at(-1), { paddingTop: 47, paddingLeft: 0, paddingRight: 0 });
+  // Портрет: шапка (имя и строка итога) над сценой; выше четверти окна (крупный текст) — в прокрутке под сценой, сцена — вне
+  // прокрутки.
+  const inScroll = () => [V.node('play-scroll').children].flat(Infinity).some((child) => child?.props?.testID === 'play-head');
+  await V.fire('play-sheet', 'onLayout', layout(390, 844));
+  await V.fire('play-head', 'onLayout', layout(390, 120));
+  assert.equal(inScroll(), false, 'обычный текст — шапка над сценой');
+  await V.fire('play-head', 'onLayout', layout(390, 560));
+  assert.equal(inScroll(), true, 'крупный текст — шапка в прокрутке под сценой');
+  assert.equal(V.node('play-scroll').style.at(-1).maxHeight, 422);
+  await V.fire('play-head', 'onLayout', layout(358, 150));
+  assert.equal(inScroll(), false);
   // Широкий экран: сцена и колонка рядом (прокрутка — только у колонки).
   await V.fire('play-sheet', 'onLayout', layout(844, 390));
   assert.equal(V.has('play-scroll'), true);

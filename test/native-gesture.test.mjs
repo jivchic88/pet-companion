@@ -90,7 +90,9 @@ test('раскладка сцены: размер по рамке определ
   }
   // Свой питомец не обрезается и не сжимается до кота: выше рамки при той же ширине сцены.
   assert.ok(G.playLayout({ width: 390, height: 900 }, tall, 0).pet.height > G.playLayout({ width: 390, height: 900 }, cat, 0).pet.height);
-  for (const box of [null, undefined, {}, { width: 0, height: 500 }, { width: 390, height: 0 }, { width: -1, height: 500 }, { width: Number.NaN, height: 500 }, { width: 390, height: Infinity }, { width: 12, height: 400 }, { width: 390, height: 20 }]) assert.equal(G.playLayout(box, cat, 42), null, JSON.stringify(box));
+  for (const box of [null, undefined, {}, { width: 0, height: 500 }, { width: 390, height: 0 }, { width: -1, height: 500 }, { width: Number.NaN, height: 500 }, { width: 390, height: Infinity }, { width: 12, height: 400 }, { width: 390, height: 20 }, { width: 85, height: 400 }, { width: 400, height: 110 }]) assert.equal(G.playLayout(box, cat, 42), null, JSON.stringify(box));
+  // Переходный замер поворота (питомец уже 80 точек) — не раскладка; 80 и шире — раскладка.
+  assert.ok(G.playLayout({ width: 92, height: 400 }, cat, 0).pet.width >= G.PET_MIN_PT);
   // Ключ раскладки меняется с размером, рамкой определения и строкой реплики.
   const keys = new Set([G.playLayout({ width: 390, height: 520 }, cat, 42).key, G.playLayout({ width: 391, height: 520 }, cat, 42).key, G.playLayout({ width: 390, height: 520 }, tall, 42).key, G.playLayout({ width: 390, height: 520 }, cat, 40).key]);
   assert.equal(keys.size, 4);

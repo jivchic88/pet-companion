@@ -98,6 +98,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
 
   const [frame, setFrame] = useState(null);
   const [box, setBox] = useState(null);
+  const [headHeight, setHeadHeight] = useState(0);
   const [line, setLine] = useState(0);
   const [fit, setFit] = useState({});
   const [note, setNote] = useState(null);
@@ -582,6 +583,16 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
     ),
   );
 
+  // Имя и строка итога: над сценой, а когда они выше четверти окна (крупный системный текст, длинное имя) — под сценой, в
+  // прокрутке вместе с кнопками: сцене остаётся место, и она сама вне прокрутки (жест не спорит с прокруткой). Найдено в
+  // iOS Simulator (PL10.2.2): при самом крупном тексте шапка занимала весь экран — ни питомца, ни кнопок.
+  const headNode = h(
+    View,
+    { key: 'head', testID: `${testID}-head`, style: styles.head, onLayout: (event) => setHeadHeight(Math.ceil(event?.nativeEvent?.layout?.height ?? 0)) },
+    titleNode,
+    noteNode,
+  );
+  const compact = !wide && height > 0 && headHeight > height * 0.25;
   const content = wide
     ? h(
         View,
@@ -598,9 +609,15 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
         Fragment,
         null,
         barNode,
-        h(View, { style: styles.head }, titleNode, noteNode),
+        compact ? null : headNode,
         stageNode,
-        h(ScrollView, { testID: `${testID}-scroll`, style: [styles.below, { maxHeight: Math.max(120, height * 0.42) }], contentContainerStyle: [styles.belowContent, { paddingBottom: pad.bottom + 12 }] }, actionsNode, refusedNode),
+        h(
+          ScrollView,
+          { testID: `${testID}-scroll`, style: [styles.below, { maxHeight: Math.max(120, height * (compact ? 0.5 : 0.42)) }], contentContainerStyle: [styles.belowContent, { paddingBottom: pad.bottom + 12 }] },
+          compact ? headNode : null,
+          actionsNode,
+          refusedNode,
+        ),
       );
 
   return h(
