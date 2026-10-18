@@ -1052,6 +1052,220 @@ test('P2-1: поздний отклик прежнего движения не �
   M.core.destroy();
 });
 
+// ---------- доработка PL10.2.2 после повторной проверки Codex: отклики координат порознь ----------
+
+// Анимации движения по координатам (0 — x, 1 — y): отклики «закончилась» x и y приходят порознь.
+const axesOf = (values, runs) => values.map((value) => runs.find((run) => run.steps[0].value === value));
+// Две точки пола для миски (единицы рисунка, внутри пределов пола у кота): перенос хостом между ними движет обе координаты.
+const BOWL_AT = [
+  [20, 210],
+  [45, 232],
+];
+// Начать движение предмета toy: мячик — кнопкой «Катнуть мячик» (движется только x), миска — хостом в дальнюю из BOWL_AT.
+// Контроль — ядро передвинуло предмет, и идут анимации обеих координат; from — значения координат в начале движения.
+async function movement(V, L, toy, prefix = 'play') {
+  const values = toyValues(V, toy, prefix);
+  const before = L.core.getState().play.toys[toy].at;
+  if (toy === 'ball') await V.press(`${prefix}-ball`);
+  else {
+    const far = BOWL_AT.reduce((a, b) => (Math.hypot(b[0] - before[0], b[1] - before[1]) > Math.hypot(a[0] - before[0], a[1] - before[1]) ? b : a));
+    let result = null;
+    await V.act(() => {
+      result = L.core.interact({ type: 'bowl', to: far });
+    });
+    assert.equal(result.ok, true, 'контроль: миска передвинута хостом');
+  }
+  assert.notDeepEqual(L.core.getState().play.toys[toy].at, before, 'контроль: предмет передвинут (ядро)');
+  const runs = runsOf(values);
+  assert.equal(runs.length, 2, 'контроль: идут обе координаты');
+  const axes = axesOf(values, runs);
+  assert.ok(axes.every((run) => run?.live), 'контроль: у каждой координаты своя идущая анимация');
+  return { values, runs, axes, from: values.map((value) => value.value) };
+}
+// Команды ввода игры, которые отображение отдало ядру после отметки mark (снятие движения их не вызывает).
+const inputSince = (L, mark) => L.names().slice(mark).filter((name) => /^(toy\.|stroke\.|interact$)/.test(name));
+
+test('P2-1: отклики координат порознь — закончилась одна (y или x), другая ещё идёт: системное «уменьшить движение» и motion: none снимают оставшуюся, предмет сразу на месте снимка, возврат не доигрывает; ни toy.*, ни interact, места ядра прежние; захват после отклика одной — по нарисованному месту, без скачка', async (t) => {
+  let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  const L = await lab();
+  const V = mount('play-axes', tree(L));
+  await V.render();
+  await started(L, V);
+  const L0 = await opened(L, V);
+  const causes = [
+    ['системное «уменьшить движение»', () => L.core.setReducedMotion(true), () => L.core.setReducedMotion(false)],
+    ['motion: none', () => L.core.setPreferences({ motion: 'none' }), () => L.core.setPreferences({ motion: 'normal' })],
+  ];
+  // Предмет и координата, чья анимация закончилась первой: мячик — y (сценарий проверки Codex), миска — y и x (у неё
+  // движутся обе, поэтому оставшаяся действительно не на цели в обоих порядках).
+  const cases = [
+    ['ball', 1],
+    ['bowl', 1],
+    ['bowl', 0],
+  ];
+  for (const [toy, first] of cases)
+    for (const [what, cause, undo] of causes) {
+      const label = `${toy}, первой закончилась ${first ? 'y' : 'x'}, ${what}`;
+      const { values, axes } = await movement(V, L, toy);
+      const [done, rest] = [axes[first], axes[1 - first]];
+      assert.notEqual(rest.steps[0].value.value, rest.steps[0].toValue, `${label}: контроль — оставшаяся координата не на цели`);
+      await V.act(() => done.end({ finished: true }));
+      assert.equal(done.live, false, `${label}: контроль — первая закончилась`);
+      assert.equal(rest.live, true, `${label}: контроль — оставшаяся ещё идёт`);
+      const toys = JSON.stringify(L.core.getState().play.toys);
+      const mark = L.names().length;
+      await V.act(cause);
+      assert.equal(rest.live, false, `${label}: оставшаяся координата снята`);
+      assert.deepEqual(runsOf(values), [], `${label}: идущих анимаций предмета нет`);
+      assert.ok(sameAt(values.map((value) => value.value), placeOf(L, L0, toy)), `${label}: сразу на месте снимка`);
+      assert.deepEqual(inputSince(L, mark), [], `${label}: ни toy.*, ни interact`);
+      assert.equal(JSON.stringify(L.core.getState().play.toys), toys, `${label}: места ядра прежние`);
+      await V.act(undo);
+      assert.deepEqual(runsOf(values), [], `${label}: возврат не доигрывает прежнее движение`);
+      assert.ok(sameAt(values.map((value) => value.value), placeOf(L, L0, toy)), `${label}: место прежнее`);
+    }
+  // Захват после отклика одной координаты — там, где предмет нарисован: закончившаяся — на своей цели, оставшаяся — по
+  // кривой; ядро берёт предмет с этого места (первая точка переноса).
+  for (const [toy, first] of [
+    ['ball', 1],
+    ['bowl', 0],
+  ]) {
+    const { axes, from: start } = await movement(V, L, toy);
+    const frame = G.toyBox(L0, toy, [0, 0]);
+    const from = G.toUnits(L0, [start[0] + frame.width / 2, start[1] + frame.height / 2]);
+    const to = L.core.getState().play.toys[toy].at;
+    const ms = axes[0].steps[0].duration;
+    await V.act(() => axes[first].end({ finished: true }));
+    clock += ms * 0.2;
+    const e = 1 - (1 - 0.2) ** 3;
+    const drawn = [0, 1].map((i) => (i === first ? to[i] : from[i] + (to[i] - from[i]) * e));
+    assert.ok(Math.abs(drawn[1 - first] - to[1 - first]) > 1, `${toy}: контроль — оставшаяся координата далеко от цели`);
+    assert.equal(await down(V, pt(L0, drawn)), true, `${toy}: под пальцем — там, где нарисован`);
+    const [took, point] = L.of('toy.drag').at(-1);
+    assert.equal(took, toy);
+    assert.ok(sameAt(point, drawn), `${toy}: первая точка переноса — нарисованное место: ${point} ≈ ${drawn}`);
+    assert.equal(axes[1 - first].live, false, `${toy}: перенос снял оставшуюся координату`);
+    await up(V, pt(L0, drawn));
+  }
+  // Обе координаты закончились сами — мячик на цели; затем без движения мгновенная перестановка — берут на новом месте
+  // снимка, а не на цели прежней кривой.
+  const done = await movement(V, L, 'ball');
+  await V.act(() => {
+    for (const run of done.axes) run.end({ finished: true });
+  });
+  assert.deepEqual(runsOf(done.values), [], 'контроль: обе закончились');
+  let at = L.core.getState().play.toys.ball.at;
+  assert.equal(await down(V, pt(L0, at)), true, 'закончилось само — под пальцем на цели');
+  assert.ok(sameAt(L.of('toy.drag').at(-1)[1], at), 'первая точка переноса — цель');
+  await up(V, pt(L0, at));
+  await V.act(() => L.core.setPreferences({ motion: 'none' }));
+  await V.press('play-ball');
+  assert.notDeepEqual(L.core.getState().play.toys.ball.at, at, 'контроль: мячик переставлен (ядро)');
+  assert.deepEqual(runsOf(done.values), [], 'без движения — анимаций нет');
+  at = L.core.getState().play.toys.ball.at;
+  assert.ok(sameAt(done.values.map((value) => value.value), placeOf(L, L0)), 'нарисован на новом месте снимка');
+  assert.equal(await down(V, pt(L0, at)), true, 'мгновенная перестановка — под пальцем на новом месте');
+  assert.ok(sameAt(L.of('toy.drag').at(-1)[1], at), 'первая точка переноса — новое место');
+  await up(V, pt(L0, at));
+  await V.act(() => L.core.destroy());
+});
+
+test('P2-1: отклики координат порознь — поздние отклики прежнего движения не трогают новое; после отклика одной координаты оставшуюся снимают фон (AppState и видимость ядра у хоста), закрытие, нулевая раскладка, смена ядра, отключение и размонтирование; независимые экземпляры — каждый своё', async () => {
+  const L = await lab();
+  const V = mount('play-axes-more', tree(L));
+  await V.render();
+  await started(L, V);
+  let L0 = await opened(L, V);
+  // Прежнее движение: y закончилась, x снята новым. Поздние «закончилась» прежних x и y приходят после начала нового — оно
+  // идёт обеими координатами; затем закончилась y нового — «уменьшить движение» снимает его x.
+  const old = await movement(V, L, 'bowl');
+  await V.act(() => old.axes[1].end({ finished: true }));
+  const next = await movement(V, L, 'bowl');
+  assert.equal(old.axes[0].live, false, 'новое движение сняло прежнюю x');
+  for (const run of old.axes) run.late({ finished: true });
+  assert.ok(next.runs.every((run) => run.live), 'поздние отклики прежнего новое не трогают');
+  await V.act(() => next.axes[1].end({ finished: true }));
+  old.axes[1].late({ finished: true });
+  assert.equal(next.axes[0].live, true, 'контроль: x нового ещё идёт');
+  await V.act(() => L.core.setReducedMotion(true));
+  assert.equal(next.axes[0].live, false, 'x нового снята');
+  assert.ok(sameAt(next.values.map((value) => value.value), placeOf(L, L0, 'bowl')), 'миска на месте снимка');
+  await V.act(() => L.core.setReducedMotion(false));
+  // Мячик: закончилась y, x ещё идёт.
+  const partial = async (M, W) => {
+    const roll = await movement(W, M, 'ball');
+    await W.act(() => roll.axes[1].end({ finished: true }));
+    assert.equal(roll.axes[0].live, true, 'контроль: x ещё идёт');
+    return roll;
+  };
+  for (const [what, cause, undo] of [
+    ['фон (AppState)', () => rn.emit('change', 'background'), () => rn.emit('change', 'active')],
+    ['фон у хоста (setVisible)', () => L.core.setVisible(false), () => L.core.setVisible(true)],
+  ]) {
+    const roll = await partial(L, V);
+    const mark = L.names().length;
+    await V.act(cause);
+    assert.equal(roll.axes[0].live, false, `${what}: оставшаяся x снята`);
+    assert.ok(sameAt(roll.values.map((value) => value.value), placeOf(L, L0)), `${what}: на месте снимка`);
+    await V.act(undo);
+    assert.deepEqual(runsOf(roll.values), [], `${what}: возврат не доигрывает`);
+    assert.deepEqual(inputSince(L, mark), [], `${what}: ни toy.*, ни interact`);
+  }
+  let roll = await partial(L, V);
+  await V.act(() => L.core.close());
+  assert.equal(roll.axes[0].live, false, 'закрытие — оставшаяся x снята');
+  L0 = await opened(L, V);
+  assert.deepEqual(runsOf(roll.values), []);
+  assert.ok(sameAt(roll.values.map((value) => value.value), placeOf(L, L0)), 'новое открытие — на месте снимка');
+  roll = await partial(L, V);
+  await V.fire('play-box', 'onLayout', layout(0, 0));
+  assert.equal(roll.axes[0].live, false, 'нулевая раскладка — оставшаяся x снята');
+  L0 = await measure(V, L);
+  assert.deepEqual(runsOf(roll.values), []);
+  // Независимые экземпляры (свои ядра и поверхности): у одного закончилась y, у другого идут обе — «уменьшить движение»
+  // первого снимает только его x; отклик и motion: none второго первый не трогают.
+  const A = await lab();
+  const VA = mount('play-axes-a', tree(A));
+  await VA.render();
+  await started(A, VA);
+  await opened(A, VA);
+  const B = await lab();
+  const VB = mount('play-axes-b', tree(B));
+  await VB.render();
+  await started(B, VB);
+  await opened(B, VB);
+  const a = await partial(A, VA);
+  const b = await movement(VB, B, 'ball');
+  await VA.act(() => A.core.setReducedMotion(true));
+  assert.equal(a.axes[0].live, false, 'первый — x снята');
+  assert.ok(b.runs.every((run) => run.live), 'второй — своё движение');
+  await VB.act(() => b.axes[1].end({ finished: true }));
+  assert.equal(b.axes[0].live, true, 'второй — x ещё идёт');
+  await VB.act(() => B.core.setPreferences({ motion: 'none' }));
+  assert.equal(b.axes[0].live, false, 'второй — motion: none снял свою x');
+  await VA.act(() => A.core.destroy());
+  await VB.act(() => B.core.destroy());
+  // Смена ядра, отключение и размонтирование после отклика одной координаты — оставшаяся снята.
+  roll = await partial(L, V);
+  const M = await lab();
+  await V.act(() => M.core.start());
+  await V.act(() => M.plan.advance(8000));
+  await V.render(tree(M));
+  assert.equal(roll.axes[0].live, false, 'смена ядра — оставшаяся x прежнего снята');
+  await opened(M, V);
+  assert.deepEqual(runsOf(roll.values), [], 'новое ядро — без движения от мест прежнего');
+  roll = await partial(M, V);
+  await V.act(() => M.core.destroy());
+  assert.equal(roll.axes[0].live, false, 'отключение — оставшаяся x снята');
+  await V.render(tree(L));
+  await opened(L, V);
+  roll = await partial(L, V);
+  await V.unmount();
+  assert.equal(roll.axes[0].live, false, 'размонтирование — оставшаяся x снята');
+  L.core.destroy();
+});
+
 test('P2-2: системная отмена без отпускания — inactive → active и background → active без старых End/Release/Terminate: новый жест (другим пальцем и тем же identifier) без закрытия игры; пока неактивно — не начинается ни через Grant, ни через onResponderStart; поздние события прежнего касания не гладят и не завершают новый; повтор событий безопасен; ни лапы, ни drop отменённого', async () => {
   const L = await lab();
   const V = mount('play-recover', tree(L));

@@ -38,7 +38,7 @@
 //
 // Предметы: движение — Animated (x и y) только при движении и на виду; «уменьшить движение» (система или motion: 'none'),
 // фон, отключение, смена ядра, закрытие, нулевая раскладка и размонтирование снимают уже начатое движение и модель его кривой
-// — предмет сразу на месте снимка.
+// — предмет сразу на месте снимка. Движение — своё, пока идёт хоть одна его координата (отклики x и y — порознь).
 
 import { createElement as h, Fragment, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, AppState, Easing, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -91,16 +91,30 @@ function touchPoint(ne, id) {
 }
 const ended = (ne, id) => (Array.isArray(ne?.changedTouches) ? ne.changedTouches.some((item) => item?.identifier === id) : ne?.identifier === id);
 
-// Нарисованное место предмета t (единицы рисунка) в момент at: идёт движение — по той же кривой, что Animated (выход
-// кубический), иначе — где поставлен.
+// Движение предмета t: t.run — его анимации, которые ещё идут (владение движением: предмет движется, пока идёт хоть одна
+// координата); t.model — кривая последнего движения (from → to, начало, длительность, runs — анимации x и y), её снимает
+// только halt. Отклики x и y приходят порознь: закончившаяся координата покидает t.run, движение другой остаётся своим
+// (доработка PL10.2.2).
+const moving = (t) => t.run.length > 0;
+
+// Нарисованное место предмета t (единицы рисунка) в момент at: координата, чья анимация идёт, — по той же кривой, что
+// Animated (выход кубический), закончившаяся — на своей цели; без движения — где поставлен.
 function drawnAt(t, at = now()) {
-  if (!t.model) return t.shown;
-  const k = Math.min(1, Math.max(0, (at - t.model.start) / t.model.ms));
+  const m = t.model;
+  if (!m) return t.shown;
+  const k = Math.min(1, Math.max(0, (at - m.start) / m.ms));
   const e = 1 - (1 - k) ** 3;
-  return [t.model.from[0] + (t.model.to[0] - t.model.from[0]) * e, t.model.from[1] + (t.model.to[1] - t.model.from[1]) * e];
+  return m.to.map((to, i) => (t.run.includes(m.runs[i]) ? m.from[i] + (to - m.from[i]) * e : to));
 }
 
-// Снять движение предмета t: анимации остановлены (их поздний отклик — finished: false — модель не трогает), модели кривой нет.
+// Анимация anim закончилась сама (finished: true): её координата на цели и движению больше не принадлежит. Отклик прежнего
+// движения (снятого или заменённого) новое не трогает: его анимаций в t.run нет; отклик снятой (finished: false) сюда не
+// приходит — её снимает halt.
+function arrived(t, anim) {
+  t.run = t.run.filter((item) => item !== anim);
+}
+
+// Снять движение предмета t: идущие анимации остановлены (их отклик — finished: false — ничего не трогает), кривой нет.
 function halt(t) {
   for (const anim of t.run.splice(0)) anim.stop();
   t.model = null;
@@ -252,7 +266,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   // Фон: начатые движения предметов сняты, предметы — на месте снимка (возврат не доигрывает прежнее движение).
   const settle = useCallback(() => {
     for (const t of Object.values(toyState.current)) {
-      if (!t.run.length && !t.model) continue;
+      if (!moving(t)) continue;
       halt(t);
       if (t.goal) {
         t.x.setValue(t.goal[0]);
@@ -414,8 +428,8 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
       if (endedDrag) rolling.current = '';
       const relayout = t.key !== placeKey;
       t.key = placeKey;
-      // На месте и не движется (или движется, и движение ещё разрешено) — ничего.
-      if (near(t.shown, at) && !relayout && !(still && t.model)) continue;
+      // На месте и не движется (или движется хоть одной координатой, и движение ещё разрешено) — ничего.
+      if (near(t.shown, at) && !relayout && !(still && moving(t))) continue;
       const from = drawnAt(t) ?? at;
       halt(t);
       const goal = toyBox(L, toy, at);
@@ -428,18 +442,17 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
         continue;
       }
       const ms = toy === 'ball' ? Math.min(900, 300 + Math.abs(at[0] - from[0]) * L.s * 3) : 300;
-      const model = { from, to: [...at], start: now(), ms };
-      t.model = model;
-      t.shown = [...at];
       const start = toyBox(L, toy, from);
       t.x.setValue(start.left);
       t.y.setValue(start.top);
       const easing = Easing.out(Easing.cubic);
-      t.run = [Animated.timing(t.x, { toValue: x, duration: ms, easing, useNativeDriver: true }), Animated.timing(t.y, { toValue: y, duration: ms, easing, useNativeDriver: true })];
-      // Отклик своей анимации снимает только свою модель (поздний отклик прежней новую не трогает).
-      for (const anim of t.run)
+      const runs = [Animated.timing(t.x, { toValue: x, duration: ms, easing, useNativeDriver: true }), Animated.timing(t.y, { toValue: y, duration: ms, easing, useNativeDriver: true })];
+      const model = { from, to: [...at], start: now(), ms, runs };
+      Object.assign(t, { model, run: [...runs], shown: [...at] });
+      // Отклик «закончилась» снимает только свою координату своего движения (arrived).
+      for (const anim of runs)
         anim.start(({ finished } = {}) => {
-          if (finished && t.model === model) t.model = null;
+          if (finished) arrived(t, anim);
         });
     }
     // Ядро, drawnKey и ключ раскладки задают места; motion и still — плавность.
