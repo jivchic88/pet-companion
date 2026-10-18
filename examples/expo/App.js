@@ -1,12 +1,16 @@
-// Минимальный мобильный потребитель (PL10.1): питомец на экране — PetView и штатные наборы pet-companion/native (рисунки
-// react-native-svg, без WebView); выбор кота или собаки, имя с клавиатуры, облик и платок, движение, «Погладить»,
-// «Покормить», подтверждённое занятие хоста, отключение и повторное подключение. Ниже — диагностика PL09: хранение
-// (настоящий expo-sqlite), жизненный цикл (useNativeLifecycle — единственный владелец), «Новое ядро», резервирование дня,
-// занятый файл, журнал. Все решения — ядро: подписи и доступность кнопок — по снимку, команда всё равно проходит его
-// проверку. Сценарии и что записать — README.md рядом.
+// Мобильный потребитель (PL10.1, PL10.2.1): питомец на экране — PetView и штатные наборы pet-companion/native (рисунки
+// react-native-svg, без WebView) внутри координатора PetProvider (один владелец объявления отображения ядра) и уголок
+// PetCorner (окно по view снимка: вход, «Закрыть», Android «Назад»; комната, вещи ступени, имя, облик, аксессуары,
+// движение, реплики, кормление, счёт и ступени); отступы безопасной области — useSafeAreaInsets (react-native-safe-area-
+// context, входит в Expo Go SDK 58). Ниже — прежние кнопки PL10.1 (выбор кота или собаки, имя с клавиатуры, облик и
+// платок, движение, «Погладить», «Покормить», подтверждённое занятие хоста, отключение и повторное подключение) и
+// диагностика PL09: хранение (настоящий expo-sqlite), жизненный цикл (useNativeLifecycle — единственный владелец), «Новое
+// ядро», резервирование дня, занятый файл, журнал. Все решения — ядро: подписи и доступность кнопок — по снимку, команда
+// всё равно проходит его проверку. Сценарии и что записать — README.md рядом.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { catNative, dogNative, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { catNative, dogNative, PetCorner, PetProvider, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
 import { busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
 
 const KITS = [catNative, dogNative];
@@ -41,7 +45,18 @@ function adopt(own, turn, core) {
   return false;
 }
 
+// Корень: SafeAreaProvider измеряет системные отступы окна (вырез, строка состояния, полоса жестов, нижний индикатор) —
+// экран и уголок получают их настоящими значениями, а не константами.
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <Screen />
+    </SafeAreaProvider>
+  );
+}
+
+function Screen() {
+  const insets = useSafeAreaInsets();
   const [store, setStore] = useState(null);
   const [core, setCore] = useState(null);
   const [lines, setLines] = useState([]);
@@ -69,7 +84,7 @@ export default function App() {
     setChecks((all) => ({ ...all, [name]: value }));
   }, []);
   // Итог для человека: строка состояния; важное (отказы, итог занятия хоста) — ещё и скринридеру, один раз. Объявления
-  // самого питомца (лакомство, готовое имя) делает PetView по эффектам ядра — здесь они не повторяются.
+  // самого питомца (лакомство, готовое имя) делает координатор PetProvider по эффектам ядра — здесь они не повторяются.
   const tell = useCallback((text, important = false) => {
     if (!owner.current) return;
     setNote(text);
@@ -137,11 +152,13 @@ export default function App() {
   useEffect(() => {
     if (!core || !store) return undefined;
     const first = core.getState();
-    let last = { cat: first?.save.cat.status, visible: first?.visible, reaction: first?.pose.reaction?.type ?? '—', page: first?.pose.shown.page };
+    let last = { cat: first?.save.cat.status, visible: first?.visible, reaction: first?.pose.reaction?.type ?? '—', page: first?.pose.shown.page, view: first?.view.open ?? '—', views: first?.display.views.join(',') };
     return core.subscribe(
       (update) => {
         const s = update.snapshot;
-        const now = { cat: s.save.cat.status, visible: s.visible, reaction: s.pose.reaction?.type ?? '—', page: s.pose.shown.page };
+        const now = { cat: s.save.cat.status, visible: s.visible, reaction: s.pose.reaction?.type ?? '—', page: s.pose.shown.page, view: s.view.open ?? '—', views: s.display.views.join(',') };
+        if (now.view !== last.view) say(`вид: ${last.view} → ${now.view} (${update.reason})`);
+        if (now.views !== last.views) say(`объявлены виды: [${last.views ?? ''}] → [${now.views}]`);
         if (now.cat !== last.cat) say(`cat: ${last.cat} → ${now.cat}`);
         if (now.visible !== last.visible) say(`ядро visible: ${last.visible} → ${now.visible}`);
         if (now.reaction !== last.reaction) say(`реакция: ${last.reaction} → ${now.reaction}`);
@@ -349,6 +366,8 @@ export default function App() {
     ['Сохранение cat, companion, look, treat', state ? ['cat', 'companion', 'look', 'treat'].map((key) => state.save[key].status).join(', ') : '—'],
     ['cat: pending, unsaved', state ? `[${state.save.cat.pending}], [${state.save.cat.unsaved}]` : '—'],
     ['Реакция / поза', state ? `${state.pose.reaction?.type ?? '—'} / ${state.pose.shown.page}` : '—'],
+    ['Вид / объявлено ядру', state ? `${state.view.open ?? '—'} / views [${state.display.views.join(', ')}] · pets [${state.display.pets?.join(', ') ?? '—'}] · scenes ${JSON.stringify(state.display.scenes)}` : '—'],
+    ['Отступы (insets)', `${Math.round(insets.top)} / ${Math.round(insets.right)} / ${Math.round(insets.bottom)} / ${Math.round(insets.left)}`],
     ['Лакомство', state?.treat ?? '—'],
     ['Знаки хоста: всего / сегодня / день', progress ? `${progress.marks} / ${progress.today} / ${store.host.today()}${store.host.shift ? ` (сдвиг +${store.host.shift})` : ''}` : '—'],
   ];
@@ -376,11 +395,19 @@ export default function App() {
   });
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" testID="screen">
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.page, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 48, paddingLeft: insets.left + 16, paddingRight: insets.right + 16 }]}
+      keyboardShouldPersistTaps="handled"
+      testID="screen"
+    >
       <Text style={styles.title} accessibilityRole="header">
         pet-companion · нативный пример
       </Text>
-      <View style={styles.stage}>{core ? <PetView core={core} pets={PETS} kits={KITS} size={200} testID="pet" /> : <Text style={styles.off}>Питомец отключён</Text>}</View>
+      <PetProvider core={core} pets={PETS} kits={KITS}>
+        <View style={styles.stage}>{core ? <PetView size={200} testID="pet" /> : <Text style={styles.off}>Питомец отключён</Text>}</View>
+        {core ? <PetCorner insets={insets} testID="corner" /> : null}
+      </PetProvider>
       <Text style={styles.status} testID="status">
         {`${store ? `Хранилище: ${store.storage.status}` : 'Хранилище: загрузка…'} · ${core ? `ядро ${core.status}` : 'ядро отключено'}${note ? `\n${note}` : ''}`}
       </Text>
@@ -484,7 +511,7 @@ function Row({ id, label, value }) {
 const INK = '#1d2024';
 const styles = StyleSheet.create({
   screen: { backgroundColor: '#f6f2ea' },
-  page: { padding: 16, paddingTop: 56, paddingBottom: 48, gap: 10 },
+  page: { gap: 10 },
   title: { fontSize: 20, fontWeight: '600', color: INK },
   stage: { alignItems: 'center', minHeight: 200, justifyContent: 'center' },
   off: { fontSize: 16, color: INK },

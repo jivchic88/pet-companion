@@ -5,7 +5,7 @@
 // Набор не решает, какую позу показать: Figure получает позу, облик и аксессуар из снимка ядра.
 
 import { Circle, ClipPath, Defs, Ellipse, G, Path } from 'react-native-svg';
-import { badge, bowl, grow, h, idPrefix, linear, move, radial, scarfFill, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
+import { badge, bodyShift, bowl, grow, h, idPrefix, linear, move, radial, scarfFill, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
 
 // Палитры обликов (cat-art.mjs, CAT_COATS): halo и bridge — непрозрачность светлой морды и переносицы, marks — отметины.
 const COATS = Object.freeze({
@@ -294,23 +294,39 @@ function head(p, c, P) {
 }
 
 // Рисунок кота: поза, облик (неизвестный — дымчатый, как веб), надетый аксессуар; toward — сторона предмета; prefix —
-// префикс id градиентов экземпляра. Только элементы — корневой <Svg viewBox="0 0 220 204"> ставит отображение.
-function CatFigure({ pose = 'calm', coat = 'smoke', accessory = 'scarf', toward = '', prefix = '' } = {}) {
+// префикс id градиентов экземпляра; room — рисунок в сцене комнаты уголка ({ feed } — сдвиг к миске, своей миски нет).
+// Только элементы — корневой <Svg viewBox="0 0 220 204"> ставит отображение.
+function CatFigure({ pose = 'calm', coat = 'smoke', accessory = 'scarf', toward = '', prefix = '', room = null } = {}) {
   const c = Object.hasOwn(COATS, coat) ? COATS[coat] : COATS.smoke;
   const p = idPrefix(prefix, 'cat');
   const P = params(pose, toward);
+  const [x, y] = bodyShift(P, pose, room);
   return h(
     G,
     null,
     defs(p, c),
     h(Ellipse, { cx: 104, cy: 189, rx: 72, ry: 7.5, fill: `url(#${p}-ground)` }),
-    h(G, { transform: tf(move(P.allX, P.allY)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(c) : null),
-    P.bowl ? bowl(P.bowl === 'full') : null,
+    h(G, { transform: tf(move(x, y)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(c) : null),
+    P.bowl && !room ? bowl(P.bowl === 'full') : null,
   );
 }
 
-// Набор: все позы словаря, кроме settle (устроился на новом месте — вход legacy-отображения, нативу PL10.1 не нужен:
-// явная замена — content); сценок (stretch, curl), вещей уголка и предметов игры нет — PL10.2.
+// Клубок — своя игрушка кота в уголке (cat-art.mjs, yarnArt), единицы сцены 400×250, исходное место (36, 231).
+function CatItem({ id } = {}) {
+  if (id !== 'yarn') return h(G, null);
+  return h(
+    G,
+    null,
+    h(Ellipse, { cx: 37, cy: 242, rx: 14, ry: 2.4, fill: '#3a2414', opacity: 0.16 }),
+    h(Path, { d: 'M45 238q4 4 8 1', fill: 'none', stroke: '#9e4528', strokeWidth: 1.6, strokeLinecap: 'round' }),
+    h(Circle, { cx: 36, cy: 231, r: 11, fill: '#cf6741', stroke: '#9e4528', strokeWidth: 2 }),
+    h(Path, { d: 'M27.5 225q8-3.5 16 3.5M26 231.5q9-5.5 19 2M28.5 237.5q7.5-4.5 13.5.5M33 220.8q-4.5 7.5 0 19', fill: 'none', stroke: '#e58a5f', strokeWidth: 1.7, strokeLinecap: 'round' }),
+  );
+}
+
+// Набор: все позы словаря, кроме settle (устроился на новом месте — вход legacy-отображения, нативу не нужен: явная замена
+// — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room) и клубок; сценок (stretch, curl) и предметов игры нет —
+// PL10.2.2–PL10.2.4.
 export const catNative = Object.freeze({
   pet: 'cat',
   poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn']),
@@ -318,4 +334,7 @@ export const catNative = Object.freeze({
   coats: Object.freeze(Object.keys(COATS)),
   accessories: Object.freeze(['scarf', 'plaid', 'badge']),
   Figure: CatFigure,
+  room: true,
+  items: Object.freeze(['yarn']),
+  Item: CatItem,
 });

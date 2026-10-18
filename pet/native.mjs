@@ -1,8 +1,9 @@
 // pet-companion/native — React Native (README, «Мобильное хранение и жизненный цикл», «Нативное отображение»;
 // docs/ARCHITECTURE.md § 6.1, § 12.2): жизненный цикл приложения для ядра (useNativeLifecycle, PL09), снимок для React
-// (usePetState — тот же общий хук, что у pet-companion/react, без веб-оболочки) и минимальное нативное отображение PL10.1 —
-// компонент PetView и штатные наборы catNative, dogNative (рисунки react-native-svg). Уголок, «Поиграть», «Обустроить
-// уголок» и сценки — PL10.2, этим входом пока не обещаны. Импортирует react, react-native, react-native-svg, pet/hooks/**,
+// (usePetState — тот же общий хук, что у pet-companion/react, без веб-оболочки), нативное отображение PL10.1 — компонент
+// PetView и штатные наборы catNative, dogNative (рисунки react-native-svg) — и PL10.2.1: координатор поверхностей
+// PetProvider (один владелец объявления отображения ядра) и уголок PetCorner. «Поиграть», «Обустроить уголок» и сценки —
+// PL10.2.2–PL10.2.4, этим входом пока не обещаны. Импортирует react, react-native, react-native-svg, pet/hooks/**,
 // pet/native/** и ядро: ни DOM, ни CSS, ни веба. Импорт ничего не делает: подписки — только в эффектах.
 
 import { useEffect, useState } from 'react';
@@ -11,6 +12,8 @@ import { bindLifecycle } from './native/lifecycle.mjs';
 
 export { usePetState } from './hooks/state.mjs';
 export { PetView } from './native/view.mjs';
+export { PetProvider } from './native/provider.mjs';
+export { PetCorner } from './native/corner.mjs';
 export { catNative } from './native/cat.mjs';
 export { dogNative } from './native/dog.mjs';
 

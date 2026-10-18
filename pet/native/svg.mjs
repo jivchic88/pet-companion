@@ -74,28 +74,41 @@ export function badge(x, y, angle, cx, cy) {
   );
 }
 
-// Миска лакомства у передних лап (поза «ест» — с кормом, «доволен после лакомства» — пустая): рисунок миски веба
-// (cat-art.mjs, BOWL и FOOD) в рамке рисунка питомца.
-export function bowl(full) {
-  return h(
-    G,
-    { transform: 'translate(-120, -14)' },
-    h(Ellipse, { cx: 170, cy: 213, rx: 25, ry: 4.2, fill: '#3a2414', opacity: 0.16 }),
-    h(Path, { d: 'M147.5 200.5Q149.5 212.5 158 213.5H182Q190.5 212.5 192.5 200.5Z', fill: '#4f8a6e', stroke: '#2f5249', strokeWidth: 2, strokeLinejoin: 'round' }),
-    h(Path, { d: 'M150.5 206.5Q170 210.5 189.5 206.5', fill: 'none', stroke: '#f2ead9', strokeWidth: 2, strokeLinecap: 'round', opacity: 0.55 }),
-    h(Ellipse, { cx: 170, cy: 200.5, rx: 22.5, ry: 5.2, fill: '#6aa58a', stroke: '#2f5249', strokeWidth: 2 }),
-    h(Ellipse, { cx: 170, cy: 200.8, rx: 18, ry: 3.4, fill: '#2f5249' }),
+// Миска лакомства — рисунок миски веба (cat-art.mjs, BOWL и FOOD) в единицах сцены 400×250, на исходном месте (170, 205):
+// корм — пока питомец ест (full). Уголок (room.mjs) ставит её на место из расстановки ядра.
+export function bowlShape(full) {
+  return [
+    h(Ellipse, { key: 'shade', cx: 170, cy: 213, rx: 25, ry: 4.2, fill: '#3a2414', opacity: 0.16 }),
+    h(Path, { key: 'body', d: 'M147.5 200.5Q149.5 212.5 158 213.5H182Q190.5 212.5 192.5 200.5Z', fill: '#4f8a6e', stroke: '#2f5249', strokeWidth: 2, strokeLinejoin: 'round' }),
+    h(Path, { key: 'shine', d: 'M150.5 206.5Q170 210.5 189.5 206.5', fill: 'none', stroke: '#f2ead9', strokeWidth: 2, strokeLinecap: 'round', opacity: 0.55 }),
+    h(Ellipse, { key: 'rim', cx: 170, cy: 200.5, rx: 22.5, ry: 5.2, fill: '#6aa58a', stroke: '#2f5249', strokeWidth: 2 }),
+    h(Ellipse, { key: 'inside', cx: 170, cy: 200.8, rx: 18, ry: 3.4, fill: '#2f5249' }),
     full
       ? h(
           G,
-          null,
+          { key: 'food' },
           h(Path, { d: 'M153.5 200.8Q156 193.5 162 194Q166 190.5 171 192.5Q177 190 180 194.5Q185.5 195 186.5 200.8Z', fill: '#b0743f', stroke: '#7a4a22', strokeWidth: 1.4, strokeLinejoin: 'round' }),
           h(Circle, { cx: 161, cy: 196.6, r: 2.1, fill: '#d39a5e' }),
           h(Circle, { cx: 170.5, cy: 194.6, r: 2.2, fill: '#d39a5e' }),
           h(Circle, { cx: 178.6, cy: 197, r: 2, fill: '#d39a5e' }),
         )
       : null,
-  );
+  ];
+}
+
+// Миска у передних лап отдельного рисунка (поза «ест» — с кормом, «доволен после лакомства» — пустая): та же миска в рамке
+// рисунка питомца. В сцене комнаты (свойство room рисунка) миску рисует уголок — на её месте из расстановки.
+export function bowl(full) {
+  return h(G, { transform: 'translate(-120, -14)' }, ...bowlShape(full));
+}
+
+// Сдвиг всего рисунка: отдельно — по таблице позы (P.allX, P.allY); в сцене комнаты поза «ест» идёт к миске, как веб
+// (pet.css, dog.css: --all-x = --feed-x − 30, --all-y = --feed-y + 12; feed — room.feedShift ядра в единицах рисунка).
+export const ROOM_FEED = Object.freeze([-30, 12]);
+export function bodyShift(P, pose, room) {
+  if (!room || pose !== 'feed') return [P.allX, P.allY];
+  const [x, y] = Array.isArray(room.feed) ? room.feed : [0, 0];
+  return [ROOM_FEED[0] + (Number(x) || 0), ROOM_FEED[1] + (Number(y) || 0)];
 }
 
 // Префикс id внутри рисунка: только латиница, цифры и дефис (useId React даёт «:r1:» — двоеточия в url(#…) недопустимы).

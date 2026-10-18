@@ -5,7 +5,7 @@
 // один из трёх платков. Набор не решает, какую позу показать: Figure получает позу, облик и аксессуар из снимка ядра.
 
 import { Circle, ClipPath, Defs, Ellipse, G, Path } from 'react-native-svg';
-import { badge, bowl, grow, h, idPrefix, linear, move, radial, scarfFill, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
+import { badge, bodyShift, bowl, grow, h, idPrefix, linear, move, radial, scarfFill, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
 
 // Палитры обликов (dog-art.mjs, DOG_COATS): lid / lidR — тон морды у глаз, blaze — светлая полоса на лбу, marks —
 // отметины (patch — пятно у правого глаза и на боку, tan — подпалины-«брови»).
@@ -311,24 +311,55 @@ function head(p, c, P) {
 }
 
 // Рисунок собаки: поза, облик (неизвестный — карамельный, как веб), надетый аксессуар; toward — сторона предмета; prefix —
-// префикс id градиентов экземпляра. Только элементы — корневой <Svg viewBox="0 0 220 204"> ставит отображение.
-function DogFigure({ pose = 'calm', coat = 'caramel', accessory = 'scarf', toward = '', prefix = '' } = {}) {
+// префикс id градиентов экземпляра; room — рисунок в сцене комнаты уголка ({ feed } — сдвиг к миске, своей миски нет).
+// Только элементы — корневой <Svg viewBox="0 0 220 204"> ставит отображение.
+function DogFigure({ pose = 'calm', coat = 'caramel', accessory = 'scarf', toward = '', prefix = '', room = null } = {}) {
   const c = Object.hasOwn(COATS, coat) ? COATS[coat] : COATS.caramel;
   const p = idPrefix(prefix, 'dog');
   const P = params(pose, toward);
+  const [x, y] = bodyShift(P, pose, room);
   return h(
     G,
     null,
     defs(p, c),
     h(Ellipse, { cx: 102, cy: 189, rx: 76, ry: 7.5, fill: `url(#${p}-ground)` }),
-    h(G, { transform: tf(move(P.allX, P.allY)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(p, c) : null),
-    P.bowl ? bowl(P.bowl === 'full') : null,
+    h(G, { transform: tf(move(x, y)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(p, c) : null),
+    P.bowl && !room ? bowl(P.bowl === 'full') : null,
   );
 }
 
+// Свои вещи собаки в уголке (dog-art.mjs, ropeArt и ballArt): канат — сразу, мячик — со ступени «Наш ритуал»; единицы
+// сцены 400×250, исходные места (36, 233) и (283, 234).
+function DogItem({ id } = {}) {
+  if (id === 'rope') {
+    return h(
+      G,
+      null,
+      h(Ellipse, { cx: 36, cy: 240, rx: 23, ry: 2.4, fill: '#3a2414', opacity: 0.16 }),
+      h(Path, { d: 'M19 233Q36 226.5 53 233', fill: 'none', stroke: '#8b6a47', strokeWidth: 8.4, strokeLinecap: 'round' }),
+      h(Path, { d: 'M19 233Q36 226.5 53 233', fill: 'none', stroke: '#efe3d0', strokeWidth: 5.6, strokeLinecap: 'round' }),
+      h(Path, { d: 'M24.5 233.6l3-5M30.2 231.6l3-5M36 230.9l3-5M41.8 231.4l3-5M47.4 233.1l3-4.8', stroke: '#cf6741', strokeWidth: 2, strokeLinecap: 'round' }),
+      h(Circle, { cx: 17, cy: 234, r: 5, fill: '#cf6741', stroke: '#9e4528', strokeWidth: 1.8 }),
+      h(Circle, { cx: 55, cy: 234, r: 5, fill: '#cf6741', stroke: '#9e4528', strokeWidth: 1.8 }),
+      h(Path, { d: 'M13 237.5l-2.2 3.4M15.6 239l-.8 3.6M56.4 239l.8 3.6M59 237.5l2.2 3.4', stroke: '#9e4528', strokeWidth: 1.6, strokeLinecap: 'round' }),
+    );
+  }
+  if (id === 'ball') {
+    return h(
+      G,
+      null,
+      h(Ellipse, { cx: 283, cy: 244.5, rx: 11.5, ry: 2.8, fill: '#3a2414', opacity: 0.18 }),
+      h(Circle, { cx: 283, cy: 233, r: 11, fill: '#e3b94a', stroke: '#9a7420', strokeWidth: 2 }),
+      h(Path, { d: 'M273.8 227.4Q283 233 292.2 227.4M273.8 238.6Q283 233 292.2 238.6', fill: 'none', stroke: '#f8edd0', strokeWidth: 2.2, strokeLinecap: 'round' }),
+      h(Ellipse, { cx: 279, cy: 228.2, rx: 3, ry: 1.8, fill: '#ffffff', opacity: 0.45 }),
+    );
+  }
+  return h(G, null);
+}
+
 // Набор: все позы словаря, включая «Дай лапу» (поднятая лапа), кроме settle (устроился на новом месте — вход
-// legacy-отображения, нативу PL10.1 не нужен: явная замена — content); сценок (fetch), вещей уголка и предметов игры нет —
-// PL10.2.
+// legacy-отображения, нативу не нужен: явная замена — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room), канат
+// и мячик; сценок (fetch) и предметов игры нет — PL10.2.2–PL10.2.4.
 export const dogNative = Object.freeze({
   pet: 'dog',
   poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn']),
@@ -336,4 +367,7 @@ export const dogNative = Object.freeze({
   coats: Object.freeze(Object.keys(COATS)),
   accessories: Object.freeze(['scarf', 'plaid', 'badge']),
   Figure: DogFigure,
+  room: true,
+  items: Object.freeze(['rope', 'ball']),
+  Item: DogItem,
 });

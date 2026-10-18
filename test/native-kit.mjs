@@ -144,12 +144,15 @@ export async function sqliteSite(initial = {}, { ns = 'qa', mode = 'wal', busyTi
   return self;
 }
 
-// Подделка React Native: AppState (currentState, change, blur) и AccessibilityInfo (isReduceMotionEnabled — ручное
-// обещание, reduceMotionChanged, announceForAccessibility — в announced). Счётчики подписок и снятий; emit — событие всем
-// текущим слушателям; animations — учёт анимаций подделки Animated (test/fakes/react-native.mjs): started, stopped и
-// идущие (live), finish() — все идущие закончились сами.
+// Подделка React Native: AppState (currentState, change, blur), AccessibilityInfo (isReduceMotionEnabled — ручное
+// обещание, reduceMotionChanged, announceForAccessibility — в announced, sendAccessibilityEvent — в focused), Keyboard
+// (keyboardWillShow/Hide, keyboardDidShow/Hide; keyboard(event, data) — событие слушателям) и Platform (OS — platform).
+// Счётчики подписок и снятий; emit — событие всем текущим слушателям; animations — учёт анимаций подделки Animated
+// (test/fakes/react-native.mjs): started, stopped и идущие (live), finish() — все идущие закончились сами; scrolls —
+// вызовы scrollTo у ScrollView.
 export function system({ state = 'active' } = {}) {
   const listeners = { change: new Set(), blur: new Set(), reduceMotionChanged: new Set() };
+  const keys = { keyboardWillShow: new Set(), keyboardWillHide: new Set(), keyboardDidShow: new Set(), keyboardDidHide: new Set() };
   const counts = { add: 0, remove: 0, ask: 0 };
   const asks = [];
   const target = (names) => ({
@@ -170,6 +173,7 @@ export function system({ state = 'active' } = {}) {
   });
   const AppState = Object.assign(target(['change', 'blur']), { currentState: state });
   const announced = [];
+  const focused = [];
   const AccessibilityInfo = Object.assign(target(['reduceMotionChanged']), {
     isReduceMotionEnabled() {
       counts.ask += 1;
@@ -178,7 +182,23 @@ export function system({ state = 'active' } = {}) {
     announceForAccessibility(text) {
       announced.push(text);
     },
+    sendAccessibilityEvent(node, type) {
+      focused.push({ testID: node?.testID ?? null, type });
+    },
   });
+  const Keyboard = {
+    addListener(event, handler) {
+      if (!Object.hasOwn(keys, event)) throw new Error(`нет события клавиатуры ${event}`);
+      keys[event].add(handler);
+      return { remove: () => keys[event].delete(handler) };
+    },
+  };
+  const Platform = {
+    get OS() {
+      return self.platform;
+    },
+    select: (spec) => (Object.hasOwn(spec, self.platform) ? spec[self.platform] : spec.default),
+  };
   const animations = {
     started: 0,
     stopped: 0,
@@ -187,10 +207,19 @@ export function system({ state = 'active' } = {}) {
       for (const run of [...this.live]) run.end({ finished: true });
     },
   };
-  return {
+  const self = {
+    platform: 'ios',
     AppState,
     AccessibilityInfo,
+    Keyboard,
+    Platform,
     announced,
+    focused,
+    scrolls: [],
+    keys,
+    keyboard(event, data) {
+      for (const handler of [...keys[event]]) handler(data);
+    },
     animations,
     counts,
     asks,
@@ -206,6 +235,7 @@ export function system({ state = 'active' } = {}) {
       while (this.answered < asks.length) asks[this.answered++].resolve(value);
     },
   };
+  return self;
 }
 
 // Настоящий React 19 в Node: react-dom/client с контейнером-заглушкой (хуки и экраны проверок ничего не рисуют в DOM, DOM

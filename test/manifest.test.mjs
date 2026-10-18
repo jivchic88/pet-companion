@@ -88,7 +88,7 @@ async function loaded(module) {
   // react-native, react-native-svg и expo-sqlite (партнёры /native и /native-sqlite) в проверках не установлены — заглушки
   // загрузчика с теми же именами экспорта.
   const stubs = {
-    'react-native': 'data:text/javascript,export const AppState = {}; export const AccessibilityInfo = {}; export const Animated = {}; export const Pressable = () => null; export const Text = () => null; export const View = () => null; export const StyleSheet = { create: (styles) => styles };',
+    'react-native': 'data:text/javascript,export const AppState = {}; export const AccessibilityInfo = {}; export const Animated = {}; export const Keyboard = {}; export const Platform = {}; export const Modal = () => null; export const ScrollView = () => null; export const TextInput = () => null; export const Pressable = () => null; export const Text = () => null; export const View = () => null; export const StyleSheet = { create: (styles) => styles };',
     'react-native-svg': "data:text/javascript,export default () => null; export const Circle = 'circle', ClipPath = 'clipPath', Defs = 'defs', Ellipse = 'ellipse', G = 'g', LinearGradient = 'linearGradient', Path = 'path', Pattern = 'pattern', RadialGradient = 'radialGradient', Rect = 'rect', Stop = 'stop';",
     'expo-sqlite': 'data:text/javascript,export function openDatabaseAsync() {}',
   };

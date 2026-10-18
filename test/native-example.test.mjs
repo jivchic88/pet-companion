@@ -38,7 +38,7 @@ const fake = (name) => new URL(`./fakes/${name}`, import.meta.url).href;
 const source = ts.transpileModule(await readFile(new URL(APP), 'utf8'), { fileName: 'App.jsx', compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 // Только импорты самого App.js: его React — с записью смен состояния, jsx-runtime — тот же React, что у библиотеки.
 const FROM_APP = { react: fake('react-state.mjs'), 'react/jsx-runtime': pathToFileURL(require.resolve('react/jsx-runtime')).href, './diagnostics.mjs': fake('expo-diagnostics.mjs') };
-const PEERS = { 'react-native': fake('react-native.mjs'), 'react-native-svg': fake('react-native-svg.mjs'), 'expo-sqlite': fake('expo-sqlite.mjs') };
+const PEERS = { 'react-native': fake('react-native.mjs'), 'react-native-svg': fake('react-native-svg.mjs'), 'expo-sqlite': fake('expo-sqlite.mjs'), 'react-native-safe-area-context': fake('react-native-safe-area-context.mjs') };
 registerHooks({
   resolve(specifier, context, next) {
     if (context.parentURL === APP && Object.hasOwn(FROM_APP, specifier)) return { url: FROM_APP[specifier], shortCircuit: true };
@@ -667,4 +667,29 @@ test('сверка перезапуска (diagnostics): прежние запи
   assert.throws(() => D.confirmed(state), TypeError);
   assert.throws(() => D.restartCheck(now, state), TypeError);
   core.destroy();
+});
+
+test('экран PL10.2.1: координатор PetProvider — одно объявление { views: ["corner"], scenes: {} }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
+  globalThis.__petInsets = { top: 47, right: 0, bottom: 34, left: 0 };
+  try {
+    const { S, core } = await running('pl1021');
+    const display = core.getState().display;
+    assert.deepEqual([display.views, display.scenes, display.pets], [['corner'], {}, ['cat', 'dog']]);
+    assert.equal(S.node('pet-art').children.type, catNative.Figure, 'PetView в композиции рисует');
+    const page = S.node('screen').contentContainerStyle[1];
+    assert.deepEqual([page.paddingTop, page.paddingBottom, page.paddingLeft, page.paddingRight], [47 + 12, 34 + 48, 16, 16]);
+    assert.equal(S.node('corner-modal').visible, false);
+    await S.press('corner-open');
+    assert.equal(core.getState().view.open, 'corner');
+    assert.equal(S.node('corner-modal').visible, true);
+    assert.equal(S.node('corner-sheet').style[1].paddingTop, 47, 'уголок — те же отступы хоста');
+    assert.deepEqual(core.getState().display.views, ['corner'], 'открытие уголка объявление не меняет');
+    await act(() => S.node('corner-modal').onRequestClose());
+    assert.deepEqual([core.getState().view.open, S.node('corner-modal').visible], [null, false]);
+    await S.press('pet-off');
+    assert.deepEqual([core.status, S.node('corner-open')], ['destroyed', null], 'отключено — входа уголка нет');
+    await S.unmount();
+  } finally {
+    delete globalThis.__petInsets;
+  }
 });

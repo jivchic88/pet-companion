@@ -37,6 +37,8 @@
 // и жизненный цикл — только ядро, рисунки — react и react-native-svg), голое react-native-svg — только у отображения;
 // типы PetView и наборов — с @types/react проекта, без типов React Native и react-native-svg; логика примера Expo на
 // архиве — счёт хоста, подтверждённое и восстановление питомца, облика и лакомства во втором процессе, сдвиг дня.
+// PL10.2.1: в архиве ещё рисунок поверхности, координатор, общий уголок и уголок (figure, provider, room, corner) — свои
+// слои импортов; внутренние пути закрыты; типы PetProvider, PetCorner, режима композиции PetView и ресурсов уголка набора.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -64,18 +66,19 @@ const DEFS = ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs'];
 const WEB = ['web/catalog.mjs', 'web/kits.mjs', 'web/legacy/places.mjs', 'web/parts.mjs', 'web/pointer.mjs', 'web/scenes.mjs', 'web/shell.mjs', 'web/storage.mjs', 'web/view.css', 'web/view.mjs'];
 // PL08: вход React pet/react.mjs с типами и общий хук pet/hooks/state.mjs.
 const REACT = ['hooks/state.mjs', 'react.d.mts', 'react.mjs'];
-// PL09: входы натива с типами, жизненный цикл и SQLite-адаптер; PL10.1: отображение, наборы и рисунки.
-const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
+// PL09: входы натива с типами, жизненный цикл и SQLite-адаптер; PL10.1: отображение, наборы и рисунки; PL10.2.1: рисунок
+// поверхности, координатор, общий уголок и уголок.
+const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/cat.mjs', 'native/corner.mjs', 'native/dog.mjs', 'native/figure.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/provider.mjs', 'native/room.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
 const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', ...REACT, ...NATIVE, 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
 // Голые имена партнёров — только в своих файлах (PL08 — react, PL09 — react-native и expo-sqlite, PL10.1 — отображение и
-// рисунки натива: react и react-native-svg).
+// рисунки натива: react и react-native-svg; PL10.2.1 — рисунок поверхности, координатор, общий уголок, уголок).
 const PEER_FILES = {
-  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || file === 'native/view.mjs' || file === 'native/svg.mjs',
-  'react-native': (file) => file === 'native.mjs' || file === 'native/view.mjs',
-  'react-native-svg': (file) => ['native/view.mjs', 'native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs'].includes(file),
+  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs'].includes(file),
+  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs'].includes(file),
+  'react-native-svg': (file) => ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/room.mjs', 'native/figure.mjs', 'native/corner.mjs'].includes(file),
   'expo-sqlite': (file) => file === 'native-sqlite.mjs',
 };
-// Локальные импорты слоёв pet/native/** (PL10.1): области, в которые файл может ссылаться.
+// Локальные импорты слоёв pet/native/** (PL10.1, PL10.2.1): области, в которые файл может ссылаться.
 const NATIVE_LOCAL = {
   'native/lifecycle.mjs': ['core/'],
   'native/kits.mjs': ['core/'],
@@ -83,7 +86,11 @@ const NATIVE_LOCAL = {
   'native/svg.mjs': [],
   'native/cat.mjs': ['native/svg.mjs'],
   'native/dog.mjs': ['native/svg.mjs'],
-  'native/view.mjs': ['core/ports.mjs', 'hooks/state.mjs', 'native/kits.mjs', 'native/motion.mjs'],
+  'native/room.mjs': ['core/room.mjs', 'native/kits.mjs', 'native/svg.mjs'],
+  'native/figure.mjs': ['native/kits.mjs', 'native/motion.mjs'],
+  'native/provider.mjs': ['core/ports.mjs', 'native/kits.mjs'],
+  'native/view.mjs': ['core/ports.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/kits.mjs', 'native/provider.mjs'],
+  'native/corner.mjs': ['core/pets.mjs', 'core/ports.mjs', 'core/room.mjs', 'core/stages.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/room.mjs'],
 };
 // Пример расширения (вне архива): файлы для Node и для браузера (legacy и контейнер).
 const EXTENSION = ['bunny.mjs', 'bunny-web.mjs', 'bunny.css', 'container.html', 'index.html', 'lively.mjs', 'node.mjs'];
@@ -739,7 +746,7 @@ try {
     const web = await import('${NAME}/web');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
-    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs', 'hooks', 'hooks/state.mjs', 'pet/native.mjs', 'pet/native.d.mts', 'pet/native-sqlite.mjs', 'pet/native/lifecycle.mjs', 'pet/storage/sqlite.mjs', 'native/lifecycle.mjs', 'storage/sqlite.mjs', 'storage', 'pet/native/view.mjs', 'pet/native/cat.mjs', 'native/view.mjs', 'native/kits.mjs'].map((name) => resolve('${NAME}/' + name));
+    const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs', 'hooks', 'hooks/state.mjs', 'pet/native.mjs', 'pet/native.d.mts', 'pet/native-sqlite.mjs', 'pet/native/lifecycle.mjs', 'pet/storage/sqlite.mjs', 'native/lifecycle.mjs', 'storage/sqlite.mjs', 'storage', 'pet/native/view.mjs', 'pet/native/cat.mjs', 'native/view.mjs', 'native/kits.mjs', 'pet/native/corner.mjs', 'pet/native/provider.mjs', 'native/room.mjs'].map((name) => resolve('${NAME}/' + name));
     const react = await import('${NAME}/react').then(() => 'imported', (error) => ({ code: error.code, message: error.message }));
     const failure = (error) => ({ code: error.code, message: error.message });
     const native = { at: resolve('${NAME}/native').replace(/^.*node_modules\\//, ''), sqliteAt: resolve('${NAME}/native-sqlite').replace(/^.*node_modules\\//, ''), lifecycle: await import('${NAME}/native').then(() => 'imported', failure), sqlite: await import('${NAME}/native-sqlite').then(() => 'imported', failure) };
@@ -750,7 +757,7 @@ try {
   check('Node: вход ядра pet-companion/core — ровно createPetCore, createStorage, defineBehavior, definePet (PL06), PetError, localDay, VERSION из pet/core.mjs; та же граница дня и версия', JSON.stringify(node.coreKeys) === '["PetError","VERSION","createPetCore","createStorage","defineBehavior","definePet","localDay"]' && node.coreAt === `${NAME}/pet/core.mjs` && node.sameDay && node.sameVersion, stdout);
   check('Node: входы pet-companion/pets (cat, dog, corner, cornerItems) и pet-companion/behaviors (calm) — pet/pets.mjs и pet/behaviors.mjs; определения глубоко заморожены', JSON.stringify(node.petsKeys) === '["cat","corner","cornerItems","dog"]' && JSON.stringify(node.behaviorsKeys) === '["calm"]' && node.petsAt === `${NAME}/pet/pets.mjs` && node.behaviorsAt === `${NAME}/pet/behaviors.mjs` && node.frozen && node.ids.join() === 'cat,dog,calm', stdout);
   check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
-  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, файлы React по внутренним путям (pet/react.mjs, типы, хук), файлы натива по внутренним путям (pet/native.mjs, типы, pet/native-sqlite.mjs, жизненный цикл, SQLite-адаптер; PL10.1 — отображение и наборы), несуществующие входы (defs, kits, hooks, storage) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 56 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
+  check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, файлы React по внутренним путям (pet/react.mjs, типы, хук), файлы натива по внутренним путям (pet/native.mjs, типы, pet/native-sqlite.mjs, жизненный цикл, SQLite-адаптер; PL10.1 — отображение и наборы; PL10.2.1 — уголок, координатор, общий уголок), несуществующие входы (defs, kits, hooks, storage) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 59 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
   check('Node без мобильных партнёров (PL09): pet-companion/native и /native-sqlite разрешаются в pet/native.mjs и pet/native-sqlite.mjs, импорт честно отказывает — нет react (необязательный партнёр /native, за ним react-native) и expo-sqlite; прежние входы выше работают', node.native?.at === `${NAME}/pet/native.mjs` && node.native.sqliteAt === `${NAME}/pet/native-sqlite.mjs` && node.native.lifecycle?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.native.lifecycle.message) && node.native.sqlite?.code === 'ERR_MODULE_NOT_FOUND' && /'expo-sqlite'/.test(node.native.sqlite.message), stdout);
   check('Node без React (PL08): pet-companion/manifest.json — публичный путь к manifest.json; pet-companion/react разрешается в pet/react.mjs, а импорт честно отказывает — нет пакета react (необязательный партнёр); остальные входы выше работают', node.manifestAt === `${NAME}/manifest.json` && node.reactAt === `${NAME}/pet/react.mjs` && node.react?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.react.message), stdout);
   check('Node: вход pet-companion/web (PL07) — ровно catWeb, createWebScenes, createWebStorage, dogWeb, mountPetIn из pet/web.mjs', JSON.stringify(node.webKeys) === '["catWeb","createWebScenes","createWebStorage","dogWeb","mountPetIn"]' && node.webAt === `${NAME}/pet/web.mjs`, stdout);
@@ -1201,7 +1208,7 @@ export { styles };
     path.join(project, 'native.mts'),
     `import { calm } from '${NAME}/behaviors';
 import { createPetCore, type PetCore, type PetLoadStatus, type PetSceneReserver, type PetView as PetViewName } from '${NAME}/core';
-import { catNative, dogNative, PetView, useNativeLifecycle, usePetState, type NativePetKit, type PetViewProps } from '${NAME}/native';
+import { catNative, dogNative, PetCorner, PetProvider, PetView, useNativeLifecycle, usePetState, type NativePetKit, type PetCornerProps, type PetInsets, type PetViewProps } from '${NAME}/native';
 import { createSqliteScenes, createSqliteStorage, type PetSqliteOptions } from '${NAME}/native-sqlite';
 import { cat, dog } from '${NAME}/pets';
 declare const db: { databasePath: string; execAsync(source: string): Promise<void> };
@@ -1238,7 +1245,26 @@ const web: NativePetKit = { ...catNative, Figure: () => '<svg class="cat-art"></
 PetView({ ...props, size: '200' });
 // @ts-expect-error тип вида ядра — не компонент
 const notView: PetViewName = 'pet';
-export { loaded, ready, idle, name, sync, view, kind, own, web, notView };
+// PL10.2.1: координатор, уголок, PetView в композиции (без core, pets, kits), ресурсы уголка набора.
+const insets: PetInsets = { top: 47, right: 0, bottom: 34, left: 0 };
+const provider = PetProvider({ core, pets: [cat, dog], kits: [catNative, dogNative], announce: true, children: null });
+const composed = PetView({ size: 120, testID: 'pet' });
+const cornerProps: PetCornerProps = { insets, entry: true, label: 'Уголок', hint: 'Открыть', returnFocus: { current: null }, testID: 'corner' };
+const corner = PetCorner(cornerProps);
+const bare = PetCorner({});
+const room: NativePetKit = { ...own, room: true, items: ['nest'], Item: ({ id }) => catNative.Figure({ pose: 'calm', coat: 'red', accessory: '', toward: '', prefix: id }) };
+const feedIn = catNative.Figure({ pose: 'feed', coat: 'smoke', accessory: 'scarf', toward: '', prefix: 'p', room: { feed: [4, -2] } });
+// @ts-expect-error в композиции нет своих наборов без ядра — либо всё (core, pets, kits), либо ничего
+PetView({ pets: [cat], kits: [catNative] });
+// @ts-expect-error в композиции объявления скринридеру — у координатора
+PetView({ announce: false });
+// @ts-expect-error room набора — только true
+const notRoom: NativePetKit = { ...own, room: false };
+// @ts-expect-error отступы — числа top, right, bottom, left
+PetCorner({ insets: { top: 0 } });
+// @ts-expect-error координатору нужны наборы
+PetProvider({ core, pets: [cat] });
+export { loaded, ready, idle, name, sync, view, kind, own, web, notView, provider, composed, corner, bare, room, feedIn, notRoom };
 `,
   );
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
@@ -1262,7 +1288,7 @@ export { loaded, ready, idle, name, sync, view, kind, own, web, notView };
     const web = await types('web.mts');
     check(`TypeScript (${resolution}): pet-companion/web — mountPetIn, настройки и вид, веб-адаптеры с публичным createPetCore, наборы и стили набора; неверные настройки, вид, контейнер и поля — ошибки (8 @ts-expect-error)`, web === '', web);
     const native = await types('native.mts', 'es2022');
-    check(`TypeScript (${resolution}, без lib dom и без типов React Native, react-native-svg и expo-sqlite; @types/react — для PetView): pet-companion/native-sqlite — настройки, асинхронный координатор и резервирование с публичным createPetCore; pet-companion/native — useNativeLifecycle, usePetState, PetView и наборы catNative, dogNative, свой набор; тип вида ядра PetView прежний; неверные настройки, аргумент хука, синхронный load, PetView без kits, набор-строка, size строкой, неверный вид — ошибки (10 @ts-expect-error)`, native === '', native);
+    check(`TypeScript (${resolution}, без lib dom и без типов React Native, react-native-svg и expo-sqlite; @types/react — для PetView): pet-companion/native-sqlite — настройки, асинхронный координатор и резервирование с публичным createPetCore; pet-companion/native — useNativeLifecycle, usePetState, PetView и наборы catNative, dogNative, свой набор; PL10.2.1 — PetProvider, PetCorner с insets, PetView в композиции, ресурсы уголка набора и рисунок в комнате; тип вида ядра PetView прежний; неверные настройки, аргумент хука, синхронный load, PetView без kits, набор-строка, size строкой, неверный вид, композиция со своими наборами и announce, room не true, неполные insets, координатор без kits — ошибки (15 @ts-expect-error)`, native === '', native);
     const closed = await types('paths.mts');
     const errors = [...closed.matchAll(/^paths\.mts\((\d+),\d+\): error (TS\d+)/gm)].map(([, line, code]) => `${line} ${code}`);
     check(`TypeScript (${resolution}): несуществующий стиль, внутренние пути (в том числе файлы ядра, входов штатных, определений, наборов, веба, React и натива) и несуществующий вход kits — TS2307, значения из стиля нет — TS1192`, JSON.stringify(errors) === JSON.stringify(PATH_ERRORS) && closed.trim().split('\n').length === PATH_ERRORS.length, closed);

@@ -1,13 +1,20 @@
-// Натив: проверка и выбор наборов отображения (этап PL10.1; docs/ARCHITECTURE.md § 7.3, § 7.4, § 12.2). Набор —
+// Натив: проверка и выбор наборов отображения (этапы PL10.1, PL10.2.1; docs/ARCHITECTURE.md § 7.3, § 7.4, § 12.2). Набор —
 // код рисования одного питомца для react-native-svg, отдельно от определения и модели поведения: рисует позу, облик и
 // надетый аксессуар из снимка ядра и не принимает решений. Модуль без React и React Native — только словарь поз ядра:
 // проверка идёт до любых побочных действий отображения (подписки, setDisplay, команды).
 //
 // Набор: { pet — ID определения; poses — нарисованные позы; coats, accessories — нарисованные облики и аксессуары;
 // substitutes? — явные замены необязательных поз { поза: нарисованная поза } (декоративные yawn и settle, позы сценок);
-// Figure({ pose, coat, accessory, toward, prefix }) — чистая функция без хуков: элементы react-native-svg в единицах рисунка
-// (220×204 у штатных — size определения), без корневого <Svg> (его ставит отображение) }. Сценок, вещей уголка и предметов
-// игры набор PL10.1 не рисует — это PL10.2.
+// Figure({ pose, coat, accessory, toward, prefix, room? }) — чистая функция без хуков: элементы react-native-svg в единицах
+// рисунка (220×204 у штатных — size определения), без корневого <Svg> (его ставит отображение) }. Сценок и предметов игры
+// набор не рисует — это PL10.2.2–PL10.2.4.
+//
+// Ресурсы уголка (PL10.2.1) — необязательные поля, их предъявляет только PetCorner (nativeCornerProblem): room: true —
+// Figure рисует питомца и в сцене комнаты (свойство room: { feed } — без своей миски, поза feed — со сдвигом к миске
+// room.feed); items — свои вещи комнаты, которые рисует Item (игрушки определения и вещи ступеней вне общего уголка
+// SHARED_ROOM); Item({ id, prefix }) — чистая функция: элементы react-native-svg вещи в единицах сцены 400×250 на её
+// исходном месте (сдвиг по расстановке ядра делает уголок). Минимальный набор PL10.1 без этих полей по-прежнему подходит
+// PetView; уголок с ним честно отказывает. Неизвестные поля — отказ, как прежде.
 //
 // Обязательное покрытие — как у веб-наборов (§ 7.3), по роли позы: конечная поза (после poseFallback определения) каждой
 // обязательной позы словаря (calm — всегда сама) и лапы, если у питомца есть actions.paw; облики и аксессуары определения.
@@ -22,7 +29,13 @@ function stringList(value) {
   return true;
 }
 const looksLikeElement = (value) => isObject(value) && 'type' in value && 'props' in value;
-const KIT_FIELDS = ['pet', 'poses', 'coats', 'accessories', 'substitutes', 'Figure'];
+const KIT_FIELDS = ['pet', 'poses', 'coats', 'accessories', 'substitutes', 'Figure', 'room', 'items', 'Item'];
+
+// Вещи, которые рисует общий уголок натива (pet/native/room.mjs — место отдыха и вещи ступеней штатного уголка, как общая
+// сцена веба): набору их рисовать не нужно. Остальные вещи определения и его игрушки — Item набора.
+export const SHARED_ROOM = Object.freeze(['cushion', 'bed', 'mug', 'notebook', 'lamp', 'plant', 'board']);
+// Места отдыха (room.seats определения), которые рисует общий уголок натива.
+export const SHARED_SEATS = Object.freeze(['cushion', 'bed']);
 
 // Что набор обязан нарисовать по определению def.
 export function nativeKitNeeds(def) {
@@ -50,9 +63,13 @@ export function nativeKitProblem(kit, defs, isElement = looksLikeElement) {
   const def = defs.get(kit.pet);
   const at = `набор «${kit.pet}»`;
   const extra = Object.keys(kit).filter((key) => !KIT_FIELDS.includes(key));
-  if (extra.length) return `${at}: неизвестные поля ${extra.join(', ')} (сценки, вещи и предметы — PL10.2)`;
+  if (extra.length) return `${at}: неизвестные поля ${extra.join(', ')} (сценки и предметы игры — PL10.2.2–PL10.2.4)`;
   for (const field of ['poses', 'coats', 'accessories']) if (!stringList(kit[field])) return `${at}: ${field} — плотный массив строк`;
   if (typeof kit.Figure !== 'function') return `${at}: Figure — функция рисунка`;
+  // Ресурсы уголка необязательны, но если заданы — верной формы (их полноту проверяет уголок, nativeCornerProblem).
+  if (kit.room !== undefined && kit.room !== true) return `${at}: room — true (Figure рисует и в сцене комнаты) или не задано`;
+  if (kit.items !== undefined && !stringList(kit.items)) return `${at}: items — плотный массив строк`;
+  if (kit.Item !== undefined && typeof kit.Item !== 'function') return `${at}: Item — функция рисунка вещи`;
   if (kit.substitutes !== undefined) {
     if (!isObject(kit.substitutes)) return `${at}: substitutes — объект { поза: нарисованная поза }`;
     const allowed = replaceable(def);
@@ -79,6 +96,44 @@ export function nativeKitProblem(kit, defs, isElement = looksLikeElement) {
   return '';
 }
 
+// Что набор обязан нарисовать для уголка по определению def: свои вещи комнаты — игрушки (room.toys) и вещи ступеней
+// (items.list) вне общего уголка SHARED_ROOM.
+export function cornerNeeds(def) {
+  const toys = def.room.toys.map((toy) => toy.id);
+  return { items: [...new Set([...toys, ...def.items.list.map((item) => item.id).filter((id) => !SHARED_ROOM.includes(id))])] };
+}
+
+// Проблема ресурсов уголка набора (строка отказа PetCorner) или ''. Проверяется против переданного определения того же ID
+// (изменённые облики, вещи, игрушки): room — Figure рисует в сцене комнаты; items — все свои вещи; Item — функция; пробный
+// рисунок каждой вещи и питомца в комнате — элемент React, не строка разметки. Без ресурсов уголка набор годен PetView.
+export function nativeCornerProblem(kit, def, isElement = looksLikeElement) {
+  const at = `набор «${kit.pet}»`;
+  if (kit.room !== true) return `${at}: нет ресурсов уголка — room: true (Figure рисует в сцене комнаты)`;
+  const seats = def.room.seats.map((seat) => seat.id).filter((id) => !SHARED_SEATS.includes(id));
+  if (seats.length) return `${at}: место отдыха ${seats.join(', ')} общий уголок натива не рисует (${SHARED_SEATS.join(', ')})`;
+  const items = kit.items ?? [];
+  const missing = cornerNeeds(def).items.filter((id) => !items.includes(id));
+  if (missing.length) return `${at}: не нарисовано для уголка (items): ${missing.join(', ')}`;
+  if (cornerNeeds(def).items.length && typeof kit.Item !== 'function') return `${at}: Item — функция рисунка своих вещей уголка`;
+  for (const id of cornerNeeds(def).items) {
+    let element;
+    try {
+      element = kit.Item({ id, prefix: 'probe' });
+    } catch (error) {
+      return `${at}: Item({ id: '${id}' }) бросил исключение (${error instanceof Error ? error.message : String(error)})`;
+    }
+    if (!isElement(element)) return `${at}: Item({ id: '${id}' }) — элемент React (компоненты react-native-svg), не строка и не null`;
+  }
+  let figure;
+  try {
+    figure = kit.Figure({ pose: 'feed', coat: def.coats[0].id, accessory: def.accessories[0]?.id ?? '', toward: '', prefix: 'probe', room: { feed: [0, 0] } });
+  } catch (error) {
+    return `${at}: Figure в комнате бросил исключение (${error instanceof Error ? error.message : String(error)})`;
+  }
+  if (!isElement(figure)) return `${at}: Figure в комнате — элемент React, не строка и не null`;
+  return '';
+}
+
 // Каталог отображения: определения pets и наборы kits одним проверенным списком. { problem: '' | строка, defs, kits, ids }:
 // ids — питомцы с набором в порядке kits (их отображение объявляет ядру через setDisplay({ pets })).
 export function nativeCatalog(pets, kits, isElement = looksLikeElement) {
@@ -99,6 +154,16 @@ export function nativeCatalog(pets, kits, isElement = looksLikeElement) {
     chosen.set(kit.pet, kit);
   }
   return { problem: '', defs, kits: chosen, ids: [...chosen.keys()] };
+}
+
+// Ресурсы уголка всего каталога: первая проблема набора против определения своего ID или ''.
+export function cornerProblem(catalog, isElement = looksLikeElement) {
+  if (catalog.problem) return catalog.problem;
+  for (const kit of catalog.kits.values()) {
+    const problem = nativeCornerProblem(kit, catalog.defs.get(kit.pet), isElement);
+    if (problem) return problem;
+  }
+  return '';
 }
 
 // Набор показанного питомца: свой, иначе набор штатного запасного (fallback определения), иначе первый.
