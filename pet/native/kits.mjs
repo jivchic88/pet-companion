@@ -1,13 +1,19 @@
-// Натив: проверка и выбор наборов отображения (этапы PL10.1, PL10.2.1; docs/ARCHITECTURE.md § 7.3, § 7.4, § 12.2). Набор —
-// код рисования одного питомца для react-native-svg, отдельно от определения и модели поведения: рисует позу, облик и
-// надетый аксессуар из снимка ядра и не принимает решений. Модуль без React и React Native — только словарь поз ядра:
-// проверка идёт до любых побочных действий отображения (подписки, setDisplay, команды).
+// Натив: проверка и выбор наборов отображения (этапы PL10.1, PL10.2.1, PL10.2.2; docs/ARCHITECTURE.md § 7.3, § 7.4,
+// § 12.2). Набор — код рисования одного питомца для react-native-svg, отдельно от определения и модели поведения: рисует
+// позу, облик и надетый аксессуар из снимка ядра и не принимает решений. Модуль без React и React Native — только словарь
+// поз ядра: проверка идёт до любых побочных действий отображения (подписки, setDisplay, команды).
 //
 // Набор: { pet — ID определения; poses — нарисованные позы; coats, accessories — нарисованные облики и аксессуары;
 // substitutes? — явные замены необязательных поз { поза: нарисованная поза } (декоративные yawn и settle, позы сценок);
 // Figure({ pose, coat, accessory, toward, prefix, room? }) — чистая функция без хуков: элементы react-native-svg в единицах
-// рисунка (220×204 у штатных — size определения), без корневого <Svg> (его ставит отображение) }. Сценок и предметов игры
-// набор не рисует — это PL10.2.2–PL10.2.4.
+// рисунка (220×204 у штатных — size определения), без корневого <Svg> (его ставит отображение) }. Сценок набор не рисует —
+// это PL10.2.4; миску и мячик «Поиграть» рисует общая сцена натива (pet/native/svg.mjs), не набор.
+//
+// Ресурсы игры (PL10.2.2) — необязательное поле, его предъявляет только PetPlay (nativePlayProblem): play: true — рисунок
+// совпадает с областями play определения (голова и тело play.hits, лапа play.paw, у поднятой — play.paw.up, линия лап
+// size.ground): по ним отображение распознаёт поглаживание и касание лапы поверх нарисованной позы; Figure рисует все позы
+// сцены (обязательные по роли и лапу, если она есть, — с поворотом toward к предмету). Набор без play годен PetView и
+// уголку; игра с ним честно отказывает (вид 'play' не объявляется).
 //
 // Ресурсы уголка (PL10.2.1) — необязательные поля, их предъявляет только PetCorner (nativeCornerProblem): room: true —
 // Figure рисует питомца и в сцене комнаты (свойство room: { feed } — без своей миски, поза feed — со сдвигом к миске
@@ -29,7 +35,7 @@ function stringList(value) {
   return true;
 }
 const looksLikeElement = (value) => isObject(value) && 'type' in value && 'props' in value;
-const KIT_FIELDS = ['pet', 'poses', 'coats', 'accessories', 'substitutes', 'Figure', 'room', 'items', 'Item'];
+const KIT_FIELDS = ['pet', 'poses', 'coats', 'accessories', 'substitutes', 'Figure', 'room', 'items', 'Item', 'play'];
 
 // Вещи, которые рисует общий уголок натива (pet/native/room.mjs — место отдыха и вещи ступеней штатного уголка, как общая
 // сцена веба): набору их рисовать не нужно. Остальные вещи определения и его игрушки — Item набора.
@@ -63,11 +69,13 @@ export function nativeKitProblem(kit, defs, isElement = looksLikeElement) {
   const def = defs.get(kit.pet);
   const at = `набор «${kit.pet}»`;
   const extra = Object.keys(kit).filter((key) => !KIT_FIELDS.includes(key));
-  if (extra.length) return `${at}: неизвестные поля ${extra.join(', ')} (сценки и предметы игры — PL10.2.2–PL10.2.4)`;
+  if (extra.length) return `${at}: неизвестные поля ${extra.join(', ')} (сценки — PL10.2.4; миску и мячик игры рисует сцена натива)`;
   for (const field of ['poses', 'coats', 'accessories']) if (!stringList(kit[field])) return `${at}: ${field} — плотный массив строк`;
   if (typeof kit.Figure !== 'function') return `${at}: Figure — функция рисунка`;
-  // Ресурсы уголка необязательны, но если заданы — верной формы (их полноту проверяет уголок, nativeCornerProblem).
+  // Ресурсы уголка и игры необязательны, но если заданы — верной формы (полноту проверяют уголок, nativeCornerProblem, и
+  // игра, nativePlayProblem).
   if (kit.room !== undefined && kit.room !== true) return `${at}: room — true (Figure рисует и в сцене комнаты) или не задано`;
+  if (kit.play !== undefined && kit.play !== true) return `${at}: play — true (рисунок совпадает с областями play определения) или не задано`;
   if (kit.items !== undefined && !stringList(kit.items)) return `${at}: items — плотный массив строк`;
   if (kit.Item !== undefined && typeof kit.Item !== 'function') return `${at}: Item — функция рисунка вещи`;
   if (kit.substitutes !== undefined) {
@@ -131,6 +139,42 @@ export function nativeCornerProblem(kit, def, isElement = looksLikeElement) {
     return `${at}: Figure в комнате бросил исключение (${error instanceof Error ? error.message : String(error)})`;
   }
   if (!isElement(figure)) return `${at}: Figure в комнате — элемент React, не строка и не null`;
+  return '';
+}
+
+// Позы реакций на предметы — с поворотом к предмету (toward снимка).
+const TOWARD_POSES = ['sniff', 'watch', 'ball'];
+
+// Проблема ресурсов игры набора (строка отказа PetPlay) или ''. Против переданного определения того же ID: play — рисунок
+// совпадает с областями play определения (их распознаёт отображение); пробный рисунок каждой позы сцены — обязательных по
+// роли и лапы, если у питомца она есть (actions.paw), позы предметов — ещё и с поворотом влево и вправо — элемент React, не
+// строка разметки. Геометрия областей — данные определения (definePet проверил её форму); у питомца без лапы области лапы
+// нет — и набору рисовать её не нужно.
+export function nativePlayProblem(kit, def, isElement = looksLikeElement) {
+  const at = `набор «${kit.pet}»`;
+  if (kit.play !== true) return `${at}: нет ресурсов игры — play: true (рисунок совпадает с областями play определения: голова и тело, лапа)`;
+  const towards = new Set(TOWARD_POSES.map((pose) => resolvePose(def, pose)));
+  for (const pose of nativeKitNeeds(def).poses) {
+    for (const toward of towards.has(pose) ? ['', 'left', 'right'] : ['']) {
+      let element;
+      try {
+        element = kit.Figure({ pose, coat: def.coats[0].id, accessory: def.accessories[0]?.id ?? '', toward, prefix: 'probe' });
+      } catch (error) {
+        return `${at}: Figure({ pose: '${pose}', toward: '${toward}' }) в игре бросил исключение (${error instanceof Error ? error.message : String(error)})`;
+      }
+      if (!isElement(element)) return `${at}: Figure({ pose: '${pose}', toward: '${toward}' }) в игре — элемент React, не строка и не null`;
+    }
+  }
+  return '';
+}
+
+// Ресурсы игры всего каталога: первая проблема набора против определения своего ID или ''.
+export function playProblem(catalog, isElement = looksLikeElement) {
+  if (catalog.problem) return catalog.problem;
+  for (const kit of catalog.kits.values()) {
+    const problem = nativePlayProblem(kit, catalog.defs.get(kit.pet), isElement);
+    if (problem) return problem;
+  }
   return '';
 }
 

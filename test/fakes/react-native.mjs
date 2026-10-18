@@ -1,5 +1,6 @@
 // Только проверки (test/native-entry.test.mjs, test/native-hook.test.mjs, test/native-example.test.mjs,
-// test/native-view.test.mjs, test/native-corner.test.mjs): подмена пакета react-native загрузчиком Node (registerHooks) —
+// test/native-view.test.mjs, test/native-corner.test.mjs, test/native-play.test.mjs): подмена пакета react-native
+// загрузчиком Node (registerHooks); с PL10.2.2 — ещё Easing и interpolate у Animated.Value (только запись настройки) —
 // AppState, AccessibilityInfo, Keyboard и Platform подделки system() из test/native-kit.mjs, которую проверка кладёт в
 // globalThis.__petRN до импорта. Компоненты ничего не рисуют: View, ScrollView, Pressable и Animated.View — только дети,
 // Text и TextInput — ничего, Modal — дети только пока visible (как закрытое окно Android); каждый записывает свои последние
@@ -74,7 +75,12 @@ class Value {
   setValue(value) {
     this.value = value;
   }
+  interpolate(config) {
+    return { source: this, config };
+  }
 }
+// Кривые — те же формулы, что у React Native (out — отражение, cubic — t³).
+export const Easing = { cubic: (t) => t ** 3, out: (f) => (t) => 1 - f(1 - t) };
 // Анимация подделки: steps — шаги timing по порядку; start — идёт (live), stop — снята, end — закончилась сама.
 function animation(steps, iterations = 1) {
   const book = system.animations;

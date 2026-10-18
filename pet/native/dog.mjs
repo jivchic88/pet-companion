@@ -5,7 +5,7 @@
 // один из трёх платков. Набор не решает, какую позу показать: Figure получает позу, облик и аксессуар из снимка ядра.
 
 import { Circle, ClipPath, Defs, Ellipse, G, Path } from 'react-native-svg';
-import { badge, bodyShift, bowl, grow, h, idPrefix, linear, move, radial, scarfFill, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
+import { badge, ballShape, bodyShift, bowl, grow, h, idPrefix, linear, move, radial, scarfFill, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
 
 // Палитры обликов (dog-art.mjs, DOG_COATS): lid / lidR — тон морды у глаз, blaze — светлая полоса на лбу, marks —
 // отметины (patch — пятно у правого глаза и на боку, tan — подпалины-«брови»).
@@ -328,8 +328,8 @@ function DogFigure({ pose = 'calm', coat = 'caramel', accessory = 'scarf', towar
   );
 }
 
-// Свои вещи собаки в уголке (dog-art.mjs, ropeArt и ballArt): канат — сразу, мячик — со ступени «Наш ритуал»; единицы
-// сцены 400×250, исходные места (36, 233) и (283, 234).
+// Свои вещи собаки в уголке (dog-art.mjs, ropeArt и ballArt): канат — сразу, мячик — со ступени «Наш ритуал» (тот же
+// рисунок, что предмет «Поиграть», — ballShape общего svg.mjs); единицы сцены 400×250, исходные места (36, 233) и (283, 234).
 function DogItem({ id } = {}) {
   if (id === 'rope') {
     return h(
@@ -345,21 +345,16 @@ function DogItem({ id } = {}) {
     );
   }
   if (id === 'ball') {
-    return h(
-      G,
-      null,
-      h(Ellipse, { cx: 283, cy: 244.5, rx: 11.5, ry: 2.8, fill: '#3a2414', opacity: 0.18 }),
-      h(Circle, { cx: 283, cy: 233, r: 11, fill: '#e3b94a', stroke: '#9a7420', strokeWidth: 2 }),
-      h(Path, { d: 'M273.8 227.4Q283 233 292.2 227.4M273.8 238.6Q283 233 292.2 238.6', fill: 'none', stroke: '#f8edd0', strokeWidth: 2.2, strokeLinecap: 'round' }),
-      h(Ellipse, { cx: 279, cy: 228.2, rx: 3, ry: 1.8, fill: '#ffffff', opacity: 0.45 }),
-    );
+    const ball = ballShape();
+    return h(G, null, ...ball.shadow, ...ball.body);
   }
   return h(G, null);
 }
 
 // Набор: все позы словаря, включая «Дай лапу» (поднятая лапа), кроме settle (устроился на новом месте — вход
 // legacy-отображения, нативу не нужен: явная замена — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room), канат
-// и мячик; сценок (fetch) и предметов игры нет — PL10.2.2–PL10.2.4.
+// и мячик; ресурсы игры PL10.2.2 — рисунок совпадает с областями play определения собаки, поднятая лапа «Дай лапу» — там,
+// где play.paw.up (play); сценки (fetch) — PL10.2.4.
 export const dogNative = Object.freeze({
   pet: 'dog',
   poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn']),
@@ -370,4 +365,5 @@ export const dogNative = Object.freeze({
   room: true,
   items: Object.freeze(['rope', 'ball']),
   Item: DogItem,
+  play: true,
 });

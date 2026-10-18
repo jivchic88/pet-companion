@@ -669,12 +669,12 @@ test('сверка перезапуска (diagnostics): прежние запи
   core.destroy();
 });
 
-test('экран PL10.2.1: координатор PetProvider — одно объявление { views: ["corner"], scenes: {} }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
+test('экран PL10.2.1–PL10.2.2: координатор PetProvider — одно объявление { views: ["corner", "play"], scenes: {} }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
   globalThis.__petInsets = { top: 47, right: 0, bottom: 34, left: 0 };
   try {
     const { S, core } = await running('pl1021');
     const display = core.getState().display;
-    assert.deepEqual([display.views, display.scenes, display.pets], [['corner'], {}, ['cat', 'dog']]);
+    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play'], {}, ['cat', 'dog']]);
     assert.equal(S.node('pet-art').children.type, catNative.Figure, 'PetView в композиции рисует');
     const page = S.node('screen').contentContainerStyle[1];
     assert.deepEqual([page.paddingTop, page.paddingBottom, page.paddingLeft, page.paddingRight], [47 + 12, 34 + 48, 16, 16]);
@@ -683,7 +683,7 @@ test('экран PL10.2.1: координатор PetProvider — одно об�
     assert.equal(core.getState().view.open, 'corner');
     assert.equal(S.node('corner-modal').visible, true);
     assert.equal(S.node('corner-sheet').style[1].paddingTop, 47, 'уголок — те же отступы хоста');
-    assert.deepEqual(core.getState().display.views, ['corner'], 'открытие уголка объявление не меняет');
+    assert.deepEqual(core.getState().display.views, ['corner', 'play'], 'открытие уголка объявление не меняет');
     await act(() => S.node('corner-modal').onRequestClose());
     assert.deepEqual([core.getState().view.open, S.node('corner-modal').visible], [null, false]);
     await S.press('pet-off');
@@ -691,5 +691,36 @@ test('экран PL10.2.1: координатор PetProvider — одно об�
     await S.unmount();
   } finally {
     delete globalThis.__petInsets;
+  }
+});
+
+test('экран PL10.2.2: прямые команды хоста — открыть игру (окно PetPlay по снимку), «Приходит по зову» (питомца нет, вход «Позвать …»), вызов, закрыть вид, «Скрыть» и «Показать»; журнал перехода видов и присутствия; знаков и лакомства нет', async () => {
+  rn.platform = 'android';
+  try {
+    const { S, core } = await running('pl1022');
+    const before = [core.getState().progress?.marks ?? 0, core.getState().treat];
+    await S.press('host-play');
+    assert.deepEqual(core.getState().view, { open: 'play', source: 'pet' });
+    assert.equal(S.node('play-modal').visible, true);
+    await act(() => S.node('play-modal').onRequestClose());
+    assert.equal(core.getState().view.open, 'corner', 'из «Открыть игру» — назад в уголок (уголок есть)');
+    await S.press('host-close');
+    assert.equal(core.getState().view.open, null);
+    await S.press('host-oncall');
+    assert.deepEqual([core.getState().presence.surface, S.node('pet-art'), Boolean(S.node('play-call'))], ['call', null, true]);
+    await S.press('play-call');
+    assert.deepEqual(core.getState().view, { open: 'play', source: 'call' });
+    await S.press('play-close');
+    assert.equal(core.getState().view.open, null, 'вызванная — закрыта целиком');
+    await S.press('host-hide');
+    assert.equal(core.getState().presence.surface, 'none');
+    await S.press('host-show');
+    assert.deepEqual([core.getState().presence.surface, core.getState().view.open], ['call', null], 'показать — вызов, без игры');
+    await S.press('host-always');
+    assert.ok(S.node('pet-art'), 'снова на экране');
+    assert.deepEqual([core.getState().progress?.marks ?? 0, core.getState().treat], before);
+    await S.unmount();
+  } finally {
+    rn.platform = 'ios';
   }
 });

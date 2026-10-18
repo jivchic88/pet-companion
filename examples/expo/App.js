@@ -1,8 +1,10 @@
-// Мобильный потребитель (PL10.1, PL10.2.1): питомец на экране — PetView и штатные наборы pet-companion/native (рисунки
-// react-native-svg, без WebView) внутри координатора PetProvider (один владелец объявления отображения ядра) и уголок
-// PetCorner (окно по view снимка: вход, «Закрыть», Android «Назад»; комната, вещи ступени, имя, облик, аксессуары,
-// движение, реплики, кормление, счёт и ступени); отступы безопасной области — useSafeAreaInsets (react-native-safe-area-
-// context, входит в Expo Go SDK 58). Ниже — прежние кнопки PL10.1 (выбор кота или собаки, имя с клавиатуры, облик и
+// Мобильный потребитель (PL10.1, PL10.2.1, PL10.2.2): питомец на экране — PetView и штатные наборы pet-companion/native
+// (рисунки react-native-svg, без WebView) внутри координатора PetProvider (один владелец объявления отображения ядра),
+// уголок PetCorner (окно по view снимка: вход, «Закрыть», Android «Назад»; комната, вещи ступени, имя, облик, аксессуары,
+// движение, реплики, кормление, счёт и ступени, «Поиграть», присутствие, «Скрыть») и «Поиграть» PetPlay (поглаживание,
+// лапа, миска и мячик пальцем и кнопками; вызов «по зову»); отступы безопасной области — useSafeAreaInsets
+// (react-native-safe-area-context, входит в Expo Go SDK 58). Прямые команды хоста PL10.2.2 — присутствие, «Скрыть» /
+// «Показать», открыть, позвать и закрыть игру — те же публичные команды ядра. Ниже — прежние кнопки PL10.1 (выбор кота или собаки, имя с клавиатуры, облик и
 // платок, движение, «Погладить», «Покормить», подтверждённое занятие хоста, отключение и повторное подключение) и
 // диагностика PL09: хранение (настоящий expo-sqlite), жизненный цикл (useNativeLifecycle — единственный владелец), «Новое
 // ядро», резервирование дня, занятый файл, журнал. Все решения — ядро: подписи и доступность кнопок — по снимку, команда
@@ -10,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { catNative, dogNative, PetCorner, PetProvider, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
+import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
 import { busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
 
 const KITS = [catNative, dogNative];
@@ -147,22 +149,45 @@ function Screen() {
     settle(core.getState());
   }, [core, ready, say, settle]);
 
-  // Журнал переходов: сохранение, видимость, реакция и нарисованная поза; запоминание подтверждённого для сверки после
-  // перезапуска.
+  // Журнал переходов: сохранение, видимость, реакция и нарисованная поза; с PL10.2.2 — вид и источник, присутствие, игра
+  // (жест поглаживания, перенос предмета, итог, поза сцены, места предметов, пол); запоминание подтверждённого для сверки
+  // после перезапуска.
   useEffect(() => {
     if (!core || !store) return undefined;
-    const first = core.getState();
-    let last = { cat: first?.save.cat.status, visible: first?.visible, reaction: first?.pose.reaction?.type ?? '—', page: first?.pose.shown.page, view: first?.view.open ?? '—', views: first?.display.views.join(',') };
+    const pick = (s) => ({
+      cat: s?.save.cat.status,
+      visible: s?.visible,
+      reaction: s?.pose.reaction?.type ?? '—',
+      page: s?.pose.shown.page,
+      view: s ? `${s.view.open ?? '—'}${s.view.source ? `/${s.view.source}` : ''}` : '—',
+      views: s?.display.views.join(','),
+      presence: s ? `${s.presence.mode}/${s.presence.surface}${s.presence.hidden ? '/скрыт' : ''}` : '—',
+      stroke: s?.play?.stroke ? `${s.play.stroke.id}${s.play.stroke.held ? '+удержание' : ''}` : '—',
+      drag: s?.play?.drag ? s.play.drag.toy : '—',
+      outcome: s?.play?.outcome || '—',
+      playPose: s?.play ? s.pose.shown.play : '—',
+      toys: s?.play ? `миска ${s.play.toys.bowl.at?.map(Math.round).join(',') ?? '—'}${s.play.toys.bowl.home ? ' (дом)' : ''}, мячик ${s.play.toys.ball.at?.map(Math.round).join(',') ?? '—'}` : '—',
+      // Пол — с тремя знаками: по нему проверка на устройстве переводит единицы рисунка в точки сцены (масштаб 22 / playTouch).
+      floor: s?.display.playFloor ? `${s.display.playFloor.join(',')} / ${s.display.playTouch}` : '—',
+    });
+    let last = pick(core.getState());
     return core.subscribe(
       (update) => {
         const s = update.snapshot;
-        const now = { cat: s.save.cat.status, visible: s.visible, reaction: s.pose.reaction?.type ?? '—', page: s.pose.shown.page, view: s.view.open ?? '—', views: s.display.views.join(',') };
+        const now = pick(s);
         if (now.view !== last.view) say(`вид: ${last.view} → ${now.view} (${update.reason})`);
         if (now.views !== last.views) say(`объявлены виды: [${last.views ?? ''}] → [${now.views}]`);
+        if (now.presence !== last.presence) say(`присутствие: ${last.presence} → ${now.presence}`);
+        if (now.floor !== last.floor) say(`пол игры: ${last.floor} → ${now.floor}`);
         if (now.cat !== last.cat) say(`cat: ${last.cat} → ${now.cat}`);
         if (now.visible !== last.visible) say(`ядро visible: ${last.visible} → ${now.visible}`);
         if (now.reaction !== last.reaction) say(`реакция: ${last.reaction} → ${now.reaction}`);
         if (now.page !== last.page) say(`поза: ${last.page} → ${now.page}`);
+        if (now.stroke !== last.stroke) say(`игра: жест ${last.stroke} → ${now.stroke} (${update.reason})`);
+        if (now.drag !== last.drag) say(`игра: перенос ${last.drag} → ${now.drag} (${update.reason})`);
+        if (now.outcome !== last.outcome) say(`игра: итог ${last.outcome} → ${now.outcome}${s.play?.text ? ` «${s.play.text}»` : ''}`);
+        if (now.playPose !== last.playPose) say(`игра: поза ${last.playPose} → ${now.playPose}`);
+        if (now.toys !== last.toys) say(`игра: ${now.toys}`);
         last = now;
         settle(s);
         const value = confirmed(s, store.host.today());
@@ -345,6 +370,16 @@ function Screen() {
     { id: 'host-fail', title: 'Занятие не сохранилось', disabled: !store, onPress: () => saveAction({ fail: true }) },
     { id: 'host-repeat', title: 'Повторить уведомление', disabled: !running, onPress: repeatAction },
   ];
+  // PL10.2.2: прямые команды хоста — те же публичные команды, что у кнопок поверхностей; их итог — строка состояния.
+  const direct = [
+    { id: 'host-always', title: 'Всегда рядом', selected: state?.presence.mode === 'always', disabled: !running, onPress: command('Присутствие «Всегда рядом»', (c) => c.setPresence('always')) },
+    { id: 'host-oncall', title: 'Приходит по зову', selected: state?.presence.mode === 'on-call', disabled: !running, onPress: command('Присутствие «по зову»', (c) => c.setPresence('on-call')) },
+    { id: 'host-hide', title: 'Скрыть (команда)', disabled: !running, onPress: command('Скрыть', (c) => c.hide()) },
+    { id: 'host-show', title: 'Показать (команда)', disabled: !running, onPress: command('Показать', (c) => c.show()) },
+    { id: 'host-play', title: 'Открыть игру (команда)', disabled: !running, onPress: command('open(play)', (c) => c.open('play')) },
+    { id: 'host-call', title: 'Позвать (команда)', disabled: !running, onPress: command('open(play, call)', (c) => c.open('play', { source: 'call' })) },
+    { id: 'host-close', title: 'Закрыть вид (команда)', disabled: !running, onPress: command('close()', (c) => c.close()) },
+  ];
   const life = [
     core ? { id: 'pet-off', title: 'Отключить питомца', onPress: disconnect } : { id: 'pet-on', title: 'Подключить питомца', disabled: !store, onPress: () => connect('Подключение') },
     { id: 'day-next', title: 'Следующий день (проверка)', disabled: !store, onPress: nextDay },
@@ -355,7 +390,7 @@ function Screen() {
     { id: 'diag-busy', title: 'Занятый файл', disabled: !running, onPress: busy },
   ];
   const nameSave = { id: 'name-save', title: 'Сохранить имя', disabled: !running, onPress: saveName };
-  const all = [...kinds, nameSave, ...coats, ...accessories, ...motions, ...actions, ...life, ...diag];
+  const all = [...kinds, nameSave, ...coats, ...accessories, ...motions, ...actions, ...direct, ...life, ...diag];
   const progress = store?.host?.progress?.();
   const rows = [
     ['Хранилище', store ? store.storage.status : '…'],
@@ -366,7 +401,10 @@ function Screen() {
     ['Сохранение cat, companion, look, treat', state ? ['cat', 'companion', 'look', 'treat'].map((key) => state.save[key].status).join(', ') : '—'],
     ['cat: pending, unsaved', state ? `[${state.save.cat.pending}], [${state.save.cat.unsaved}]` : '—'],
     ['Реакция / поза', state ? `${state.pose.reaction?.type ?? '—'} / ${state.pose.shown.page}` : '—'],
-    ['Вид / объявлено ядру', state ? `${state.view.open ?? '—'} / views [${state.display.views.join(', ')}] · pets [${state.display.pets?.join(', ') ?? '—'}] · scenes ${JSON.stringify(state.display.scenes)}` : '—'],
+    ['Вид / объявлено ядру', state ? `${state.view.open ?? '—'}${state.view.source ? ` (${state.view.source})` : ''} / views [${state.display.views.join(', ')}] · pets [${state.display.pets?.join(', ') ?? '—'}] · scenes ${JSON.stringify(state.display.scenes)}` : '—'],
+    ['Присутствие: режим / поверхность / на виду / скрыт', state ? `${state.presence.mode} / ${state.presence.surface} / ${state.presence.around} / ${state.presence.hidden}` : '—'],
+    ['Игра: итог / жест / перенос / поза', state?.play ? `${state.play.outcome || '—'} / ${state.play.stroke ? `${state.play.stroke.id}${state.play.stroke.held ? ' удержание' : ''}` : '—'} / ${state.play.drag?.toy ?? '—'} / ${state.pose.shown.play}` : 'не открыта'],
+    ['Пол игры (единицы рисунка) / радиус лапы', state?.display.playFloor ? `${state.display.playFloor.map((n) => Math.round(n)).join(', ')} / ${Math.round(state.display.playTouch * 10) / 10}` : '—'],
     ['Отступы (insets)', `${Math.round(insets.top)} / ${Math.round(insets.right)} / ${Math.round(insets.bottom)} / ${Math.round(insets.left)}`],
     ['Лакомство', state?.treat ?? '—'],
     ['Знаки хоста: всего / сегодня / день', progress ? `${progress.marks} / ${progress.today} / ${store.host.today()}${store.host.shift ? ` (сдвиг +${store.host.shift})` : ''}` : '—'],
@@ -407,6 +445,7 @@ function Screen() {
       <PetProvider core={core} pets={PETS} kits={KITS}>
         <View style={styles.stage}>{core ? <PetView size={200} testID="pet" /> : <Text style={styles.off}>Питомец отключён</Text>}</View>
         {core ? <PetCorner insets={insets} testID="corner" /> : null}
+        {core ? <PetPlay insets={insets} testID="play" /> : null}
       </PetProvider>
       <Text style={styles.status} testID="status">
         {`${store ? `Хранилище: ${store.storage.status}` : 'Хранилище: загрузка…'} · ${core ? `ядро ${core.status}` : 'ядро отключено'}${note ? `\n${note}` : ''}`}
@@ -438,6 +477,7 @@ function Screen() {
       <Group title="Облик" items={coats} />
       <Group title="Платок" items={accessories} />
       <Group title="Движение" items={motions} />
+      <Group title="Присутствие и вид (команды хоста)" items={direct} />
       <Group title="Подключение и день" items={life} />
       <Text style={styles.head} accessibilityRole="header">
         Диагностика

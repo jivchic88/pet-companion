@@ -18,8 +18,9 @@
 // жизненный цикл — только ядро, рисунки — react и react-native-svg, отображение — ещё react-native, хук и правила наборов),
 // голое react-native-svg — только у них; SQLite-вход не достигает ни React, ни отображения. PL10.2.1: во входе /native ещё
 // PetProvider и PetCorner; новые слои — рисунок поверхности (figure), координатор (provider), общий уголок (room), уголок
-// (corner) — каждый со своим перечнем; PetView больше не импортирует react-native-svg сам (рисунок — figure). Нативные
-// входы здесь не импортируются (партнёров в проверках нет): экспорты — разбором исходника.
+// (corner) — каждый со своим перечнем; PetView больше не импортирует react-native-svg сам (рисунок — figure). PL10.2.2: во
+// входе /native ещё PetPlay; новые слои — распознавание и геометрия игры (gesture: без React, только размеры предметов
+// ядра) и «Поиграть» (play). Нативные входы здесь не импортируются (партнёров в проверках нет): экспорты — разбором исходника.
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -85,9 +86,9 @@ test('публичные входы: mountPet, localDay, VERSION; ядро (PL05
 // рисунок поверхности figure.mjs, координатор provider.mjs, общий уголок room.mjs и уголок corner.mjs).
 const NATIVE_ART = ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/room.mjs'];
 const PEER_FILES = {
-  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs'].includes(file),
-  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs'].includes(file),
-  'react-native-svg': (file) => ['native/figure.mjs', 'native/corner.mjs'].includes(file) || NATIVE_ART.includes(file),
+  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
+  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
+  'react-native-svg': (file) => ['native/figure.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file) || NATIVE_ART.includes(file),
   'expo-sqlite': (file) => file === 'native-sqlite.mjs',
 };
 // Слои pet/native/** (PL10.1, PL10.2.1): у каждого файла — ровно разрешённые голые имена и локальные области.
@@ -103,6 +104,9 @@ const NATIVE_LAYERS = {
   'native/provider.mjs': { bare: ['react', 'react-native'], local: ['core/ports.mjs', 'native/kits.mjs'] },
   'native/view.mjs': { bare: ['react', 'react-native'], local: ['core/ports.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/kits.mjs', 'native/provider.mjs'] },
   'native/corner.mjs': { bare: ['react', 'react-native', 'react-native-svg'], local: ['core/pets.mjs', 'core/ports.mjs', 'core/room.mjs', 'core/stages.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/room.mjs'] },
+  // PL10.2.2: распознавание и геометрия игры — без React (только размеры предметов ядра); «Поиграть» — отображение.
+  'native/gesture.mjs': { bare: [], local: ['core/toys.mjs'] },
+  'native/play.mjs': { bare: ['react', 'react-native', 'react-native-svg'], local: ['core/play.mjs', 'core/ports.mjs', 'core/toys.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/svg.mjs'] },
 };
 // Экспорты значений модуля разбором исходника (для входов, которые без партнёров не импортируются).
 const exported = (text) =>
@@ -212,7 +216,7 @@ test('граф React (PL08): хук pet/hooks/** — только react (ядр�
   }
 });
 
-test('граф натива (PL09, PL10.1, PL10.2.1): pet/storage/** — только ядро; pet/native/** — ровно слои NATIVE_LAYERS (правила наборов, движения и жизненный цикл — без React, рисунки и общий уголок — без react-native, координатор — без react-native-svg); вход /native — react, react-native, хук и pet/native/**; вход /native-sqlite — expo-sqlite и pet/storage/**; натив не достигает веба, DOM, CSS и веб-рисунков; без изменяемого состояния модуля; прежние входы не достигают натива и его партнёров', async () => {
+test('граф натива (PL09, PL10.1, PL10.2.1, PL10.2.2): pet/storage/** — только ядро; pet/native/** — ровно слои NATIVE_LAYERS (правила наборов, движения, распознавание жестов и жизненный цикл — без React, рисунки и общий уголок — без react-native, координатор — без react-native-svg); вход /native — react, react-native, хук и pet/native/**; вход /native-sqlite — expo-sqlite и pet/storage/**; натив не достигает веба, DOM, CSS и веб-рисунков; без изменяемого состояния модуля; прежние входы не достигают натива и его партнёров', async () => {
   const files = await runtime('.mjs');
   for (const file of files.filter((name) => name.startsWith('storage/'))) {
     for (const { spec, resolved, external } of await imports(file)) assert.ok(!external && resolved?.startsWith('core/'), `${file}: ${spec} — только ядро`);
@@ -253,7 +257,7 @@ test('граф натива (PL09, PL10.1, PL10.2.1): pet/storage/** — тол�
     assert.ok(![...seen].some((file) => /^(native|storage)(\/|\.|-)/.test(file)), `${entry} достигает натива`);
     assert.ok(!bare.has('react-native') && !bare.has('expo-sqlite') && !bare.has('react-native-svg'), `${entry}: ${[...bare].join(', ')}`);
   }
-  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetCorner', 'PetProvider', 'PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
+  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetCorner', 'PetPlay', 'PetProvider', 'PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
   assert.deepEqual(exported(await read('pet/native-sqlite.mjs')), ['createSqliteScenes', 'createSqliteStorage']);
 });
 

@@ -325,8 +325,8 @@ function CatItem({ id } = {}) {
 }
 
 // Набор: все позы словаря, кроме settle (устроился на новом месте — вход legacy-отображения, нативу не нужен: явная замена
-// — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room) и клубок; сценок (stretch, curl) и предметов игры нет —
-// PL10.2.2–PL10.2.4.
+// — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room) и клубок; ресурсы игры PL10.2.2 — рисунок совпадает с
+// областями play определения кота (play); сценки (stretch, curl) — PL10.2.4.
 export const catNative = Object.freeze({
   pet: 'cat',
   poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn']),
@@ -337,4 +337,5 @@ export const catNative = Object.freeze({
   room: true,
   items: Object.freeze(['yarn']),
   Item: CatItem,
+  play: true,
 });

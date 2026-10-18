@@ -96,6 +96,23 @@ export function bowlShape(full) {
   ];
 }
 
+// Мячик — рисунок мячика веба (dog-art.mjs, ballArt) в единицах сцены 400×250, на исходном месте (283, 233): тень и сам
+// мячик отдельно (в «Поиграть» мячик поворачивается на пройденный путь, тень — нет). Его рисуют вещь собаки в уголке
+// (dog.mjs) и предмет «Поиграть» (play.mjs) — один рисунок.
+export function ballShape() {
+  return {
+    shadow: [h(Ellipse, { key: 'shade', cx: 283, cy: 244.5, rx: 11.5, ry: 2.8, fill: '#3a2414', opacity: 0.18 })],
+    body: [
+      h(Circle, { key: 'ball', cx: 283, cy: 233, r: 11, fill: '#e3b94a', stroke: '#9a7420', strokeWidth: 2 }),
+      h(Path, { key: 'seam', d: 'M273.8 227.4Q283 233 292.2 227.4M273.8 238.6Q283 233 292.2 238.6', fill: 'none', stroke: '#f8edd0', strokeWidth: 2.2, strokeLinecap: 'round' }),
+      h(Ellipse, { key: 'shine', cx: 279, cy: 228.2, rx: 3, ry: 1.8, fill: '#ffffff', opacity: 0.45 }),
+    ],
+  };
+}
+
+// Окна рисунков предметов «Поиграть» (viewBox, как bowlToySvg и ballToySvg веба): миска — пустая, мячик — с тенью.
+export const TOY_VIEW = Object.freeze({ bowl: '144 193 52 25', ball: '270 220 26 28' });
+
 // Миска у передних лап отдельного рисунка (поза «ест» — с кормом, «доволен после лакомства» — пустая): та же миска в рамке
 // рисунка питомца. В сцене комнаты (свойство room рисунка) миску рисует уголок — на её месте из расстановки.
 export function bowl(full) {

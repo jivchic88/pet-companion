@@ -1,6 +1,6 @@
 // Типы входа pet-companion/native (pet/native.mjs; README, «Мобильное хранение и жизненный цикл», «Нативное отображение»).
-// Только описания: поведение — в pet/native/lifecycle.mjs, view.mjs, provider.mjs, corner.mjs, наборы — pet/native/cat.mjs
-// и dog.mjs, хук снимка — pet/hooks/state.mjs. Типы элементов — из react (@types/react проекта, как у входа /react); типы
+// Только описания: поведение — в pet/native/lifecycle.mjs, view.mjs, provider.mjs, corner.mjs, play.mjs (распознавание —
+// gesture.mjs), наборы — pet/native/cat.mjs и dog.mjs, хук снимка — pet/hooks/state.mjs. Типы элементов — из react (@types/react проекта, как у входа /react); типы
 // React Native и react-native-svg не нужны: стиль контейнера — свой структурный тип. Имя компонента PetView здесь —
 // значение; тип вида ядра `PetView` ('corner' | 'play' | 'room') входа pet-companion/core от него не зависит.
 
@@ -47,7 +47,11 @@ export interface NativeItemProps {
  * `settle`, позы сценок). **Ресурсы уголка** (PL10.2.1; необязательные, их предъявляет только PetCorner): `room: true` —
  * Figure рисует и в сцене комнаты (`NativeFigureProps.room`); `items` и `Item` — свои вещи комнаты (игрушки определения и
  * вещи ступеней вне общего уголка — подушки, лежанки, кружки, блокнота, лампы, растения, доски) в единицах сцены 400×250 на
- * исходном месте. Набор PL10.1 без них подходит PetView; уголок с ним отказывает. Сценок и предметов игры набор не рисует.
+ * исходном месте. Набор PL10.1 без них подходит PetView; уголок с ним отказывает. **Ресурсы игры** (PL10.2.2;
+ * необязательное, предъявляет только PetPlay): `play: true` — рисунок совпадает с областями `play` определения (голова и
+ * тело `hits`, лапа `paw`, поднятая — `paw.up`): по ним распознаются поглаживание и касание лапы; позы предметов — с
+ * поворотом `toward`. Без него PetView и уголок работают, игра отказывает (вид `'play'` не объявляется). Сценок набор не
+ * рисует (PL10.2.4); миску и мячик игры рисует сцена натива.
  */
 export interface NativePetKit {
   readonly pet: string;
@@ -59,11 +63,12 @@ export interface NativePetKit {
   readonly room?: true;
   readonly items?: readonly string[];
   readonly Item?: (props: NativeItemProps) => ReactElement;
+  readonly play?: true;
 }
 
-/** Штатный набор кота: все позы словаря (settle — замена content), три облика, три платка; уголок — рисунок в комнате и клубок. */
+/** Штатный набор кота: все позы словаря (settle — замена content), три облика, три платка; уголок — рисунок в комнате и клубок; игра — по областям определения кота. */
 export declare const catNative: NativePetKit;
-/** Штатный набор собаки: все позы словаря с поднятой лапой (settle — замена content), три облика, три платка; уголок — рисунок в комнате, канат и мячик. */
+/** Штатный набор собаки: все позы словаря с поднятой лапой (settle — замена content), три облика, три платка; уголок — рисунок в комнате, канат и мячик; игра — по областям определения собаки (поднятая лапа — `play.paw.up`). */
 export declare const dogNative: NativePetKit;
 
 /** Стиль контейнера (`style` View React Native): объект стиля, зарегистрированный стиль, ложное значение или их список. */
@@ -116,9 +121,10 @@ export interface PetProviderProps {
 }
 
 /**
- * Координатор поверхностей одного ядра (PL10.2.1): владелец `setDisplay` — `{ full: true, moving: false, pets
- * (питомцы с набором), views (подключённые поверхности: PetCorner — 'corner'), scenes: {} }` — и объявлений скринридеру.
- * Внутри — PetView (без `core`, `pets`, `kits`) и PetCorner. Объявляет последний подключённый к ядру координатор: замена
+ * Координатор поверхностей одного ядра (PL10.2.1, PL10.2.2): владелец `setDisplay` — `{ full: true, moving: false, pets
+ * (питомцы с набором), views (подключённые поверхности: PetCorner — 'corner', PetPlay — 'play'), scenes: {}, playFloor и
+ * playTouch — замер сцены игры, когда он есть }` — и объявлений скринридеру. Окно — одно на ядро: уголок и игра показывают
+ * его по очереди. Внутри — PetView (без `core`, `pets`, `kits`), PetCorner и PetPlay. Объявляет последний подключённый к ядру координатор: замена
  * (другой React key, новый экран) передаёт объявление без сброса, его отключение возвращает объявление предыдущему, а
  * последнего — снимает с ядра (открытый вид закрыт, `views: []`); смена ядра — так же для прежнего. Жизненный цикл и
  * `start` — у хоста.
@@ -156,5 +162,34 @@ export interface PetCornerProps {
  * аксессуары, движение и реплики, «Погладить», «Дай лапу», кормление, счёт, ступени, праздник и «Новое в уголке» — по
  * снимку и эффектам ядра. Черновик имени и «Новое в уголке» принадлежат паре «ядро и показанный питомец»: смена питомца
  * или ядра их снимает. Наборы координатора обязаны иметь ресурсы уголка (`room`, `items`, `Item`), иначе — отказ.
+ * PL10.2.2: «Поиграть» (`core.open('play')`) — только когда вид `'play'` объявлен (подключён PetPlay); присутствие
+ * «Всегда рядом» / «Приходит по зову» (`setPresence`), «Скрыть …» (`hide`); спрятан — вместо входа «Показать …» (`show`).
  */
 export declare function PetCorner(props: PetCornerProps): ReactElement | null;
+
+/** Свойства PetPlay (только внутри PetProvider). */
+export interface PetPlayProps {
+  /** Отступы безопасной области от хоста; без них окно оставляет системные отступы (Android — без сквозного режима). */
+  readonly insets?: PetInsets;
+  /** Показать вход «Позвать …», когда питомец приходит по зову (по умолчанию true); без него хост зовёт `core.open('play', { source: 'call' })` сам. */
+  readonly entry?: boolean;
+  /** Доступное имя входа вызова (по умолчанию «Позвать питомца: <имя>»). */
+  readonly label?: string;
+  /** Подсказка доступности входа вызова (по умолчанию «Открыть игру»). */
+  readonly hint?: string;
+  /** Куда вернуть фокус после закрытия окна целиком (по умолчанию — вход вызова или вход уголка). */
+  readonly returnFocus?: { readonly current: unknown };
+  /** Префикс testID узлов (по умолчанию 'play'): '-call', '-modal', '-sheet', '-close', '-corner', '-title', '-hint', '-stage', '-toy-bowl', '-toy-ball', '-stroke', '-paw', '-bowl', '-ball', '-note', … */
+  readonly testID?: string;
+  readonly style?: PetViewStyle;
+}
+
+/**
+ * «Поиграть» и вызов «по зову» (PL10.2.2): окно открыто, пока в снимке `view.open === 'play'` (кнопка «Поиграть» уголка,
+ * вход «Позвать …» — `core.open('play', { source: 'call' })`, прямая команда). Назад («Закрыть», Android «Назад», жест
+ * VoiceOver): открыта из уголка — `core.open('corner')`, вызвана или уголка нет — `core.close()`. Сцена — питомец
+ * (`pose.shown.play`), миска и мячик (`play.toys`, `play.drag`), итог (`play.outcome`, `play.text`) — по снимку; касания —
+ * `stroke.*`, `interact({ type: 'paw' })`, `toy.*` (пороги — точки экрана); кнопки — `interact()`. Пол игры объявляет
+ * координатор по замеру сцены. Наборы координатора обязаны иметь ресурсы игры (`play: true`), иначе — отказ.
+ */
+export declare function PetPlay(props: PetPlayProps): ReactElement | null;

@@ -10,8 +10,12 @@
 // движение и реплики, «Погладить», «Дай лапу» (actions.paw.ask), кормление (treat снимка, решение — feed() ядра), счёт,
 // ступени и подарки (progress, STAGES ядра), праздник и «Новое в уголке» (эффекты celebrate и seen показанного питомца,
 // пока уголок на виду; иначе progress.unseen), состояние записи (save). Правил нет: команды проходят проверки ядра, отказ
-// показывается его текстом. «Поиграть» и «Обустроить уголок» — PL10.2.2–PL10.2.3: их кнопок здесь нет. Сценок нет
-// (scenes: {} у координатора).
+// показывается его текстом. «Поиграть» (PL10.2.2) — кнопка у сцены, только когда вид 'play' объявлен ядру (подключена
+// годная поверхность PetPlay): core.open('play'); возврат из игры — фокус на неё. Присутствие (PL10.2.2): «Всегда рядом» /
+// «Приходит по зову» — core.setPresence, «Скрыть …» — core.hide() (окно закрывает ядро), спрятан — вместо входа
+// «Показать …» — core.show() (по зову — снова вызов, игра сама не открывается). «Обустроить уголок» — PL10.2.3: кнопки нет.
+// Сценок нет (scenes: {} у координатора). Окно — по очереди с окном игры (useWindow координатора: iOS не покажет новое
+// модальное окно, пока прежнее уходит).
 //
 // Привязка окна — пара «ядро и показанный питомец» (доработка PL10.2.1): черновик имени, страница готовых имён, отказ и
 // «Новое в уголке» принадлежат ей; смена питомца (по любому обновлению ядра) или ядра их снимает — возврат к прежней паре
@@ -32,7 +36,7 @@ import { marksText, STAGES, stageGift } from '../core/stages.mjs';
 import { usePetState } from '../hooks/state.mjs';
 import { PetFigure } from './figure.mjs';
 import { cornerProblem, kitFor } from './kits.mjs';
-import { usePetContext } from './provider.mjs';
+import { usePetContext, useWindow } from './provider.mjs';
 import { petBox, roomBack, roomFront, sharedItems, SCENE } from './room.mjs';
 
 const MOTIONS = [
@@ -40,7 +44,12 @@ const MOTIONS = [
   ['calm', 'Спокойное'],
   ['none', 'Без анимации'],
 ];
-const SAVE_KEYS = ['cat', 'companion', 'look', 'treat', 'ext'];
+// Присутствие (ключ presence ядра): подписи и пояснения — как у веба (pet-place.mjs, PRESENCES).
+const PRESENCES = Object.freeze([
+  Object.freeze({ id: 'always', title: 'Всегда рядом', note: 'Питомец остаётся на экране.' }),
+  Object.freeze({ id: 'on-call', title: 'Приходит по зову', note: 'Без питомца на экране. Позови кнопкой, когда захочешь.' }),
+]);
+const SAVE_KEYS = ['cat', 'companion', 'look', 'treat', 'ext', 'presence'];
 const ORIENTATIONS = ['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right'];
 
 // Черновик имени: { core, pet, text } — виден и применяется только для того же ядра и показанного питомца (смена пары его
@@ -74,6 +83,8 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const snapshot = usePetState(core);
   const prefix = useId().replace(/[^a-z0-9]/gi, '');
   const open = Boolean(snapshot && snapshot.status !== 'destroyed' && snapshot.view.open === 'corner');
+  // Окно — по очереди с окном игры того же ядра (iOS: новое модальное окно — после ухода прежнего).
+  const slot = useWindow(core, open);
 
   // Принадлежат привязке окна — паре «ядро и показанный питомец»: «Новое в уголке» { core, pet, … }, черновик имени
   // { core, pet, text }, страница готовых имён { core, pet, value }, отказ { core, text }.
@@ -86,6 +97,10 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const [keyboardTop, setKeyboardTop] = useState(null);
   const entryRef = useRef(null);
   const closeRef = useRef(null);
+  const playRef = useRef(null);
+  // Вид до открытия уголка: из «Поиграть» — фокус на «Поиграть», иначе на «Закрыть».
+  const from = useRef(null);
+  const seen = useRef(null);
   const treatRef = useRef(null);
   const nameRef = useRef(null);
   const scrollRef = useRef(null);
@@ -171,8 +186,31 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
     [core, release],
   );
 
-  // Возврат фокуса ко входу (или к returnFocus хоста) после закрытия окна.
-  const focusBack = useCallback(() => focusOn(returnFocus?.current ?? entryRef.current), [returnFocus]);
+  // Откуда открыт уголок: прежний вид снимка (возврат из «Поиграть» — фокус на «Поиграть»).
+  const viewNow = snapshot?.view.open ?? null;
+  useLayoutEffect(() => {
+    if (seen.current !== viewNow) {
+      from.current = seen.current;
+      seen.current = viewNow;
+    }
+  }, [viewNow]);
+
+  // Возврат фокуса ко входу (или к returnFocus хоста) после закрытия окна — только когда закрыто всё (переход в «Поиграть»
+  // — не закрытие: фокус там у игры).
+  // Входа уголка нет («по зову»: вызов открыл игру, «Уголок» — уголок) — фокус на вход вызова.
+  const callFocus = shared?.focusEntry ?? null;
+  const entryFocus = useCallback(() => {
+    const target = returnFocus?.current ?? entryRef.current;
+    if (target) focusOn(target);
+    else callFocus?.('call');
+  }, [returnFocus, callFocus]);
+  const focusBack = useCallback(() => {
+    const now = quiet('снимок не прочитан', () => (core && core.status !== 'destroyed' ? core.getState().view.open : null));
+    if (now === null) entryFocus();
+  }, [core, entryFocus]);
+  // Вход уголка — координатору: «Поиграть», открытая из уголка и закрытая целиком, возвращает фокус сюда.
+  const entryOf = shared?.entry ?? null;
+  useEffect(() => (entryOf && !problem ? entryOf('corner', entryFocus) : undefined), [entryOf, problem, entryFocus]);
   useEffect(() => {
     const closed = wasOpen.current && !open;
     wasOpen.current = open;
@@ -264,10 +302,58 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const close = () => {
     if (ours()) core.close();
   };
+  // «Поиграть» — тот же вид ядра: окно уголка уходит, окно игры показывает её поверхность.
+  const toPlay = () => {
+    if (!ours()) return;
+    setNote(null);
+    core.activity();
+    const result = core.open('play');
+    if (!result.ok) say(`Поиграть: ${result.error.message}`);
+  };
+  const tell = (text) => quiet('объявление не передано', () => AccessibilityInfo.announceForAccessibility?.(text));
+  // «Скрыть»: окно закрывает ядро, фокус — на «Показать …» (вход на месте прежнего).
+  const hide = () => {
+    if (!mine()) return;
+    const result = core.hide();
+    if (!result.ok) return say(`Скрыть: ${result.error.message}`);
+    tell(`${name} спрятан. Вернуть — «Показать ${who.forms.acc}».`);
+  };
+  // «Показать»: поверхность по присутствию — питомец рядом (вход уголка) или вызов «по зову» (вход игры); игра сама не
+  // открывается. Фокус — на новый вход после отрисовки.
+  const show = () => {
+    if (!ours()) return;
+    const result = core.show();
+    if (!result.ok) return say(`Показать: ${result.error.message}`);
+    const call = core.getState().presence.surface === 'call';
+    tell(call ? `Позвать ${who.forms.acc} — снова на месте.` : `${name} снова рядом.`);
+    setTimeout(() => (call ? shared.focusEntry('call') : focusOn(entryRef.current)), 0);
+  };
 
   // ---------- вход ----------
   const surface = snapshot.presence.surface === 'pet';
+  const hidden = snapshot.presence.surface === 'none';
   const unseen = Boolean(progress?.unseen);
+  const showNode =
+    entry && hidden && running
+      ? h(
+          View,
+          { style: [styles.entryBox, style] },
+          h(
+            Pressable,
+            {
+              ref: entryRef,
+              testID: `${testID}-show`,
+              onPress: show,
+              accessibilityRole: 'button',
+              accessibilityLabel: `Показать ${who.forms.acc}`,
+              accessibilityHint: snapshot.presence.mode === 'on-call' ? 'Вернуть вызов «по зову»' : 'Вернуть питомца на экран',
+              style: ({ pressed }) => [styles.entry, pressed && styles.pressed],
+            },
+            h(Text, { style: styles.entryText }, `Показать ${who.forms.acc}`),
+          ),
+          note && note.core === core ? h(Text, { testID: `${testID}-note`, style: styles.note, accessibilityRole: 'alert' }, note.text) : null,
+        )
+      : null;
   const entryNode =
     entry && surface
       ? h(
@@ -313,6 +399,11 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const newsText = `${told?.celebrate ? `Новая ступень «${STAGES[told.stage]?.title ?? ''}»! ` : ''}${freshNames.length ? `Новое в уголке: ${freshNames.join(', ')}.` : ''}`.trim();
 
   const scene = sceneWidth > 0 ? h(Scene, { width: sceneWidth, def, kit, who, snapshot, stage, fresh, prefix, core, testID, name }) : null;
+  // «Поиграть» — только когда вид объявлен (подключена годная поверхность игры): неработающей кнопки нет.
+  const playable = snapshot.display.views.includes('play');
+  const playNode = playable
+    ? h(Choice, { key: 'play', ref: playRef, testID: `${testID}-play`, role: 'button', title: 'Поиграть', primary: true, disabled: !running, hint: 'Погладить, лапа, миска и мячик', onPress: toPlay })
+    : null;
   const sections = [
     snapshot.prefs.phrases && snapshot.scenePhrase ? h(Text, { key: 'say', testID: `${testID}-phrase`, style: styles.phrase }, snapshot.scenePhrase) : null,
     newsText ? h(Text, { key: 'news', testID: `${testID}-news`, style: styles.news }, newsText) : null,
@@ -373,9 +464,15 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
       MOTIONS.map(([id, title]) => h(Choice, { key: id, testID: `${testID}-motion-${id}`, title, checked: snapshot.prefs.motion === id, disabled: !running, onPress: run('Движение', (c) => c.setPreferences({ motion: id })) })),
     ),
     h(
+      Group,
+      { key: 'presence', title: 'Присутствие', testID: `${testID}-presence`, note: PRESENCES.find((item) => item.id === snapshot.presence.mode)?.note ?? '' },
+      PRESENCES.map((item) => h(Choice, { key: item.id, testID: `${testID}-presence-${item.id}`, title: item.title, checked: snapshot.presence.mode === item.id, disabled: !running, onPress: run('Присутствие', (c) => c.setPresence(item.id)) })),
+    ),
+    h(
       View,
       { key: 'phrases', style: styles.group },
       h(Choice, { testID: `${testID}-phrases`, role: 'switch', title: 'Короткие реплики', checked: snapshot.prefs.phrases, disabled: !running, onPress: run('Реплики', (c) => c.setPreferences({ phrases: !snapshot.prefs.phrases })) }),
+      h(Choice, { testID: `${testID}-hide`, role: 'button', title: `Скрыть ${who.forms.acc}`, disabled: !running, hint: 'Убрать с экрана; вернуть — «Показать»', onPress: hide }),
     ),
     h(Text, { key: 'save', testID: `${testID}-save`, style: styles.muted }, saveText(snapshot)),
   ];
@@ -384,10 +481,11 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
     Fragment,
     null,
     entryNode,
+    showNode,
     h(
       Modal,
       {
-        visible: open,
+        visible: slot.visible,
         animationType: motion === 'none' ? 'none' : motion === 'calm' ? 'fade' : 'slide',
         // iOS: окно поверх экрана хоста, а не вместо него — экран хоста остаётся в иерархии и при повороте пересчитывает свои
         // отступы (insets хоста обновляются и для открытого уголка). При fullScreen они оставались портретными (найдено в
@@ -397,8 +495,11 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
         statusBarTranslucent: edge,
         navigationBarTranslucent: edge,
         onRequestClose: close,
-        onShow: () => focusOn(closeRef.current),
-        onDismiss: focusBack,
+        onShow: () => focusOn((from.current === 'play' ? playRef.current : null) ?? closeRef.current),
+        onDismiss: () => {
+          slot.dismissed();
+          focusBack();
+        },
         testID: `${testID}-modal`,
       },
       h(
@@ -420,7 +521,7 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
         h(
           View,
           { testID: `${testID}-body`, style: [styles.body, wide && styles.bodyWide], onLayout: (event) => setBody(event?.nativeEvent?.layout ?? null) },
-          wide && scene ? h(View, { style: [styles.sceneSide, { paddingBottom: pad.bottom + 12 }] }, scene) : null,
+          wide && scene ? h(View, { style: [styles.sceneSide, { paddingBottom: pad.bottom + 12 }] }, scene, playNode) : null,
           h(
             ScrollView,
             { ref: scrollRef, testID: `${testID}-scroll`, style: styles.scroll, contentContainerStyle: [styles.content, { paddingBottom: bottom }], keyboardShouldPersistTaps: 'handled' },
@@ -431,6 +532,7 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
               h(Text, { testID: `${testID}-stage`, style: styles.sub }, `Ступень «${STAGES[stage]?.title ?? ''}»`),
             ),
             !wide && scene ? h(View, { style: styles.sceneTop }, scene) : null,
+            wide && scene ? null : playNode,
             ...sections,
           ),
         ),
@@ -604,12 +706,13 @@ function Group({ title, testID, note = '', children }) {
 }
 
 // Кнопка или выбор: роль (radio — выбор из группы, switch — переключатель, button), подпись, состояние, область ≥ 48 точек.
-function Choice({ testID, title, onPress, checked, disabled = false, hint, role = 'radio', primary = false }) {
+function Choice({ ref, testID, title, onPress, checked, disabled = false, hint, role = 'radio', primary = false }) {
   const state = { disabled: Boolean(disabled) };
   if (role !== 'button') state.checked = Boolean(checked);
   return h(
     Pressable,
     {
+      ref,
       testID,
       onPress,
       disabled: Boolean(disabled),
