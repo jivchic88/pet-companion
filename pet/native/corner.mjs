@@ -109,7 +109,6 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const typing = useRef(null);
   const nameFocused = useRef(false);
   const treatFocus = useRef(false);
-  const wasOpen = useRef(false);
   // Режим движения последней отрисовки — для прокрутки из слушателя клавиатуры (без движения — без анимации).
   const still = useRef(true);
   still.current = (snapshot?.prefs.effectiveMotion ?? 'none') === 'none';
@@ -212,19 +211,44 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const entryOf = shared?.entry ?? null;
   useEffect(() => (entryOf && !problem ? entryOf('corner', entryFocus) : undefined), [entryOf, problem, entryFocus]);
   useEffect(() => {
-    const closed = wasOpen.current && !open;
-    wasOpen.current = open;
-    if (open) return undefined;
+    if (open) return;
     setNews(null);
     setDraft(null);
     setNote(null);
     setKeyboardTop(null);
     release();
-    // iOS — по onDismiss окна; Android — после снятия окна, следующим оборотом.
-    if (!closed || Platform.OS === 'ios') return undefined;
-    const id = setTimeout(focusBack, 0);
-    return () => clearTimeout(id);
-  }, [open, focusBack, release]);
+  }, [open, release]);
+  // Фокус возвращает поверхность, которая держит окно (показано или ещё уходит), когда вид становится «ничего не
+  // открыто»: переход в «Поиграть» — не закрытие (фокус там у игры), окно, так и не показанное (ждало ухода окна игры), —
+  // не возвращает (иначе игра и уголок возвращали бы его оба). iOS — по onDismiss окна, Android — следующим оборотом после
+  // снятия окна (таймер снимает только размонтирование).
+  const backTimer = useRef(null);
+  const focusPending = useRef(false);
+  const lastView = useRef(viewNow);
+  useEffect(() => () => clearTimeout(backTimer.current), []);
+  useEffect(() => {
+    const was = lastView.current;
+    lastView.current = viewNow;
+    if (viewNow !== null) {
+      focusPending.current = false;
+      return;
+    }
+    if (was === null || !slot.holding) return;
+    focusPending.current = true;
+    if (Platform.OS === 'ios') return;
+    clearTimeout(backTimer.current);
+    backTimer.current = setTimeout(() => {
+      if (!focusPending.current) return;
+      focusPending.current = false;
+      focusBack();
+    }, 0);
+    // Решает отрисовка, в которой вид стал «ничего не открыто» (slot.holding — её).
+  }, [viewNow]);
+  const dismissed = () => {
+    if (!focusPending.current) return;
+    focusPending.current = false;
+    focusBack();
+  };
 
   // Клавиатура, пока окно открыто: её верх — для отступа под полем имени; поле в фокусе и клавиатура показана — прокрутка к
   // строке поля (поле и «Сохранить имя»), а не к заголовку блока: над клавиатурой в альбомной ориентации остаётся меньше
@@ -498,7 +522,7 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
         onShow: () => focusOn((from.current === 'play' ? playRef.current : null) ?? closeRef.current),
         onDismiss: () => {
           slot.dismissed();
-          focusBack();
+          dismissed();
         },
         testID: `${testID}-modal`,
       },

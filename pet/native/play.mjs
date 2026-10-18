@@ -38,6 +38,10 @@ import { ballShape, bowlShape, TOY_VIEW } from './svg.mjs';
 export const PLAY_HINT = 'Проведи по питомцу, чтобы погладить';
 const ORIENTATIONS = ['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right'];
 const NUDGE_MS = 900;
+const FLOOR_MS = 80;
+// Декоративная реплика под питомцем — не больше 1,5 системного размера: при самом крупном тексте две её строки
+// занимали почти половину сцены (найдено в iOS Simulator, PL10.2.2); подсказка и итог масштабируются без ограничения.
+const PHRASE_SCALE = 1.5;
 // Один жест на ядро для всех поверхностей игры: ядро → поверхность, чей палец сейчас на сцене.
 const locks = new WeakMap();
 
@@ -105,7 +109,6 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   const [nudge, setNudge] = useState(false);
   const callRef = useRef(null);
   const closeRef = useRef(null);
-  const wasOpen = useRef(false);
   const source = useRef('');
   const nudgeTimer = useRef(null);
   const rolling = useRef('');
@@ -258,6 +261,8 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   const def = kit ? catalog.defs.get(kit.pet) : null;
   const L = slot.visible && def ? playLayout(box, def, line) : null;
   const floorKey = L ? `${L.playFloor.join(',')}/${L.playTouch}` : '';
+  // Пол — когда замер устоялся (FLOOR_MS без новых): поворот и первая раскладка окна дают несколько замеров подряд, и
+  // переходный пол переставил бы сдвинутые предметы (ядро, refloor). До объявления своего пола предметы недоступны.
   useEffect(() => {
     if (!place || !core) return undefined;
     const me = token.current;
@@ -265,8 +270,11 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
       place(me, null);
       return undefined;
     }
-    place(me, { playFloor: L.playFloor, playTouch: L.playTouch });
-    return () => place(me, null);
+    const id = setTimeout(() => place(me, { playFloor: L.playFloor, playTouch: L.playTouch }), FLOOR_MS);
+    return () => {
+      clearTimeout(id);
+      place(me, null);
+    };
     // floorKey задаёт пол однозначно.
   }, [place, core, floorKey]);
   // Раскладка сцены сменилась во время жеста (поворот, размер окна, крупный текст) — жест снят, а не пересчитан молча.
@@ -401,14 +409,39 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
     if (!shared?.focusEntry?.('corner')) focusOn(callRef.current);
   }, [returnFocus, shared]);
   useEffect(() => {
-    const closed = wasOpen.current && !open;
-    wasOpen.current = open;
-    if (open) return undefined;
-    setNote(null);
-    if (!closed || Platform.OS === 'ios') return undefined;
-    const id = setTimeout(focusBack, 0);
-    return () => clearTimeout(id);
-  }, [open, focusBack]);
+    if (!open) setNote(null);
+  }, [open]);
+  // Фокус возвращает поверхность, которая держит окно (показано или ещё уходит), когда вид становится «ничего не
+  // открыто» (возврат в уголок — фокус у уголка, на «Поиграть»): iOS — по onDismiss окна, Android — следующим оборотом
+  // после снятия окна (таймер снимает только размонтирование).
+  const viewNow = snapshot?.view.open ?? null;
+  const backTimer = useRef(null);
+  const focusPending = useRef(false);
+  const lastView = useRef(viewNow);
+  useEffect(() => () => clearTimeout(backTimer.current), []);
+  useEffect(() => {
+    const was = lastView.current;
+    lastView.current = viewNow;
+    if (viewNow !== null) {
+      focusPending.current = false;
+      return;
+    }
+    if (was === null || !slot.holding) return;
+    focusPending.current = true;
+    if (Platform.OS === 'ios') return;
+    clearTimeout(backTimer.current);
+    backTimer.current = setTimeout(() => {
+      if (!focusPending.current) return;
+      focusPending.current = false;
+      focusBack();
+    }, 0);
+    // Решает отрисовка, в которой вид стал «ничего не открыто» (slot.holding — её).
+  }, [viewNow]);
+  const dismissed = () => {
+    if (!focusPending.current) return;
+    focusPending.current = false;
+    focusBack();
+  };
   // Вход вызова — координатору: «Показать» уголка возвращает фокус сюда.
   const entryOf = shared?.entry ?? null;
   useEffect(() => (entryOf && !problem ? entryOf('call', () => focusOn(callRef.current)) : undefined), [entryOf, problem]);
@@ -571,7 +604,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
           h(
             View,
             { key: 'say', pointerEvents: 'none', style: [styles.say, { top: L.phrase.top, height: L.phrase.height }] },
-            phrase ? h(Text, { testID: `${testID}-phrase`, style: styles.sayText, numberOfLines: 2 }, phrase) : null,
+            phrase ? h(Text, { testID: `${testID}-phrase`, style: styles.sayText, numberOfLines: 2, maxFontSizeMultiplier: PHRASE_SCALE }, phrase) : null,
           ),
         )
       : null,
@@ -579,7 +612,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
     h(
       View,
       { key: 'line', style: styles.measure, pointerEvents: 'none', accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' },
-      h(Text, { testID: `${testID}-line`, style: styles.sayText, onLayout: (event) => setLine(Math.ceil(event?.nativeEvent?.layout?.height ?? 0)) }, 'Ш\nШ'),
+      h(Text, { testID: `${testID}-line`, style: styles.sayText, maxFontSizeMultiplier: PHRASE_SCALE, onLayout: (event) => setLine(Math.ceil(event?.nativeEvent?.layout?.height ?? 0)) }, 'Ш\nШ'),
     ),
   );
 
@@ -637,7 +670,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
         onShow: () => focusOn(closeRef.current),
         onDismiss: () => {
           slot.dismissed();
-          focusBack();
+          dismissed();
         },
         testID: `${testID}-modal`,
       },

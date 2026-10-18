@@ -216,9 +216,10 @@ function free(stage, token) {
 // Запасной срок освобождения окна на iOS, если onDismiss не пришёл (окно снято вместе с деревом и т. п.).
 const DISMISS_MS = 900;
 
-// useWindow(core, want) → { visible, dismissed }: показать окно поверхности, когда она хочет (want — её вид открыт) и окно
-// ядра свободно или уже её. Хотела и больше не хочет: Android — освобождает сразу после фиксации, iOS — по dismissed()
-// (onDismiss окна) или по запасному сроку. Размонтирование и смена ядра освобождают окно.
+// useWindow(core, want) → { visible, holding, dismissed }: показать окно поверхности, когда она хочет (want — её вид открыт)
+// и окно ядра свободно или уже её. Хотела и больше не хочет: Android — освобождает сразу после фиксации, iOS — по
+// dismissed() (onDismiss окна) или по запасному сроку. Размонтирование и смена ядра освобождают окно. holding — окно
+// держит эта поверхность (показано или ещё уходит) на момент отрисовки: она и возвращает фокус, когда всё закрыто.
 export function useWindow(core, want) {
   const token = useRef(null);
   if (!token.current) token.current = {};
@@ -261,6 +262,7 @@ export function useWindow(core, want) {
   });
   return {
     visible,
+    holding: Boolean(stage && (stage.holder === me || (visible && stage.holder === null))),
     dismissed: () => {
       if (want || !stage) return;
       settle();

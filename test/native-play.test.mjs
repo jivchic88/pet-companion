@@ -123,13 +123,20 @@ async function started(L, V) {
 // Окно игры показано — измерить (лист, строка реплики, строки итога, место сцены). Возвращает раскладку, как её считает
 // отображение (playLayout), и определение рисунка.
 const BOX = { width: 390, height: 520 };
-async function measure(V, L, { box = BOX, line = 42, prefix = 'play', def = null } = {}) {
+// Ждать условия оборотами таймеров (пол объявляется, когда замер устоялся — 80 мс): не дольше 100 оборотов по 5 мс.
+async function until(V, ok) {
+  for (let i = 0; i < 100 && !ok(); i += 1) await V.act(turn);
+  return ok();
+}
+async function measure(V, L, { box = BOX, line = 42, prefix = 'play', def = null, declared = true } = {}) {
   await V.fire(`${prefix}-sheet`, 'onLayout', layout(390, 844));
   await V.fire(`${prefix}-line`, 'onLayout', layout(box.width, line));
   for (let i = 0; V.has(`${prefix}-fit-${i}`); i += 1) await V.fire(`${prefix}-fit-${i}`, 'onLayout', layout(box.width, 22 + (i % 3) * 22));
   await V.fire(`${prefix}-box`, 'onLayout', layout(box.width, box.height));
   const shown = def ?? [cat, dog, tall].find((d) => d.id === L.core.getState().pet.shown);
-  return G.playLayout(box, shown, line);
+  const L0 = G.playLayout(box, shown, line);
+  if (declared) assert.ok(await until(V, () => L.core.getState().display.playFloor?.join() === L0.playFloor.join()), 'пол объявлен');
+  return L0;
 }
 // Открыть игру прямой командой и измерить.
 async function opened(L, V, options) {
@@ -223,11 +230,17 @@ test('один владелец объявления: вид play и пол иг
     assert.deepEqual(L.of('setDisplay').at(-1), [DISPLAY(['corner', 'play'], { playFloor: [...L0.playFloor], playTouch: L0.playTouch })], 'пол — замер сцены');
     assert.deepEqual(L.core.getState().display.playFloor, [...L0.playFloor]);
     assert.equal(L.of('setDisplay').length, 2, 'одно объявление пола');
-    // Тот же размер ещё раз — без повтора; другой — новое.
+    // Тот же размер ещё раз — без повтора; другой — новое, когда замер устоялся; переходные замеры подряд — одно объявление.
     await V.fire('play-box', 'onLayout', layout(BOX.width, BOX.height));
+    await V.act(turn);
     assert.equal(L.of('setDisplay').length, 2);
+    await V.fire('play-box', 'onLayout', layout(BOX.width, BOX.height + 10));
+    await V.fire('play-box', 'onLayout', layout(BOX.width, BOX.height + 25));
     await V.fire('play-box', 'onLayout', layout(BOX.width, BOX.height + 40));
-    assert.equal(L.of('setDisplay').length, 3);
+    assert.ok(await until(V, () => L.of('setDisplay').length === 3));
+    await V.act(turn);
+    assert.equal(L.of('setDisplay').length, 3, 'переходные замеры не объявлены');
+    assert.deepEqual(L.core.getState().display.playFloor, [...G.playLayout({ width: BOX.width, height: BOX.height + 40 }, cat, 42).playFloor]);
     // Поверхность игры снята при открытой игре — вид закрыт, остался уголок.
     await V.render(tree(L, { play: false }));
     await V.act(() => {});
@@ -282,8 +295,8 @@ test('окно — только по view снимка и по очереди с
   assert.deepEqual([L.core.getState().view.open, V.node('corner-modal').visible], ['corner', true]);
   await V.fire('corner-modal', 'onRequestClose');
   assert.equal(L.core.getState().view.open, null);
-  // Android переводит фокус после снятия окна, следующим оборотом таймеров: ждать по условию, не дольше 20 оборотов.
-  for (let i = 0; i < 20 && rn.focused.length === 0; i += 1) await V.act(turn);
+  // Android переводит фокус после снятия окна, следующим оборотом таймеров: ждать по условию (until).
+  await until(V, () => rn.focused.length > 0);
   assert.deepEqual(rn.focused, [{ testID: 'corner-open', type: 'focus' }]);
   // Прямая команда из закрытого — игра; прямой close() — закрыто целиком, уголок сам не открывается; фокус — на вход уголка.
   rn.platform = 'ios';
@@ -302,6 +315,29 @@ test('окно — только по view снимка и по очереди с
   await V.press('play-close');
   assert.equal(L.core.getState().view.open, null);
   L.core.destroy();
+});
+
+test('фокус возвращает окно, которое держит экран, когда всё закрыто: игра → уголок → закрыто быстрее ухода окна игры — один перевод фокуса на вход уголка (iOS — по onDismiss окна игры; окно уголка так и не показано); переход между видами фокус на вход не переводит', async () => {
+  for (const platform of ['ios', 'android']) {
+    rn.platform = platform;
+    const L = await lab();
+    const V = mount(`play-focus-${platform}`, tree(L));
+    await V.render();
+    await started(L, V);
+    await V.act(() => L.core.open('play'));
+    rn.focused.length = 0;
+    await V.press('play-close');
+    assert.equal(L.core.getState().view.open, 'corner');
+    if (platform === 'ios') assert.equal(V.node('corner-modal').visible, false, 'iOS: окно уголка ждёт ухода окна игры');
+    await V.act(turn);
+    assert.deepEqual(rn.focused, [], 'переход в уголок — фокус не на входе');
+    await V.act(() => L.core.close());
+    if (platform === 'ios') await V.fire('play-modal', 'onDismiss');
+    await until(V, () => rn.focused.length > 0);
+    await V.act(turn);
+    assert.deepEqual(rn.focused, [{ testID: 'corner-open', type: 'focus' }], platform);
+    L.core.destroy();
+  }
 });
 
 test('из ввода имени в игру: тишина ввода снята (setContext typing: false), поле уголка снято вместе с окном, черновик не переносится; уголок после игры — поле с сохранённым именем', async () => {
@@ -796,6 +832,8 @@ test('уменьшение движения и раскладка: окно бе
   await V.fire('play-head', 'onLayout', layout(390, 560));
   assert.equal(inScroll(), true, 'крупный текст — шапка в прокрутке под сценой');
   assert.equal(V.node('play-scroll').style.at(-1).maxHeight, 422);
+  assert.equal(V.node('play-line').maxFontSizeMultiplier, 1.5, 'строка реплики — не крупнее 1,5 системного размера');
+  assert.equal(V.node('play-hint').maxFontSizeMultiplier, undefined, 'итог — без ограничения');
   await V.fire('play-head', 'onLayout', layout(358, 150));
   assert.equal(inScroll(), false);
   // Широкий экран: сцена и колонка рядом (прокрутка — только у колонки).
