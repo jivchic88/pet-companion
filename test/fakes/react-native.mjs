@@ -81,7 +81,8 @@ class Value {
 }
 // Кривые — те же формулы, что у React Native (out — отражение, cubic — t³).
 export const Easing = { cubic: (t) => t ** 3, out: (f) => (t) => 1 - f(1 - t) };
-// Анимация подделки: steps — шаги timing по порядку; start — идёт (live), stop — снята, end — закончилась сама.
+// Анимация подделки: steps — шаги timing по порядку; start — идёт (live), stop — снята, end — закончилась сама; late(result) —
+// отклик start ещё раз, когда анимация уже снята или закончилась (запоздавший отклик прежнего движения).
 function animation(steps, iterations = 1) {
   const book = system.animations;
   let live = false;
@@ -113,6 +114,9 @@ function animation(steps, iterations = 1) {
       const last = steps.at(-1);
       if (last) last.value.setValue(last.toValue);
       done?.(result);
+    },
+    late(result) {
+      if (!live) done?.(result);
     },
   };
   return run;

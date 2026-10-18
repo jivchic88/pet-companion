@@ -144,14 +144,14 @@ export async function sqliteSite(initial = {}, { ns = 'qa', mode = 'wal', busyTi
   return self;
 }
 
-// Подделка React Native: AppState (currentState, change, blur), AccessibilityInfo (isReduceMotionEnabled — ручное
+// Подделка React Native: AppState (currentState, change, blur, focus), AccessibilityInfo (isReduceMotionEnabled — ручное
 // обещание, reduceMotionChanged, announceForAccessibility — в announced, sendAccessibilityEvent — в focused), Keyboard
 // (keyboardWillShow/Hide, keyboardDidShow/Hide; keyboard(event, data) — событие слушателям) и Platform (OS — platform).
 // Счётчики подписок и снятий; emit — событие всем текущим слушателям; animations — учёт анимаций подделки Animated
 // (test/fakes/react-native.mjs): started, stopped и идущие (live), finish() — все идущие закончились сами; scrolls —
 // вызовы scrollTo у ScrollView.
 export function system({ state = 'active' } = {}) {
-  const listeners = { change: new Set(), blur: new Set(), reduceMotionChanged: new Set() };
+  const listeners = { change: new Set(), blur: new Set(), focus: new Set(), reduceMotionChanged: new Set() };
   const keys = { keyboardWillShow: new Set(), keyboardWillHide: new Set(), keyboardDidShow: new Set(), keyboardDidHide: new Set() };
   const counts = { add: 0, remove: 0, ask: 0 };
   const asks = [];
@@ -171,7 +171,7 @@ export function system({ state = 'active' } = {}) {
       };
     },
   });
-  const AppState = Object.assign(target(['change', 'blur']), { currentState: state });
+  const AppState = Object.assign(target(['change', 'blur', 'focus']), { currentState: state });
   const announced = [];
   const focused = [];
   const AccessibilityInfo = Object.assign(target(['reduceMotionChanged']), {

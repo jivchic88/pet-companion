@@ -21,6 +21,24 @@
 // присутствия, видимости, раскладки сцены, кнопка во время жеста, закрытие окна и размонтирование — локально и ядру (ядро
 // снимает свой жест и само: тогда только локально). Снятый жест «мёртв» до отпускания пальца: позднее отпускание ничего не
 // вызывает. Кнопки «Погладить», лапа, «Подвинуть / Вернуть миску», «Катнуть мячик» — interact(), те же правила ядра.
+//
+// Система (доработка PL10.2.2): отпускания пальца после прерывания может не быть, поэтому неактивно / фон / blur во время
+// жеста снимают его сразу (retire: ядру отмена, жест забыт, замок ядра отпущен) — не ждут отпускания. Новые жесты не
+// начинаются, пока приложение неактивно или в фоне (до AppState 'active') и пока не вернулся фокус окна, потерянный во время
+// жеста (blur → 'focus'). blur без жеста ввод не приостанавливает: в React Native Android blur / focus — фокус окна Activity,
+// а окно игры (Modal) — отдельное окно, которое само забирает этот фокус при показе (ARCHITECTURE.md § 14.1.12); новое
+// касание до окна под системной шторкой не доходит. Новый палец после прерванного без отпускания касания приходит в
+// onResponderStart (сцена остаётся ответчиком React Native) или в Grant — оба начинают жест; поздние события прежнего
+// касания жест не находят или старше его начала (gesture.mjs). Состояние приостановки — на окно: снимается с окном.
+//
+// Сеанс показа — ядро, показанный питомец, открытый вид и его источник; любая их смена (и туда-обратно в одном такте —
+// по каждому обновлению ядра) начинает новый. Обработчики кнопок и окна, отказ, подсказка «проведи» и отложенный возврат
+// фокуса годны только в своём сеансе: прежнее нажатие ничего не командует новому питомцу, не отменяет его жест и не
+// переводит фокус. Прямые команды хоста (core.interact / open / close) — без изменений.
+//
+// Предметы: движение — Animated (x и y) только при движении и на виду; «уменьшить движение» (система или motion: 'none'),
+// фон, отключение, смена ядра, закрытие, нулевая раскладка и размонтирование снимают уже начатое движение и модель его кривой
+// — предмет сразу на месте снимка.
 
 import { createElement as h, Fragment, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, AppState, Easing, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -82,9 +100,24 @@ function drawnAt(t, at = now()) {
   return [t.model.from[0] + (t.model.to[0] - t.model.from[0]) * e, t.model.from[1] + (t.model.to[1] - t.model.from[1]) * e];
 }
 
+// Снять движение предмета t: анимации остановлены (их поздний отклик — finished: false — модель не трогает), модели кривой нет.
+function halt(t) {
+  for (const anim of t.run.splice(0)) anim.stop();
+  t.model = null;
+}
+
 // Признак, сменив который ядро снимает жест (питомец, модель, облик, вид, присутствие, видимость, отключение): тогда и
 // локальный жест снят — без команд из подписки.
 const gestureKey = (s) => [s.status, s.pet.shown, s.behavior.shown, s.look.coat, s.look.worn, s.view.open, s.presence.hidden, s.presence.around, s.visible].join('|');
+
+// Сеанс показа era (ref): ядро c и снимок s (питомец, открытый вид, источник) — тот же сеанс или новый номер.
+const sessionKey = (s) => (s ? `${s.pet?.shown ?? ''}|${s.view?.open ?? ''}|${s.view?.source ?? ''}` : '');
+function advance(era, c, s) {
+  const key = sessionKey(s);
+  const was = era.current;
+  if (was.core !== c || was.key !== key) era.current = { core: c, key, n: was.n + 1 };
+  return era.current.n;
+}
 
 export function PetPlay({ insets, entry = true, label, hint = 'Открыть игру', returnFocus = null, testID = 'play', style } = {}) {
   const shared = usePetContext();
@@ -106,7 +139,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   const [line, setLine] = useState(0);
   const [fit, setFit] = useState({});
   const [note, setNote] = useState(null);
-  const [nudge, setNudge] = useState(false);
+  const [nudge, setNudge] = useState(null);
   const callRef = useRef(null);
   const closeRef = useRef(null);
   const source = useRef('');
@@ -118,7 +151,14 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   const live = useRef({ core: null, L: null, def: null, pose: '', ready: false, toys: false });
   const gcore = useRef(null);
   const toyState = useRef(null);
-  if (!toyState.current) toyState.current = Object.fromEntries(TOYS.map((toy) => [toy, { x: new Animated.Value(0), y: new Animated.Value(0), model: null, shown: null, key: '', dragged: false, run: [] }]));
+  if (!toyState.current) toyState.current = Object.fromEntries(TOYS.map((toy) => [toy, { x: new Animated.Value(0), y: new Animated.Value(0), model: null, shown: null, goal: null, key: '', dragged: false, run: [], core: null }]));
+  // Приостановка ввода системой (на окно): away — приложение неактивно или в фоне (до 'active'), blur — во время жеста
+  // потерян фокус окна (до 'focus').
+  const pause = useRef({ away: false, blur: false });
+  const paused = () => pause.current.away || pause.current.blur;
+  const era = useRef({ core: null, key: null, n: 0 });
+  // Сеанс этой отрисовки (номер сверяют обработчики в момент вызова).
+  const session = advance(era, core, snapshot);
 
   useEffect(() => {
     if (problem && shared?.core) systemLog.warn(`PetPlay: ${problem}`);
@@ -133,6 +173,18 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
       bound.current = null;
     };
   }, [core]);
+  // Сеанс сверяется по каждому обновлению ядра: смена питомца или вида туда и обратно между отрисовками — тоже новый сеанс.
+  useLayoutEffect(() => {
+    if (!core) return undefined;
+    advance(era, core, quiet('снимок не прочитан', () => core.getState()));
+    return core.subscribe(({ snapshot: s }) => void advance(era, core, s), { initial: false });
+  }, [core]);
+  // Сеанс n ещё текущий: ядро последней фиксации живо, и с тех пор ни ядро, ни питомец, ни вид не менялись.
+  const current = useCallback((n) => {
+    const c = bound.current;
+    if (!c || c.status === 'destroyed') return false;
+    return advance(era, c, quiet('снимок не прочитан', () => c.getState())) === n;
+  }, []);
 
   // ---------- жест ----------
   const unlock = useCallback(() => {
@@ -159,7 +211,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
       cancel: (id) => run('stroke.cancel', (c) => c.stroke.cancel(id)),
       paw: () => {
         const result = run('лапа', (c) => c.interact({ type: 'paw' }));
-        if (result && !result.ok) setNote({ core: gcore.current, text: `Лапа: ${result.error.message}` });
+        if (result && !result.ok) setNote({ session: era.current.n, text: `Лапа: ${result.error.message}` });
       },
       drag: (toy, at) => run('toy.drag', (c) => c.toy.drag(toy, at))?.ok === true,
       // Брошенный мячик докатывается плавно (отметка — до отрисовки нового места, её снимает эффект предметов).
@@ -174,27 +226,40 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
         const L = live.current.L;
         return Boolean(drag && L) && Math.hypot(drag.at[0] - drag.from[0], drag.at[1] - drag.from[1]) * L.s >= MOVE_PT;
       },
+      // Подсказка — сеансу, в котором коснулись.
       nudge: () => {
         clearTimeout(nudgeTimer.current);
-        setNudge(true);
-        nudgeTimer.current = setTimeout(() => setNudge(false), NUDGE_MS);
+        setNudge(era.current.n);
+        nudgeTimer.current = setTimeout(() => setNudge(null), NUDGE_MS);
       },
     });
   }
   const g = gesture.current;
-  // Снять жест отображением: ядру — отмена своего жеста, локально — «мёртв» до отпускания; gone — палец уже не наш
-  // (система забрала касание, окно снято): забыть сразу.
+  // Снять жест отображением: ядру — отмена своего жеста, локально — «мёртв» до отпускания; gone — отпускания своего пальца
+  // может не быть (система прервала касание, окно снято, ответчик отнят, другое ядро): жест забыт сразу, замок отпущен.
   const stop = useCallback(
     (reason, gone = false) => {
       if (!g.active()) return;
-      g.cancel(reason);
-      if (gone) {
-        g.forget();
-        unlock();
+      if (!gone) {
+        g.cancel(reason);
+        return;
       }
+      g.retire(reason);
+      unlock();
     },
     [g, unlock],
   );
+  // Фон: начатые движения предметов сняты, предметы — на месте снимка (возврат не доигрывает прежнее движение).
+  const settle = useCallback(() => {
+    for (const t of Object.values(toyState.current)) {
+      if (!t.run.length && !t.model) continue;
+      halt(t);
+      if (t.goal) {
+        t.x.setValue(t.goal[0]);
+        t.y.setValue(t.goal[1]);
+      }
+    }
+  }, []);
 
   // Подписка: ядро сняло жест само (нет своего stroke или drag) или сменилось то, при чём ядро жест снимает, — локально,
   // без команд из подписки.
@@ -226,26 +291,46 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   useEffect(
     () => () => {
       clearTimeout(nudgeTimer.current);
-      for (const t of Object.values(toyState.current)) for (const anim of t.run.splice(0)) anim.stop();
+      for (const t of Object.values(toyState.current)) halt(t);
     },
     [],
   );
 
-  // Система: неактивно (iOS — центр уведомлений, звонок, переключатель приложений), фон, Android blur — локальная отмена
-  // (видимость ядра меняет useNativeLifecycle хоста; здесь — только свой жест).
+  // Система, пока окно показано: неактивно (iOS — центр уведомлений, звонок, переключатель приложений) и фон — жест снят
+  // без ожидания отпускания, новые не начинаются до 'active'; фон ещё снимает начатые движения предметов. Android blur во
+  // время жеста — снят, новые не начинаются до 'focus' (blur без жеста — см. заголовок). Видимость ядра меняет
+  // useNativeLifecycle хоста; здесь — только свой ввод. Приостановка — на окно: новое окно начинает с текущего AppState.
   useEffect(() => {
     if (!slot.visible) return undefined;
+    const state = quiet('состояние приложения не прочитано', () => AppState.currentState);
+    pause.current = { away: state === 'inactive' || state === 'background', blur: false };
     const subs = [];
     const add = (event, handler) => {
       const sub = quiet(`нет подписки AppState ${event}`, () => AppState.addEventListener(event, handler));
       if (sub) subs.push(sub);
     };
-    add('change', (state) => (state === 'inactive' || state === 'background') && stop('system'));
-    add('blur', () => stop('blur'));
+    add('change', (next) => {
+      if (next === 'active') {
+        pause.current.away = false;
+        return;
+      }
+      if (next !== 'inactive' && next !== 'background') return;
+      pause.current.away = true;
+      stop('system', true);
+      if (next === 'background') settle();
+    });
+    add('blur', () => {
+      if (g.active()) pause.current.blur = true;
+      stop('blur', true);
+    });
+    add('focus', () => {
+      pause.current.blur = false;
+    });
     return () => {
       for (const sub of subs) quiet('подписка не снята', () => sub.remove());
+      pause.current = { away: false, blur: false };
     };
-  }, [slot.visible, stop]);
+  }, [slot.visible, stop, settle, g]);
 
   // Окно ушло (вид сменён или закрыт, очередь окна, отключение): жест снят, замер забыт — новый показ меряет заново.
   useEffect(() => {
@@ -253,7 +338,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
     stop('closed', true);
     setBox(null);
     setFrame(null);
-    setNudge(false);
+    setNudge(null);
   }, [slot.visible, stop]);
 
   // ---------- раскладка и пол ----------
@@ -301,14 +386,25 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   // Раскладка предметов: сцена и пол в снимке. Новый пол переставляет предметы (ядро, refloor) — это смена раскладки, а не
   // действие: место — сразу, как у веба.
   const placeKey = L ? `${L.key}|${display?.playFloor?.join(',') ?? ''}/${display?.playTouch ?? ''}` : '';
+  // Без движения — «уменьшить движение» (система или motion: 'none'), ядро не работает или не на виду (фон у хоста): места
+  // сразу, начатое движение снято.
+  const still = motion === 'none' || !running || !snapshot?.visible;
   useLayoutEffect(() => {
     for (const toy of TOYS) {
       const t = toyState.current[toy];
+      // Другое ядро: движения и модель прежнего сняты, места нового — сразу (без кривой от мест прежнего).
+      if (t.core !== core) {
+        halt(t);
+        Object.assign(t, { core, shown: null, goal: null, key: '', dragged: false });
+        rolling.current = '';
+      }
       const dragged = play?.drag?.toy === toy;
       const at = dragged ? play.drag.at : play?.toys[toy]?.at;
+      // Окно закрыто или уходит, вид сменён, отключение, нулевая раскладка — ни движения, ни модели.
       if (!at || !L) {
+        halt(t);
         t.shown = null;
-        t.model = null;
+        t.goal = null;
         t.dragged = false;
         continue;
       }
@@ -318,13 +414,14 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
       if (endedDrag) rolling.current = '';
       const relayout = t.key !== placeKey;
       t.key = placeKey;
-      if (near(t.shown, at) && !relayout) continue;
+      // На месте и не движется (или движется, и движение ещё разрешено) — ничего.
+      if (near(t.shown, at) && !relayout && !(still && t.model)) continue;
       const from = drawnAt(t) ?? at;
-      for (const anim of t.run.splice(0)) anim.stop();
+      halt(t);
       const goal = toyBox(L, toy, at);
       const [x, y] = [goal.left, goal.top];
-      if (relayout || dragged || !t.shown || (endedDrag && !rolled) || motion === 'none') {
-        t.model = null;
+      t.goal = [x, y];
+      if (relayout || dragged || !t.shown || (endedDrag && !rolled) || still) {
         t.x.setValue(x);
         t.y.setValue(y);
         t.shown = [...at];
@@ -339,13 +436,14 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
       t.y.setValue(start.top);
       const easing = Easing.out(Easing.cubic);
       t.run = [Animated.timing(t.x, { toValue: x, duration: ms, easing, useNativeDriver: true }), Animated.timing(t.y, { toValue: y, duration: ms, easing, useNativeDriver: true })];
+      // Отклик своей анимации снимает только свою модель (поздний отклик прежней новую не трогает).
       for (const anim of t.run)
         anim.start(({ finished } = {}) => {
           if (finished && t.model === model) t.model = null;
         });
     }
-    // drawnKey и ключ раскладки задают места; motion — плавность.
-  }, [drawnKey, placeKey, motion]);
+    // Ядро, drawnKey и ключ раскладки задают места; motion и still — плавность.
+  }, [core, drawnKey, placeKey, motion, still]);
   // Где предметы нарисованы сейчас (единицы рисунка): только при объявленном поле этой сцены. Отсюда начинается перенос:
   // ядро останавливает катящийся мячик там, где его взяли (play.drag), и отрисовка ставит его туда же — без скачка; отказ
   // ядра в переносе движения не трогает.
@@ -365,36 +463,45 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
     const owner = c ? locks.get(c) : null;
     return !owner || owner === token.current;
   };
+  // Начать жест пальцем события ne (палец этого события — identifier, точка — locationX/Y, время — timestamp): сцена готова,
+  // ввод не приостановлен системой, ядро не занято другим жестом, под пальцем питомец или предмет.
+  const startable = (ne) => Boolean(live.current.ready && !paused() && free() && !g.active() && targetOf(touchPoint(ne)));
+  const begin = (ne) => {
+    const { core: c, L: L0 } = live.current;
+    if (!c || !startable(ne)) return;
+    const point = touchPoint(ne);
+    gcore.current = c;
+    locks.set(c, token.current);
+    g.begin({ touch: ne?.identifier ?? 0, point, time: ne?.timestamp ?? now(), stamp: ne?.timestamp, target: targetOf(point), scale: L0.s });
+  };
   const responder = {
-    onStartShouldSetResponder: (event) => Boolean(live.current.ready && free() && !g.active() && targetOf(touchPoint(event?.nativeEvent))),
+    onStartShouldSetResponder: (event) => startable(event?.nativeEvent),
     onMoveShouldSetResponder: () => false,
     onResponderTerminationRequest: () => false,
-    onResponderGrant: (event) => {
-      const ne = event?.nativeEvent;
-      const point = touchPoint(ne);
-      const { core: c, L: L0, ready: ok } = live.current;
-      const target = ok && free() && !g.active() ? targetOf(point) : null;
-      if (!target || !c) return;
-      gcore.current = c;
-      locks.set(c, token.current);
-      g.begin({ touch: ne?.identifier ?? 0, point, time: ne?.timestamp ?? now(), target, scale: L0.s });
-    },
+    onResponderGrant: (event) => begin(event?.nativeEvent),
+    // Новый палец, пока сцена — ответчик (React Native не спрашивает ответчика снова и шлёт ему onResponderStart; так приходит
+    // и касание после прерванного системой без отпускания). Первый палец уже начат в Grant — повтор ничего не меняет.
+    onResponderStart: (event) => begin(event?.nativeEvent),
     onResponderMove: (event) => {
       if (!g.active()) return;
-      const point = touchPoint(event?.nativeEvent, g.touch());
-      if (point) g.move({ touch: g.touch(), point, hit: hitOf, scale: live.current.L?.s });
+      const ne = event?.nativeEvent;
+      const point = touchPoint(ne, g.touch());
+      if (point) g.move({ touch: g.touch(), point, stamp: ne?.timestamp, hit: hitOf, scale: live.current.L?.s });
     },
     onResponderEnd: (event) => finish(event),
     onResponderRelease: (event) => finish(event),
-    onResponderTerminate: () => stop('terminate', true),
+    // Ответчик отнят: отпускания не будет — жест снят. Событие старше начала текущего жеста — от прежнего касания.
+    onResponderTerminate: (event) => {
+      if (!g.stale(event?.nativeEvent?.timestamp)) stop('terminate', true);
+    },
   };
   function finish(event) {
     if (!g.active()) return;
     const ne = event?.nativeEvent;
     const id = g.touch();
-    if (!ended(ne, id)) return;
+    if (!ended(ne, id) || g.stale(ne?.timestamp)) return;
     const point = touchPoint(ne, id) ?? [ne?.locationX, ne?.locationY];
-    g.end({ touch: id, point, time: ne?.timestamp ?? now(), hit: hitOf });
+    g.end({ touch: id, point, time: ne?.timestamp ?? now(), stamp: ne?.timestamp, hit: hitOf });
     unlock();
   }
 
@@ -413,35 +520,34 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   }, [open]);
   // Фокус возвращает поверхность, которая держит окно (показано или ещё уходит), когда вид становится «ничего не
   // открыто» (возврат в уголок — фокус у уголка, на «Поиграть»): iOS — по onDismiss окна, Android — следующим оборотом
-  // после снятия окна (таймер снимает только размонтирование).
+  // после снятия окна (таймер снимает только размонтирование). Возврат — сеансу закрытия: сменились до него ядро, питомец
+  // или вид — фокус не переводится (новым показом управляет его сеанс).
   const viewNow = snapshot?.view.open ?? null;
   const backTimer = useRef(null);
-  const focusPending = useRef(false);
+  const focusPending = useRef(null);
   const lastView = useRef(viewNow);
   useEffect(() => () => clearTimeout(backTimer.current), []);
+  const focusDue = useCallback(() => {
+    const n = focusPending.current;
+    if (n === null) return;
+    focusPending.current = null;
+    if (current(n)) focusBack();
+  }, [current, focusBack]);
   useEffect(() => {
     const was = lastView.current;
     lastView.current = viewNow;
     if (viewNow !== null) {
-      focusPending.current = false;
+      focusPending.current = null;
       return;
     }
     if (was === null || !slot.holding) return;
-    focusPending.current = true;
+    focusPending.current = session;
     if (Platform.OS === 'ios') return;
     clearTimeout(backTimer.current);
-    backTimer.current = setTimeout(() => {
-      if (!focusPending.current) return;
-      focusPending.current = false;
-      focusBack();
-    }, 0);
-    // Решает отрисовка, в которой вид стал «ничего не открыто» (slot.holding — её).
+    backTimer.current = setTimeout(focusDue, 0);
+    // Решает отрисовка, в которой вид стал «ничего не открыто» (slot.holding и сеанс — её).
   }, [viewNow]);
-  const dismissed = () => {
-    if (!focusPending.current) return;
-    focusPending.current = false;
-    focusBack();
-  };
+  const dismissed = focusDue;
   // Вход вызова — координатору: «Показать» уголка возвращает фокус сюда.
   const entryOf = shared?.entry ?? null;
   useEffect(() => (entryOf && !problem ? entryOf('call', () => focusOn(callRef.current)) : undefined), [entryOf, problem]);
@@ -455,8 +561,14 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   const who = catalog.defs.get(snapshot.pet.shown) ?? def;
   const name = snapshot.name.display;
   const views = snapshot.display.views;
-  const ours = () => bound.current === core && core.status !== 'destroyed';
-  const say = (text) => setNote({ core, text });
+  // Обработчики этой отрисовки годны только в её сеансе (то же ядро последней фиксации, тот же показанный питомец, тот же
+  // открытый вид и источник — сверка по каждому обновлению ядра): прежнее нажатие после смены питомца — даже туда и обратно
+  // в одном такте — или вида ничего не командует, не отменяет жест нового показа и не показывает отказ.
+  const ours = () => bound.current === core && current(session);
+  const say = (text) => setNote({ session: era.current.n, text });
+  // Отказ и подсказка «проведи» — только своего сеанса (прежнего питомца или вида не показываются).
+  const told = note && note.session === session ? note : null;
+  const nudged = nudge !== null && nudge === session;
   // Кнопка во время жеста: жест снят (ядру — отмена), затем команда — те же правила ядра, что у касания.
   const act = (title, action) => () => {
     if (!ours()) return;
@@ -507,7 +619,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
           },
           h(Text, { style: styles.entryText }, `Позвать ${who.forms.acc}`),
         ),
-        note && note.core === core && !open ? h(Text, { testID: `${testID}-note`, style: styles.refused, accessibilityRole: 'alert' }, note.text) : null,
+        told && !open ? h(Text, { testID: `${testID}-note`, style: styles.refused, accessibilityRole: 'alert' }, note.text) : null,
       )
     : null;
 
@@ -529,7 +641,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
   const noteNode = h(
     View,
     { key: 'note', testID: `${testID}-hint-box`, style: [styles.note, { minHeight: noteHeight }] },
-    h(Text, { testID: `${testID}-hint`, style: [styles.noteText, (result || nudge) && styles.noteStrong, nudge && !result && styles.noteNudge] }, noteText),
+    h(Text, { testID: `${testID}-hint`, style: [styles.noteText, (result || nudged) && styles.noteStrong, nudged && !result && styles.noteNudge] }, noteText),
     // Невидимые образцы подсказки и всех итогов с этим именем — высота строки по самому длинному.
     h(
       View,
@@ -566,7 +678,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
     h(Button, { key: 'bowl', testID: `${testID}-bowl`, title: home ? 'Подвинуть миску' : 'Вернуть миску', disabled: !toys, wide: true, onPress: act('Миска', { type: 'bowl', to: home ? 'near' : 'home' }) }),
     h(Button, { key: 'ball', testID: `${testID}-ball`, title: 'Катнуть мячик', disabled: !toys, wide: true, onPress: act('Мячик', { type: 'ball', to: 'roll' }) }),
   ];
-  const refusedNode = note && note.core === core && open ? h(Text, { key: 'refused', testID: `${testID}-note`, style: styles.refused, accessibilityRole: 'alert' }, note.text) : null;
+  const refusedNode = told && open ? h(Text, { key: 'refused', testID: `${testID}-note`, style: styles.refused, accessibilityRole: 'alert' }, note.text) : null;
   const actionsNode = h(View, { key: 'actions', style: styles.actions }, ...actionNodes);
 
   // Сцена: размер — по месту, рисунок и предметы — по снимку; ответчик — сама сцена (дети касаний не берут).

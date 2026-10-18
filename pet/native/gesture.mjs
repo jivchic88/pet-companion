@@ -114,14 +114,21 @@ export function targetAt(L, def, pose, point, drawn) {
 // лапы; drag(toy, [u, v]) → начат ли перенос; drop(roll?) — отпустили после заметного сдвига; toyCancel(); moved() — миска
 // под пальцем сдвинулась не меньше MOVE_PT; nudge() — касание питомца без сдвига (подсказка). Палец — номер касания
 // (identifier): чужие пальцы ничего не меняют. Снятый жест (cancel, ядро сняло сам — lost) «мёртв» до отпускания своего
-// пальца: позднее движение и отпускание ничего не вызывают. Всё — синхронно, без таймеров.
+// пальца: позднее движение и отпускание ничего не вызывают. Палец, отпускания которого может не быть (система прервала
+// касание, окно снято, ответчик отнят), — retire: ядру отмена, жест забыт сразу, следующий палец начинает новый.
+// Отметка времени события (stamp — timestamp события React Native, если есть): движение и отпускание старше начала жеста —
+// не его (запоздавшие события прежнего касания с тем же identifier: номера пальцев система выдаёт снова). Всё — синхронно,
+// без таймеров.
 export function createGesture(hooks) {
   let g = null;
+  // Событие старше начала текущего жеста — от прежнего касания.
+  const older = (stamp) => Boolean(g) && finite(stamp) && finite(g.since) && stamp < g.since;
 
-  function begin({ touch, point, time, target, scale }) {
+  function begin({ touch, point, time, stamp, target, scale }) {
     if (g || !target) return false;
+    const since = finite(stamp) ? stamp : null;
     if (target.kind === 'toy') {
-      g = { touch, kind: 'toy', toy: target.toy, p0: point, from: target.at, scale, on: false, d: [0, 0], dead: false, starting: true };
+      g = { touch, kind: 'toy', toy: target.toy, p0: point, from: target.at, scale, on: false, d: [0, 0], dead: false, starting: true, since };
       let ok = false;
       try {
         ok = hooks.drag(target.toy, target.at) === true;
@@ -131,7 +138,7 @@ export function createGesture(hooks) {
       if (!ok) g.dead = true;
       return true;
     }
-    g = { touch, kind: target.part === 'paw' ? 'paw' : 'pet', p0: point, anchor: point, far: 0, t0: time, id: null, dead: false, starting: true };
+    g = { touch, kind: target.part === 'paw' ? 'paw' : 'pet', p0: point, anchor: point, far: 0, t0: time, id: null, dead: false, starting: true, since };
     try {
       g.id = hooks.start() ?? null;
     } finally {
@@ -141,8 +148,8 @@ export function createGesture(hooks) {
   }
 
   // Движение своего пальца. hit(point) — часть питомца под точкой (текущая геометрия и поза); scale — текущий масштаб.
-  function move({ touch, point, hit, scale }) {
-    if (!g || g.touch !== touch || g.dead) return null;
+  function move({ touch, point, stamp, hit, scale }) {
+    if (!g || g.touch !== touch || g.dead || older(stamp)) return null;
     if (g.kind === 'toy') {
       g.d = [point[0] - g.p0[0], point[1] - g.p0[1]];
       if (!g.on && Math.hypot(g.d[0], g.d[1]) < MOVE_PT) return null;
@@ -164,9 +171,10 @@ export function createGesture(hooks) {
     return 'step';
   }
 
-  // Отпустили свой палец. Возвращает итог распознавания (для журнала и проверок).
-  function end({ touch, point, time, hit }) {
-    if (!g || g.touch !== touch) return null;
+  // Отпустили свой палец. Возвращает итог распознавания (для журнала и проверок); отпускание прежнего касания (старше
+  // начала) — null, жест остаётся.
+  function end({ touch, point, time, stamp, hit }) {
+    if (!g || g.touch !== touch || older(stamp)) return null;
     const was = g;
     g = null;
     if (was.dead) return 'dead';
@@ -225,6 +233,16 @@ export function createGesture(hooks) {
     g = null;
   }
 
+  // Отпускания пальца может не быть (система прервала касание, окно снято, ответчик отнят): ядру — отмена своего жеста, если
+  // он ещё жив, и жест забыт сразу. Поздние движение и отпускание прежнего пальца жеста не находят, а у нового жеста не
+  // совпадают с ним пальцем или временем. Повтор — ничего.
+  function retire(reason = 'retire') {
+    if (!g) return null;
+    cancel(reason);
+    g = null;
+    return reason;
+  }
+
   return Object.freeze({
     begin,
     move,
@@ -233,6 +251,9 @@ export function createGesture(hooks) {
     sync,
     abort,
     forget,
+    retire,
+    // Событие со своей отметкой времени stamp старше начала текущего жеста (от прежнего касания).
+    stale: (stamp) => older(stamp),
     active: () => g !== null,
     live: () => g !== null && !g.dead,
     touch: () => g?.touch ?? null,

@@ -270,3 +270,55 @@ test('предметы: первая точка — нарисованное м�
   back.g.move({ touch: 1, point: [320, 400] });
   assert.equal(back.g.end({ touch: 1, point: [320, 400], time: 200 }), 'cancel', 'миска упёрлась — на месте до жеста');
 });
+
+test('отпускания может не быть (доработка PL10.2.2): retire — ядру отмена живого жеста, жест забыт сразу, новый палец начинает новый; поздние движение и отпускание прежнего касания ничего не вызывают — жеста нет, палец другой или событие старше начала нового (timestamp), в том числе с тем же identifier; ядро сняло жест само — без повторной отмены; без отметок времени — прежние правила', () => {
+  // Поглаживание прервано системой без отпускания.
+  const A = rec();
+  A.g.begin({ touch: 1, point: [100, 100], time: 0, stamp: 0, target: pet() });
+  A.g.move({ touch: 1, point: [130, 100], stamp: 30, hit: on });
+  assert.equal(A.g.retire('system'), 'system');
+  assert.equal(A.g.active(), false, 'жест забыт сразу, не ждёт отпускания');
+  assert.equal(A.g.retire('system'), null, 'повтор — ничего');
+  assert.equal(A.g.move({ touch: 1, point: [160, 100], stamp: 60, hit: on }), null, 'позднее движение — некуда');
+  assert.equal(A.g.end({ touch: 1, point: [160, 100], time: 90, stamp: 90, hit: on }), null, 'позднее отпускание — некуда');
+  // Новый жест тем же номером пальца (система выдаёт номера снова): события старше его начала — от прежнего касания.
+  assert.equal(A.g.begin({ touch: 1, point: [100, 100], time: 1000, stamp: 1000, target: pet() }), true);
+  assert.deepEqual([A.g.stale(500), A.g.stale(1000), A.g.stale(undefined)], [true, false, false]);
+  assert.equal(A.g.move({ touch: 1, point: [160, 100], stamp: 500, hit: on }), null, 'старое движение не гладит');
+  assert.equal(A.g.end({ touch: 1, point: [160, 100], time: 500, stamp: 500, hit: on }), null, 'старое отпускание не завершает');
+  assert.equal(A.g.live(), true);
+  assert.equal(A.g.move({ touch: 1, point: [130, 100], stamp: 1030, hit: on }), 'step');
+  assert.equal(A.g.end({ touch: 1, point: [130, 100], time: 1100, stamp: 1100, hit: on }), 'end');
+  assert.deepEqual(A.calls, [['start'], ['step', 7], ['cancel', 7], ['start'], ['step', 7], ['end', 7]]);
+  // Касание лапы до отпускания: ни лапы, ни end.
+  const paw = rec();
+  paw.g.begin({ touch: 2, point: [50, 50], time: 0, stamp: 0, target: pet('paw') });
+  paw.g.retire('blur');
+  assert.equal(paw.g.end({ touch: 2, point: [50, 50], time: 100, stamp: 100, hit: () => 'paw' }), null);
+  assert.deepEqual(paw.calls, [['start'], ['cancel', 7]]);
+  // Ядро сняло жест само (мёртв): retire забывает без повторной отмены.
+  const lost = rec();
+  lost.g.begin({ touch: 1, point: [0, 0], time: 0, target: pet() });
+  lost.g.sync({ stroke: null, drag: null });
+  lost.g.retire('system');
+  assert.deepEqual([lost.calls, lost.g.active()], [[['start']], false]);
+  // Предмет до порога: перенос у ядра снят; позднее отпускание — не drop. Новый перенос тем же пальцем: старое отпускание
+  // его не бросает, своё — drop.
+  const toy = rec();
+  toy.g.begin({ touch: 1, point: [10, 10], time: 0, stamp: 0, target: { kind: 'toy', toy: 'ball', at: [280, 214] }, scale: 2 });
+  toy.g.move({ touch: 1, point: [13, 10], stamp: 10 });
+  toy.g.retire('system');
+  assert.equal(toy.g.end({ touch: 1, point: [80, 10], time: 100, stamp: 100 }), null);
+  assert.deepEqual(toy.calls, [['drag', 'ball', [280, 214]], ['toyCancel']]);
+  toy.g.begin({ touch: 1, point: [10, 10], time: 200, stamp: 200, target: { kind: 'toy', toy: 'bowl', at: [-60, 214] }, scale: 2 });
+  toy.g.move({ touch: 1, point: [60, 10], stamp: 210 });
+  assert.equal(toy.g.end({ touch: 1, point: [60, 10], time: 150, stamp: 150 }), null);
+  assert.equal(toy.g.end({ touch: 1, point: [60, 10], time: 260, stamp: 260 }), 'drop');
+  assert.deepEqual(toy.calls.slice(2), [['drag', 'bowl', [-60, 214]], ['drag', 'bowl', [-35, 214]], ['drop']]);
+  // Без отметки времени у начала — сравнивать не с чем: события своего пальца действуют, как прежде.
+  const plain = rec();
+  plain.g.begin({ touch: 1, point: [100, 100], time: 0, target: pet() });
+  assert.equal(plain.g.stale(-5), false);
+  assert.equal(plain.g.move({ touch: 1, point: [130, 100], stamp: -5, hit: on }), 'step');
+  assert.equal(plain.g.end({ touch: 1, point: [130, 100], time: 50, hit: on }), 'end');
+});

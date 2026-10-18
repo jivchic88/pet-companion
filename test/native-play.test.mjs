@@ -95,6 +95,8 @@ test.afterEach(async () => {
   rn.platform = 'ios';
   rn.focused.length = 0;
   rn.announced.length = 0;
+  // Окно игры начинает с текущего AppState (неактивно — ввод приостановлен до 'active'): каждая проверка — с активного.
+  rn.AppState.currentState = 'active';
 });
 const turn = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -706,14 +708,16 @@ test('отмены: система (неактивно, фон, Android blur, on
   await up(V, head);
   assert.deepEqual([ends(), L.of('stroke.step').length], [0, 1], 'после отмены — ни step, ни end');
   await V.act(() => rn.emit('change', 'active'));
-  // Касание лапы до отпускания + Android blur — лапы нет.
+  // Касание лапы до отпускания + Android blur — лапы нет; новый жест — только после возврата фокуса окна.
   rn.platform = 'android';
   await down(V, paw, { t: 0 });
   await V.act(() => rn.emit('blur'));
   await up(V, paw, { t: 50 });
   assert.equal(L.of('interact').filter(([action]) => action.type === 'paw').length, 0, 'blur до отпускания — касания лапы нет');
-  // Мячик до порога + blur: перенос у ядра снят, отпускание — не drop и не новый drag.
   const ball = pt(L0, L.core.getState().play.toys.ball.at);
+  assert.equal(await down(V, ball, { t: 60 }), false, 'фокус окна не вернулся — новый жест не начинается');
+  await V.act(() => rn.emit('focus'));
+  // Мячик до порога + blur: перенос у ядра снят, отпускание — не drop и не новый drag.
   await down(V, ball);
   await move(V, [ball[0] + 3, ball[1]]);
   await V.act(() => rn.emit('blur'));
@@ -721,6 +725,7 @@ test('отмены: система (неактивно, фон, Android blur, on
   await move(V, [ball[0] + 80, ball[1]]);
   await up(V, [ball[0] + 80, ball[1]]);
   assert.deepEqual([L.of('toy.drop').length, L.of('toy.drag').length], [0, 1]);
+  await V.act(() => rn.emit('focus'));
   // Фон (AppState background → ядро setVisible(false) у хоста; здесь — своя отмена).
   await stroke(V, L0, { n: 2 });
   await V.act(() => rn.emit('change', 'background'));
@@ -889,4 +894,466 @@ test('порт резервирования сценок подключён (к�
   assert.equal(L.scenes.calls.reserve, 0);
   assert.deepEqual(L.core.getState().display.scenes, {});
   L.core.destroy();
+});
+
+// ---------- доработка PL10.2.2 после независимой проверки Codex ----------
+
+// Обе координаты предмета toy (Animated.Value узла предмета; узел есть, пока предмет на сцене) и идущие анимации этих значений.
+const toyValues = (V, toy = 'ball', prefix = 'play') => {
+  const [{ translateX: x }, { translateY: y }] = V.node(`${prefix}-toy-${toy}`).style.transform;
+  return [x, y];
+};
+const runsOf = (values) => [...rn.animations.live].filter((run) => run.steps.some((step) => values.includes(step.value)));
+// Катнуть мячик кнопкой; контроль — ядро передвинуло мячик, и движение действительно идёт по обеим координатам.
+async function rolling(V, L, prefix = 'play') {
+  const values = toyValues(V, 'ball', prefix);
+  const before = L.core.getState().play.toys.ball.at;
+  await V.press(`${prefix}-ball`);
+  assert.notDeepEqual(L.core.getState().play.toys.ball.at, before, 'контроль: мячик покатился (ядро)');
+  const runs = runsOf(values);
+  assert.equal(runs.length, 2, 'контроль: идут обе координаты');
+  assert.ok(runs.every((run) => run.live));
+  return { values, runs };
+}
+// Место предмета по снимку ядра — левый верх его рамки в точках сцены; нарисованное место — значения обеих координат.
+const placeOf = (L, L0, toy = 'ball') => {
+  const box = G.toyBox(L0, toy, L.core.getState().play.toys[toy].at);
+  return [box.left, box.top];
+};
+const sameAt = (a, b) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+
+test('P2-1: начатое движение мячика (обе координаты) снимается системным «уменьшить движение», motion: none, фоном (AppState и видимость ядра у хоста) — мячик сразу на месте снимка, возврат не доигрывает прежнее, захват — по нарисованному месту; закрытие, нулевая раскладка, смена ядра (и с открытой игрой на тех же местах), отключение и размонтирование — тоже', async () => {
+  const L = await lab();
+  const V = mount('play-motion', tree(L));
+  await V.render();
+  await started(L, V);
+  let L0 = await opened(L, V);
+  const causes = [
+    ['системное «уменьшить движение»', () => L.core.setReducedMotion(true), () => L.core.setReducedMotion(false)],
+    ['motion: none', () => L.core.setPreferences({ motion: 'none' }), () => L.core.setPreferences({ motion: 'normal' })],
+    ['фон (AppState)', () => rn.emit('change', 'background'), () => rn.emit('change', 'active')],
+    ['фон у хоста (setVisible)', () => L.core.setVisible(false), () => L.core.setVisible(true)],
+  ];
+  for (const [what, cause, undo] of causes) {
+    const { values, runs } = await rolling(V, L);
+    await V.act(cause);
+    assert.ok(runs.every((run) => !run.live), `${what}: обе координаты сняты`);
+    assert.ok(sameAt(values.map((value) => value.value), placeOf(L, L0)), `${what}: мячик на месте снимка`);
+    await V.act(undo);
+    assert.deepEqual(runsOf(values), [], `${what}: возврат не доигрывает прежнее движение`);
+    assert.ok(sameAt(values.map((value) => value.value), placeOf(L, L0)), `${what}: место прежнее`);
+    // Нарисован там же, где ядро: захват с этого места — первая точка переноса и есть место снимка.
+    const at = L.core.getState().play.toys.ball.at;
+    assert.equal(await down(V, pt(L0, at)), true, `${what}: мячик берут на месте снимка`);
+    assert.deepEqual(L.of('toy.drag').at(-1), ['ball', at]);
+    await up(V, pt(L0, at));
+  }
+  // Закрытие во время движения: сняты; новое открытие — предметы на местах ядра без прежнего движения.
+  let roll = await rolling(V, L);
+  await V.act(() => L.core.close());
+  assert.ok(roll.runs.every((run) => !run.live), 'закрытие — сняты');
+  L0 = await opened(L, V);
+  assert.deepEqual(runsOf(roll.values), []);
+  assert.ok(sameAt(roll.values.map((value) => value.value), placeOf(L, L0)), 'новое открытие — на месте снимка');
+  // Нулевая раскладка (сцену сжали до нуля) во время движения — сняты; новый замер — место сразу.
+  roll = await rolling(V, L);
+  await V.fire('play-box', 'onLayout', layout(0, 0));
+  assert.ok(roll.runs.every((run) => !run.live), 'нулевая раскладка — сняты');
+  L0 = await measure(V, L);
+  assert.deepEqual(runsOf(roll.values), []);
+  // Смена ядра, у которого игра открыта и мячик на тех же местах: движение прежнего снято, у нового — место сразу.
+  roll = await rolling(V, L);
+  const M = await lab();
+  await V.act(() => M.core.start());
+  await V.act(() => M.plan.advance(8000));
+  await V.render(tree(M));
+  assert.ok(roll.runs.every((run) => !run.live), 'смена ядра — движение прежнего снято');
+  await V.act(() => M.core.open('play'));
+  const M0 = await measure(V, M);
+  assert.deepEqual(runsOf(roll.values), [], 'новое ядро — без движения от мест прежнего');
+  assert.ok(sameAt(roll.values.map((value) => value.value), placeOf(M, M0)));
+  // Отключение ядра во время движения — сняты.
+  roll = await rolling(V, M);
+  await V.act(() => M.core.destroy());
+  assert.ok(roll.runs.every((run) => !run.live), 'отключение — сняты');
+  // Смена ядра, у которого игра уже открыта на том же полу (объявил хост), а мячик — на своём месте: движение прежнего
+  // снято, у нового мячик сразу на месте его снимка — без кривой от нарисованного места прежнего.
+  await V.render(tree(L));
+  L0 = await opened(L, V);
+  roll = await rolling(V, L);
+  const N = await lab();
+  await V.act(() => N.core.start());
+  await V.act(() => N.plan.advance(8000));
+  N.core.setDisplay({ full: true, moving: false, pets: ['cat', 'dog'], views: ['corner', 'play'], scenes: {}, playFloor: [...L0.playFloor], playTouch: L0.playTouch });
+  assert.equal(N.core.open('play').ok, true);
+  await V.render(tree(N));
+  assert.equal(V.node('play-modal').visible, true, 'контроль: окно нового ядра показано сразу');
+  assert.ok(roll.runs.every((run) => !run.live), 'смена на открытую игру — движение прежнего снято');
+  assert.deepEqual(runsOf(roll.values), [], 'без движения от места прежнего ядра');
+  assert.ok(sameAt(roll.values.map((value) => value.value), placeOf(N, L0)), 'мячик — на месте снимка нового ядра');
+  // Размонтирование во время движения — сняты.
+  roll = await rolling(V, N);
+  await V.unmount();
+  assert.ok(roll.runs.every((run) => !run.live), 'размонтирование — сняты');
+  L.core.destroy();
+  N.core.destroy();
+});
+
+test('P2-1: поздний отклик прежнего движения не трогает новое (захват — по кривой нового); отказ команды, другие команды и отказ переноса движение не снимают; другое ядро и другая поверхность — своё движение', async (t) => {
+  let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  const L = await lab();
+  const V = mount('play-motion-late', tree(L));
+  await V.render();
+  await started(L, V);
+  const L0 = await opened(L, V);
+  // Первое катание, через 150 мс — второе: прежние анимации сняты (их отклик — finished: false), новые идут.
+  const first = await rolling(V, L);
+  clock += 150;
+  const second = await rolling(V, L);
+  assert.ok(first.runs.every((run) => !run.live), 'прежние сняты');
+  // Начало второго движения — нарисованное место на момент нажатия (значения координат сразу после него), конец — место
+  // снимка; длительность — у его анимаций.
+  const frame = G.toyBox(L0, 'ball', [0, 0]);
+  const from = G.toUnits(L0, [second.values[0].value + frame.width / 2, second.values[1].value + frame.height / 2]);
+  const to = L.core.getState().play.toys.ball.at;
+  const ms = second.runs[0].steps[0].duration;
+  // Поздний «закончилась» прежней анимации пришёл после начала новой — модель новой остаётся.
+  for (const run of first.runs) run.late({ finished: true });
+  // Отказы команд (неверный предмет и место) и другие команды («Погладить», перенос миски хостом) — движение идёт.
+  assert.equal(L.core.interact({ type: 'ball', to: 0 }).ok, false);
+  assert.equal(L.core.toy.drag('ball', [Number.NaN, 0]).ok, false);
+  await V.press('play-stroke');
+  await V.act(() => L.core.toy.drag('bowl', L.core.getState().play.toys.bowl.at));
+  await V.act(() => L.core.toy.cancel());
+  assert.ok(second.runs.every((run) => run.live), 'отказы и другие команды движение не трогают');
+  // Захват посередине второго движения: первая точка переноса — по его кривой (не конечное место: модель не снята).
+  clock += ms / 2;
+  const k = 1 - (1 - 0.5) ** 3;
+  const mid = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k];
+  assert.ok(Math.abs(mid[0] - to[0]) > 1, 'контроль: середина пути отличается от конца');
+  await down(V, pt(L0, mid));
+  const [toy, firstPoint] = L.of('toy.drag').at(-1);
+  assert.equal(toy, 'ball');
+  assert.ok(sameAt(firstPoint, mid), `первая точка — по кривой нового движения: ${firstPoint} ≈ ${mid}`);
+  await up(V, pt(L0, mid));
+  // Другое ядро: «уменьшить движение» одного не останавливает другое.
+  const M = await lab();
+  const W = mount('play-motion-other', tree(M));
+  await W.render();
+  await started(M, W);
+  await opened(M, W);
+  const mine = await rolling(V, L);
+  const other = await rolling(W, M);
+  await V.act(() => L.core.setReducedMotion(true));
+  assert.ok(mine.runs.every((run) => !run.live));
+  assert.ok(other.runs.every((run) => run.live), 'другое ядро — своё движение');
+  L.core.destroy();
+  M.core.destroy();
+});
+
+test('P2-2: системная отмена без отпускания — inactive → active и background → active без старых End/Release/Terminate: новый жест (другим пальцем и тем же identifier) без закрытия игры; пока неактивно — не начинается ни через Grant, ни через onResponderStart; поздние события прежнего касания не гладят и не завершают новый; повтор событий безопасен; ни лапы, ни drop отменённого', async () => {
+  const L = await lab();
+  const V = mount('play-recover', tree(L));
+  await V.render();
+  await started(L, V);
+  const L0 = await opened(L, V);
+  const head = pt(L0, [100, 60]);
+  const stage = () => V.node('play-stage');
+  for (const away of ['inactive', 'background']) {
+    const base = { start: L.of('stroke.start').length, cancel: L.of('stroke.cancel').length, end: L.of('stroke.end').length };
+    await stroke(V, L0, { n: 2, t: 0, id: 1 });
+    await V.act(() => rn.emit('change', away));
+    await V.act(() => rn.emit('change', away));
+    assert.equal(L.core.getState().play.stroke, null, `${away}: жест ядра снят`);
+    assert.equal(L.of('stroke.cancel').length, base.cancel + 1, `${away}: одна отмена и при повторе события`);
+    // Пока неактивно — новый жест не начинается ни через Grant, ни через onResponderStart (сцена осталась ответчиком).
+    assert.equal(await down(V, head, { id: 2, t: 500 }), false, `${away}: Grant — нет`);
+    await V.act(() => stage().onResponderStart(ev(2, head, 500)));
+    assert.equal(L.of('stroke.start').length, base.start + 1, `${away}: onResponderStart — нет`);
+    await V.act(() => rn.emit('change', 'active'));
+    await V.act(() => rn.emit('change', 'active'));
+    // Старых End/Release/Terminate не было; новый палец — новый жест без закрытия игры.
+    assert.equal(await down(V, head, { id: 2, t: 1000 }), true, `${away}: после возврата новый жест начинается`);
+    assert.equal(L.of('stroke.start').length, base.start + 2);
+    // Позднее движение и отпускание прежнего пальца (id 1) — ни step, ни end нового.
+    const steps = L.of('stroke.step').length;
+    await move(V, [head[0] + 60, head[1]], { id: 1, t: 1010 });
+    await up(V, [head[0] + 60, head[1]], { id: 1, t: 1020, last: false });
+    assert.deepEqual([L.of('stroke.step').length, L.of('stroke.end').length], [steps, base.end], `${away}: события прежнего пальца не действуют`);
+    await move(V, [head[0] + 30, head[1]], { id: 2, t: 1030 });
+    await up(V, [head[0] + 30, head[1]], { id: 2, t: 1040 });
+    assert.deepEqual([L.of('stroke.step').length, L.of('stroke.end').length], [steps + 1, base.end + 1], `${away}: новый жест гладит и завершается`);
+    // Тот же identifier новой последовательностью: запоздавшее отпускание прежней (старше начала) новый не завершает.
+    await stroke(V, L0, { n: 1, t: 2000, id: 1 });
+    await V.act(() => rn.emit('change', away));
+    await V.act(() => rn.emit('change', 'active'));
+    assert.equal(await down(V, head, { id: 1, t: 3000 }), true, `${away}: тот же номер пальца — новый жест`);
+    await up(V, head, { id: 1, t: 2500 });
+    await V.act(() => stage().onResponderTerminate(ev(1, head, 2600)));
+    assert.equal(L.core.getState().play.stroke !== null, true, `${away}: старые отпускание и terminate новый не снимают`);
+    await move(V, [head[0] + 30, head[1]], { id: 1, t: 3030 });
+    await up(V, [head[0] + 30, head[1]], { id: 1, t: 3100 });
+    assert.equal(L.core.getState().play.stroke, null);
+    assert.equal(L.of('stroke.end').length, base.end + 2, `${away}: новый завершился своим отпусканием`);
+  }
+  // Касание лапы и мячик до порога, прерванные системой: ни лапы, ни drop — ни сразу, ни поздним отпусканием; после
+  // возврата касание лапы и бросок работают.
+  const paw = pt(L0, [cat.play.paw.cx, cat.play.paw.cy]);
+  const paws = () => L.of('interact').filter(([action]) => action.type === 'paw').length;
+  await down(V, paw, { id: 1, t: 5000 });
+  await V.act(() => rn.emit('change', 'inactive'));
+  await V.act(() => rn.emit('change', 'active'));
+  await up(V, paw, { id: 1, t: 5100 });
+  assert.equal(paws(), 0, 'отменённое касание лапы — не лапа');
+  const ball = pt(L0, L.core.getState().play.toys.ball.at);
+  await down(V, ball, { id: 1, t: 6000 });
+  await move(V, [ball[0] - 3, ball[1]], { id: 1, t: 6010 });
+  await V.act(() => rn.emit('change', 'background'));
+  assert.equal(L.core.getState().play.drag, null, 'перенос у ядра снят');
+  await V.act(() => rn.emit('change', 'active'));
+  await move(V, [ball[0] - 80, ball[1]], { id: 1, t: 6050 });
+  await up(V, [ball[0] - 80, ball[1]], { id: 1, t: 6100 });
+  assert.equal(L.of('toy.drop').length, 0, 'отменённый мячик — не бросок');
+  await down(V, paw, { id: 3, t: 7000 });
+  await up(V, paw, { id: 3, t: 7100 });
+  assert.equal(paws(), 1, 'после возврата — касание лапы');
+  await down(V, ball, { id: 4, t: 8000 });
+  await move(V, [ball[0] - 80, ball[1]], { id: 4, t: 8050 });
+  await up(V, [ball[0] - 80, ball[1]], { id: 4, t: 8100 });
+  assert.equal(L.of('toy.drop').length, 1, 'после возврата — бросок');
+  // Настоящий перенос миски прерван системой: toy.cancel, миска на месте до жеста; позднее отпускание — не drop.
+  await V.act(() => L.core.interact({ type: 'bowl', to: 'home' }));
+  const home = L.core.getState().play.toys.bowl.at;
+  const bowl = pt(L0, home);
+  await down(V, bowl, { id: 5, t: 9000 });
+  await move(V, [bowl[0] + 50, bowl[1]], { id: 5, t: 9050 });
+  assert.equal(L.core.getState().play.drag?.toy, 'bowl');
+  await V.act(() => rn.emit('change', 'inactive'));
+  assert.deepEqual([L.core.getState().play.drag, L.core.getState().play.toys.bowl.at], [null, home]);
+  await V.act(() => rn.emit('change', 'active'));
+  await up(V, [bowl[0] + 50, bowl[1]], { id: 5, t: 9100 });
+  assert.equal(L.of('toy.drop').length, 1, 'позднее отпускание миски — не drop');
+  L.core.destroy();
+});
+
+test('P2-2: Android blur во время жеста при AppState active — жест снят, новые не начинаются до focus (поздний move/release под шторкой ничего не делает), focus — ввод без закрытия игры; blur без жеста ввод не приостанавливает (фокус Activity забирает и само окно игры); onResponderStart: новый палец, пока сцена ответчик, — жест, второй палец при живом — ничего; terminate текущего — снят', async () => {
+  rn.platform = 'android';
+  const L = await lab();
+  const V = mount('play-blur', tree(L));
+  await V.render();
+  await started(L, V);
+  const L0 = await opened(L, V);
+  const head = pt(L0, [100, 60]);
+  const stage = () => V.node('play-stage');
+  await stroke(V, L0, { n: 2, t: 0, id: 1 });
+  await V.act(() => rn.emit('blur'));
+  assert.deepEqual([L.core.getState().play.stroke, rn.listeners.change.size > 0], [null, true]);
+  assert.equal(rn.AppState.currentState, 'active', 'AppState остаётся active');
+  // Под шторкой прежний палец продолжает (проба 18.10): ни step, ни end; новый палец — не начинается до focus.
+  const steps = L.of('stroke.step').length;
+  await move(V, [head[0] + 80, head[1]], { id: 1, t: 200 });
+  await up(V, [head[0] + 80, head[1]], { id: 1, t: 300 });
+  assert.deepEqual([L.of('stroke.step').length, L.of('stroke.end').length], [steps, 0]);
+  assert.equal(await down(V, head, { id: 2, t: 400 }), false, 'до focus — нет');
+  await V.act(() => stage().onResponderStart(ev(2, head, 400)));
+  assert.equal(L.of('stroke.start').length, 1);
+  await V.act(() => rn.emit('focus'));
+  assert.equal(await down(V, head, { id: 2, t: 500 }), true, 'focus — новый жест');
+  await up(V, head, { id: 2, t: 560 });
+  // blur без жеста (фокус Activity ушёл, например, к самому окну игры) — ввод не приостановлен.
+  await V.act(() => rn.emit('blur'));
+  assert.equal(await down(V, head, { id: 3, t: 600 }), true, 'blur без жеста — ввод есть');
+  await up(V, head, { id: 3, t: 650 });
+  await V.act(() => rn.emit('focus'));
+  // Прерванное касание без отпускания, сцена у React Native осталась ответчиком: новый палец приходит в onResponderStart.
+  await stroke(V, L0, { n: 1, t: 1000, id: 0 });
+  await V.act(() => rn.emit('change', 'inactive'));
+  await V.act(() => rn.emit('change', 'active'));
+  const started0 = L.of('stroke.start').length;
+  await V.act(() => stage().onResponderStart(ev(0, head, 2000)));
+  assert.equal(L.of('stroke.start').length, started0 + 1, 'onResponderStart тем же номером пальца — новый жест');
+  // Второй палец при живом жесте — ни нового жеста, ни отмены.
+  await V.act(() => stage().onResponderStart(ev(1, head, 2010)));
+  assert.equal(L.of('stroke.start').length, started0 + 1);
+  await move(V, [head[0] + 30, head[1]], { id: 0, t: 2030 });
+  assert.equal(L.of('stroke.step').length, steps + 1);
+  // Ответчик отнят сейчас (не старше начала) — жест снят, замок отпущен.
+  await V.act(() => stage().onResponderTerminate(ev(0, head, 2040)));
+  assert.equal(L.core.getState().play.stroke, null);
+  assert.equal(await down(V, head, { id: 0, t: 2100 }), true, 'после terminate — новый жест');
+  await up(V, head, { id: 0, t: 2150 });
+  L.core.destroy();
+});
+
+test('P2-2: приостановка — на окно и экземпляр: закрытие при неактивном приложении и новое открытие после active — ввод есть; смена ядра, питомца и размонтирование после системной отмены — без команд и ошибок; второе ядро не затронуто blur первого; отключённое ядро — без команд', async () => {
+  rn.platform = 'android';
+  const L = await lab();
+  const V = mount('play-pause-own', tree(L));
+  await V.render();
+  await started(L, V);
+  let L0 = await opened(L, V);
+  const M = await lab();
+  const W = mount('play-pause-other', tree(M));
+  await W.render();
+  await started(M, W);
+  const M0 = await opened(M, W);
+  // blur во время жеста первого — второе ядро (без жеста) принимает касания.
+  await stroke(V, L0, { n: 1, t: 0, id: 1 });
+  await V.act(() => rn.emit('blur'));
+  assert.equal(await down(W, pt(M0, [100, 60]), { t: 10 }), true, 'другое ядро не приостановлено');
+  await up(W, pt(M0, [100, 60]), { t: 20 });
+  await V.act(() => rn.emit('focus'));
+  // Неактивно, окно закрыто, active пришёл при закрытом окне — новое окно начинает с текущего состояния.
+  await stroke(V, L0, { n: 1, t: 100, id: 1 });
+  await V.act(() => rn.emit('change', 'inactive'));
+  await V.act(() => L.core.close());
+  await V.act(() => rn.emit('change', 'active'));
+  L0 = await opened(L, V);
+  assert.equal(await down(V, pt(L0, [100, 60]), { id: 2, t: 1000 }), true, 'новое окно — ввод есть');
+  await up(V, pt(L0, [100, 60]), { id: 2, t: 1050 });
+  // Окно открыто, пока приложение неактивно (событие пришло при закрытом окне): ввод — только после active.
+  await V.act(() => L.core.close());
+  await V.act(() => rn.emit('change', 'inactive'));
+  L0 = await opened(L, V);
+  assert.equal(await down(V, pt(L0, [100, 60]), { id: 2, t: 1100 }), false, 'открыто при неактивном — ввода нет');
+  await V.act(() => rn.emit('change', 'active'));
+  assert.equal(await down(V, pt(L0, [100, 60]), { id: 2, t: 1200 }), true);
+  await up(V, pt(L0, [100, 60]), { id: 2, t: 1250 });
+  // Смена питомца и ядра после отмены без отпускания — без команд прежнему, без ошибок.
+  await stroke(V, L0, { n: 1, t: 2000, id: 1 });
+  await V.act(() => rn.emit('change', 'background'));
+  const calls = L.calls.list.length;
+  await V.act(() => L.core.setPet('dog'));
+  await V.act(() => rn.emit('change', 'active'));
+  await up(V, pt(L0, [100, 60]), { id: 1, t: 2100 });
+  assert.deepEqual(L.names().slice(calls).filter((name) => /^(stroke|toy)\./.test(name)), [], 'после отмены — ни end, ни cancel');
+  await V.render(tree(M));
+  await V.act(() => {});
+  await V.unmount();
+  assert.equal(L.live(), 0);
+  // Отключённое ядро и системные события — без команд.
+  const after = M.calls.list.length;
+  M.core.destroy();
+  await W.act(() => rn.emit('change', 'inactive'));
+  await W.act(() => rn.emit('blur'));
+  assert.equal(M.calls.list.length, after);
+  L.core.destroy();
+});
+
+test('P3: устаревшие кнопки — после смены питомца (и кот → собака → кот в одном такте) прежние «лапа», «Погладить», миска, мячик, «Закрыть», «Уголок», вызов «по зову» ничего не командуют, не отменяют жест нового показа и не навигируют; новые — работают; отказ прежнего не показан; прямые команды хоста — прежний контракт', async () => {
+  const L = await lab();
+  const V = mount('play-stale', tree(L));
+  await V.render();
+  await started(L, V);
+  let L0 = await opened(L, V);
+  const ids = ['play-paw', 'play-stroke', 'play-bowl', 'play-ball', 'play-close'];
+  let old = Object.fromEntries(ids.map((id) => [id, V.node(id).onPress]));
+  const back = V.node('play-modal').onRequestClose;
+  const escape = V.node('play-sheet').onAccessibilityEscape;
+  await V.act(() => L.core.setPet('dog'));
+  const before = L.calls.list.length;
+  for (const id of ids) await V.act(() => old[id]());
+  await V.act(() => back());
+  await V.act(() => escape());
+  assert.deepEqual(L.names().slice(before), [], 'прежние обработчики кота собаке ничего не команд­уют');
+  assert.equal(L.core.getState().view.open, 'play', 'и не навигируют');
+  // Туда и обратно в одном такте — прежний обработчик первого показа кота не оживает; новый — работает.
+  await V.act(() => L.core.setPet('cat'));
+  L0 = await measure(V, L);
+  old = Object.fromEntries(ids.map((id) => [id, V.node(id).onPress]));
+  await V.act(() => {
+    L.core.setPet('dog');
+    L.core.setPet('cat');
+  });
+  assert.equal(L.core.getState().pet.shown, 'cat');
+  const mark = L.calls.list.length;
+  for (const id of ids) await V.act(() => old[id]());
+  assert.deepEqual(L.names().slice(mark), [], 'кот → собака → кот: прежние ничего не делают');
+  await V.press('play-paw');
+  assert.deepEqual(L.of('interact').at(-1), [{ type: 'paw' }], 'новая кнопка — работает');
+  // Прежняя кнопка во время жеста нового показа его не отменяет.
+  const stale = V.node('play-stroke').onPress;
+  await V.act(() => {
+    L.core.setPet('dog');
+    L.core.setPet('cat');
+  });
+  await stroke(V, L0, { n: 1 });
+  await V.act(() => stale());
+  assert.deepEqual([L.of('stroke.cancel').length, L.core.getState().play.stroke !== null], [0, true], 'жест нового показа не отменён');
+  await up(V, pt(L0, [100, 60]));
+  // Прежние «Закрыть» и «Назад» после смены вида (игра → уголок → игра, питомец тот же) новый показ не закрывают.
+  const close = V.node('play-close').onPress;
+  const request = V.node('play-modal').onRequestClose;
+  await V.act(() => L.core.open('corner'));
+  await V.act(() => L.core.open('play'));
+  const view = L.calls.list.length;
+  await V.act(() => close());
+  await V.act(() => request());
+  assert.deepEqual([L.core.getState().view.open, L.names().slice(view)], ['play', []], 'прежний сеанс вида не навигирует новый');
+  // Прежний «Уголок» вызванной игры: питомец сменился — в уголок не ведёт.
+  await V.act(() => L.core.close());
+  await V.act(() => L.core.open('play', { source: 'call' }));
+  const toCorner = V.node('play-corner').onPress;
+  await V.act(() => L.core.setPet('dog'));
+  await V.act(() => toCorner());
+  assert.deepEqual(L.core.getState().view, { open: 'play', source: 'call' });
+  // Вызов «по зову» из закрытого: текущий работает, прежний (до смены питомца) — нет.
+  await V.act(() => L.core.close());
+  await V.act(() => L.core.setPresence('on-call'));
+  const call = V.node('play-call').onPress;
+  await V.act(() => {
+    L.core.setPet('cat');
+    L.core.setPet('dog');
+  });
+  await V.act(() => call());
+  assert.equal(L.core.getState().view.open, null, 'прежний вызов не открывает игру нового показа');
+  await V.press('play-call');
+  assert.deepEqual(L.core.getState().view, { open: 'play', source: 'call' }, 'текущий вызов из закрытого — работает');
+  // Прямые команды хоста — прежний контракт (защита касается только устаревшего UI).
+  await V.act(() => L.core.close());
+  assert.equal(L.core.open('play').ok, true);
+  assert.equal(L.core.interact({ type: 'pet' }).ok, true);
+  assert.equal(L.core.close().ok, true);
+  L.core.destroy();
+});
+
+test('P3: отказ и подсказка прежнего питомца новому не показаны (и после кот → собака → кот); отложенный возврат фокуса закрытия не переводит фокус после смены питомца или ядра (Android — таймер, iOS — onDismiss); без смены — переводит', async () => {
+  const L = await lab();
+  const V = mount('play-stale-note', tree(L));
+  await V.render();
+  await started(L, V);
+  // Пол не объявлен (окно не измерено) — «Катнуть мячик» получает отказ ядра.
+  await V.act(() => L.core.open('play'));
+  await V.act(() => V.node('play-ball').onPress());
+  assert.match(V.text('play-note'), /^Мячик: Пол «Поиграть» не объявлен/);
+  await V.act(() => {
+    L.core.setPet('dog');
+    L.core.setPet('cat');
+  });
+  assert.equal(V.has('play-note'), false, 'отказ первого показа кота не показан');
+  // Подсказка «проведи» после касания без сдвига — у своего показа; смена питомца — снята.
+  const L0 = await measure(V, L);
+  await down(V, pt(L0, [100, 150]), { t: 0 });
+  await up(V, pt(L0, [100, 150]), { t: 50 });
+  const nudged = () => V.node('play-hint').style.some((style) => style && style.color === '#2f5249');
+  assert.equal(nudged(), true, 'контроль: подсказка выделена');
+  await V.act(() => L.core.setPet('dog'));
+  assert.equal(nudged(), false, 'у собаки — без подсказки кота');
+  // Отложенный возврат фокуса (iOS — по onDismiss окна, через сотни миллисекунд после закрытия): питомец или ядро сменились
+  // до него — фокус не переводится; без смены — на вход уголка.
+  rn.platform = 'ios';
+  const M = await lab();
+  for (const change of ['none', 'pet', 'core']) {
+    await V.act(() => L.core.open('play'));
+    rn.focused.length = 0;
+    await V.act(() => L.core.close());
+    if (change === 'pet') await V.act(() => L.core.setPet(L.core.getState().pet.shown === 'cat' ? 'dog' : 'cat'));
+    if (change === 'core') await V.render(tree(M));
+    await V.fire('play-modal', 'onDismiss');
+    await V.act(turn);
+    assert.equal(rn.focused.filter((item) => item.testID === 'corner-open').length, change === 'none' ? 1 : 0, `${change}: ${JSON.stringify(rn.focused)}`);
+  }
+  L.core.destroy();
+  M.core.destroy();
 });
