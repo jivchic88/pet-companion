@@ -299,6 +299,49 @@ test('fresh — не прошлый вариант этого питомца; ra
   }
 });
 
+// PL11.2, D5 (0.2.3): копия scene:v1 — поля подтверждённой записи дня у любого питомца, как 0.1.4 (копия и запись — одна
+// запись { v, day, by, cat }). До 0.2.3 у собаки и расширения при новом профиле или копии без cat запись дня получала
+// cat: '', а копия — нет. Значения сравниваются строго (не join: пустая строка, null и undefined различаются).
+test('D5: копия scene:v1 получает cat записи дня у любого питомца — новый профиль собаки, копия без cat, прежнее curl, кот, расширение', async (t) => {
+  const OLD = '2026-10-01';
+  const BUNNY_EXT = { ...PETS['example.bunny'].ext, other: 7 };
+  // [название, питомец, копия scene (undefined — ключа нет), прежняя запись дня (undefined — нет), ожидаемое cat, сценка]
+  const cases = [
+    ['новый профиль собаки', 'dog', undefined, undefined, '', 'fetch'],
+    ['собака: копия без cat', 'dog', { v: 1, day: OLD, keep: 1 }, { v: 1, day: OLD, by: 'old', mark: 2 }, '', 'fetch'],
+    ['собака: прежнее cat curl', 'dog', { v: 1, day: OLD, cat: 'curl', keep: 1 }, { v: 1, day: OLD, by: 'old', cat: 'curl', mark: 2 }, 'curl', 'fetch'],
+    ['прежний кот', 'cat', { v: 1, day: OLD, cat: 'curl', keep: 1 }, { v: 1, day: OLD, by: 'old', cat: 'curl', mark: 2 }, 'stretch', 'stretch'],
+    ['расширение: новый профиль', 'example.bunny', undefined, undefined, '', 'hop'],
+    ['расширение: прежнее cat curl', 'example.bunny', { v: 1, day: OLD, cat: 'curl', keep: 1 }, { v: 1, day: OLD, by: 'old', cat: 'curl', mark: 2 }, 'curl', 'hop'],
+  ];
+  for (const [name, pet, scene, prior, cat, type] of cases) await t.test(name, async () => {
+    const store = sceneStore();
+    if (prior) store.days.set('qa', prior);
+    const port = reserver(store, 'qa');
+    const extra = pet === 'example.bunny' ? { ext: BUNNY_EXT } : PETS[pet];
+    const L = life({ cat: COMMON, ...extra, ...(scene ? { scene } : {}) }, { defs: ALL, display: DISPLAY, scenes: port.port, counts: host(4, 1) });
+    assert.equal(L.core.start().ok, true, name);
+    L.random.push(0, 0);
+    L.core.notify('saved', { key: `d5-${name}`, counted: true });
+    L.plan.advance(2000);
+    await flush();
+    assert.deepEqual([playing(L), port.steps.at(-1)], [type, '→ shown'], `${name}: сценка показана`);
+    const record = store.days.get('qa');
+    const copy = L.json('scene');
+    assert.equal(record.cat, cat, `${name}: cat записи дня`);
+    assert.equal(copy.cat, cat, `${name}: cat копии`);
+    assert.equal(typeof copy.cat, 'string', `${name}: cat копии — строка`);
+    assert.deepEqual(Object.keys(record).sort(), ['by', 'cat', 'day', 'v', ...(prior ? ['mark'] : [])].sort(), `${name}: ключи записи дня`);
+    assert.deepEqual(Object.keys(copy).sort(), ['by', 'cat', 'day', 'v', ...(scene ? ['keep'] : [])].sort(), `${name}: ключи копии`);
+    assert.deepEqual([record.day, copy.day, copy.by], [DAY, DAY, record.by], `${name}: день и метка — одной записи`);
+    assert.deepEqual([record.mark, copy.keep], [prior ? 2 : undefined, scene ? 1 : undefined], `${name}: неизвестное цело`);
+    assert.deepEqual([Object.hasOwn(record, 'variants'), Object.hasOwn(copy, 'variants')], [false, false], `${name}: без variants`);
+    if (pet === 'example.bunny') assert.deepEqual(L.json('ext'), { ...BUNNY_EXT, scenes: { 'example.bunny': 'hop' } }, `${name}: вариант расширения — в ext:v1, выбор и неизвестное ext целы`);
+    else assert.equal(L.raw('ext'), null, `${name}: ext:v1 нет`);
+    L.core.destroy();
+  });
+});
+
 test('повторная проверка в decide: смена модели (skip) и сужение объявления во время ожидания очереди — skip без записи; день сценки общий для питомцев и моделей', async () => {
   const store = sceneStore();
   const port = reserver(store, 'qa');

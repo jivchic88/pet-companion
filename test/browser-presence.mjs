@@ -168,19 +168,53 @@ async function desktop(browser, base, check, open, layout) {
     chrome = { scene: (await scenes(page))[0] ?? '', record: { day: record?.day, cat: record?.cat }, copy: { day: copy?.day, cat: copy?.cat }, seen: (await stored(page, 'nr:cat:v1')).seenStage };
     await page.evaluate(() => window.stand.pet.destroy());
 
-    // ---- PL11.2, D5: сценка собаки в mountPet — запись дня в IndexedDB и копия scene:v1 — формат 0.1.4 (вариант кота
-    // прежний, variants нет), неизвестное поле копии цело, ключа ext нет ----
-    await mount(page, 'nd', { extra: { companion: { v: 1, kind: 'dog' }, scene: { v: 1, day: '2026-10-01', by: 'old', cat: 'curl', keep: 1 } } });
-    await page.evaluate(() => window.stand.set(5, 2));
-    await notify(page, 'd1');
-    await page.clock.runFor(1600);
-    await until(page, () => document.querySelectorAll('.cat-art[data-scene]').length > 0);
-    await page.clock.runFor(10);
-    const dogRecord = await sceneRecord(page, 'nd:scene');
-    const dogCopy = await stored(page, 'nd:scene:v1');
-    const dogScene = { scene: (await scenes(page))[0] ?? '', record: Object.keys(dogRecord ?? {}).sort().join(), recordCat: dogRecord?.cat, copy: Object.keys(dogCopy ?? {}).sort().join(), copyCat: dogCopy?.cat, keep: dogCopy?.keep, day: [dogRecord?.day, dogCopy?.day], ext: await page.evaluate(() => localStorage.getItem('nd:ext:v1')) };
-    check(`${label}: D5 — сценка собаки: запись дня IndexedDB и копия scene:v1 — формат 0.1.4 (by, cat, day, v; вариант кота прежний, без variants), неизвестное поле копии цело, ext:v1 нет`, dogScene.scene === 'fetch' && dogScene.record === 'by,cat,day,v' && dogScene.recordCat === 'curl' && dogScene.copy === 'by,cat,day,keep,v' && dogScene.copyCat === 'curl' && dogScene.keep === 1 && dogScene.day.every((day) => day === DAY) && dogScene.ext === null, JSON.stringify(dogScene));
-    await page.evaluate(() => window.stand.pet.destroy());
+    // ---- PL11.2, D5: сценка собаки в mountPet — запись дня в IndexedDB и копия scene:v1 — формат 0.1.4: cat копии — из
+    // записи дня (прежнее curl или ''), variants нет, неизвестное цело, ключа ext нет. Профили: прежняя копия с cat; копия
+    // без cat и прежняя запись дня с неизвестным полем; новый профиль без scene. Значения — строго (не join: '', null и
+    // undefined различаются) ----
+    const sortedKeys = (value) => JSON.stringify(Object.keys(value ?? {}).sort());
+    for (const [ns, scene, prior, cat] of [
+      ['nd', { v: 1, day: '2026-10-01', by: 'old', cat: 'curl', keep: 1 }, null, 'curl'],
+      ['ne', { v: 1, day: '2026-10-01', by: 'old', keep: 1 }, { v: 1, day: '2026-10-01', by: 'old', mark: 2 }, ''],
+      ['nf', null, null, ''],
+    ]) {
+      if (prior) await putRecord(page, `${ns}:scene`, prior);
+      await mount(page, ns, { extra: { companion: { v: 1, kind: 'dog' }, ...(scene ? { scene } : {}) } });
+      await page.evaluate(() => window.stand.set(5, 2));
+      await notify(page, `${ns}-d5`);
+      await page.clock.runFor(1600);
+      await until(page, () => document.querySelectorAll('.cat-art[data-scene]').length > 0);
+      // Копия пишется исходом резервирования — после завершения транзакции записи дня: ждём её дня по условию.
+      await until(page, ([key, day]) => JSON.parse(localStorage.getItem(key) ?? 'null')?.day === day, [`${ns}:scene:v1`, DAY]);
+      const record = await sceneRecord(page, `${ns}:scene`);
+      const copy = await stored(page, `${ns}:scene:v1`);
+      const dog = { scene: (await scenes(page))[0] ?? '', record, copy, ext: await raw(page, `${ns}:ext:v1`) };
+      const fields = (more) => JSON.stringify(['by', 'cat', 'day', 'v', ...more].sort());
+      check(
+        `${label}: D5 — сценка собаки (${scene ? (prior ? 'копия без cat, прежняя запись дня' : 'прежнее cat curl') : 'новый профиль'}): запись дня IndexedDB и копия scene:v1 — формат 0.1.4 (by, cat, day, v; cat — ${JSON.stringify(cat)}, без variants), неизвестное цело, ext:v1 нет`,
+        dog.scene === 'fetch' &&
+          record !== null &&
+          copy !== null &&
+          typeof record.cat === 'string' &&
+          typeof copy.cat === 'string' &&
+          record.cat === cat &&
+          copy.cat === cat &&
+          sortedKeys(record) === fields(prior ? ['mark'] : []) &&
+          sortedKeys(copy) === fields(scene ? ['keep'] : []) &&
+          record.day === DAY &&
+          copy.day === DAY &&
+          record.by === copy.by &&
+          record.by !== 'old' &&
+          record.mark === (prior ? 2 : undefined) &&
+          copy.keep === (scene ? 1 : undefined) &&
+          !Object.hasOwn(record, 'variants') &&
+          !Object.hasOwn(copy, 'variants') &&
+          dog.ext === null,
+        JSON.stringify(dog),
+      );
+      if (!scene) check(`${label}: D5 — новый профиль собаки: record.cat === '' && copy.cat === ''`, record?.cat === '' && copy?.cat === '', JSON.stringify({ record, copy }));
+      await page.evaluate(() => window.stand.pet.destroy());
+    }
 
     // ---- «Приходит по зову» с клавиатуры ----
     await mount(page, 'pa', { marks: 2, today: 1, cat: { v: 1, seenStage: 0, greetDay: DAY } });

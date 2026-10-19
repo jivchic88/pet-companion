@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "pet-companion",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "entries": {
     ".": {
       "module": "pet/pet.mjs",

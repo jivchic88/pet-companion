@@ -287,6 +287,11 @@ export function lastVariant(raw, petId, ext = null) {
   return typeof old === 'string' ? old : '';
 }
 
+// Поле варианта копии дня из записи дня (record — та, что ставится резервированием): как 0.1.4, где копия и запись были
+// одной записью { v, day, by, cat }, — cat копии всегда, когда в записи это строка (у кота — показанный вариант, у другого
+// питомца — прежний вариант кота или ''). Нестроковое cat записи в копию не идёт: прежнее cat копии остаётся.
+export const copyVariant = (record) => (isRecord(record) && typeof record.cat === 'string' ? [[['cat'], record.cat]] : []);
+
 // Поля варианта для записи дня: у кота поле cat — показанный type; у другого питомца — как 0.1.4: своё сохранённое cat,
 // пустое — из копии (mirror). Вариант другого питомца в запись не идёт (variantPlace).
 export function variantFields(raw, mirror, petId, type) {

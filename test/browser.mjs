@@ -341,8 +341,14 @@ async function desktop(browser, base, check, layout) {
     await page.clock.runFor(1600);
     await page.waitForFunction(() => Boolean(document.querySelector('#cat-dock .cat-art')?.dataset.scene));
     const dbs = await page.evaluate(async () => (await indexedDB.databases()).map((db) => String(db.name)).sort().join(','));
+    // Показ начинается внутри транзакции IndexedDB, копия дня пишется исходом shown — после её завершения: ждём копию этого
+    // дня по условию (не дольше 10 с; не дождались — отказ этой проверки), затем проверяем её содержимое.
+    const copied = await page.waitForFunction(([key, day]) => JSON.parse(localStorage.getItem(key) ?? 'null')?.day === day, [K.scene, DAY], { timeout: 10000 }).then(
+      () => true,
+      () => false,
+    );
     const copy = await page.evaluate((k) => JSON.parse(localStorage.getItem(k.scene) ?? 'null'), K);
-    check(`${label}: сценка — база ${K.db} и копия ${K.scene}`, dbs === K.db && copy?.day === DAY && (await stored(page)).every((key) => key.startsWith('stand:')), JSON.stringify({ dbs, copy }));
+    check(`${label}: сценка — база ${K.db} и копия ${K.scene}`, copied && dbs === K.db && copy?.day === DAY && (await stored(page)).every((key) => key.startsWith('stand:')), JSON.stringify({ copied, dbs, copy }));
     await page.clock.runFor(6000);
 
     // Диалог сайта открывается и выглядит как раньше; стили сайта после всех действий — те же.

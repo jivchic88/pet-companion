@@ -24,7 +24,7 @@
 // окончательно — правило ядра, не оболочки. Узкий вход legacy-раскладки — stopScene (смена места, § 14.1.3).
 
 import { ACTIVITY_MS, basePose, blinkDelay, createDirector, effectiveMotion, finish, GREET_MS, MICRO_DEFAULT_MS, MICRO_MS, microDelay, OPEN_MICRO_MS, playing, REACTION_MIN_MS, request, REST_AFTER_MS, setBackground, setQuiet, setTable } from './director.mjs';
-import { variantPlace } from './formats/legacy.mjs';
+import { copyVariant, variantPlace } from './formats/legacy.mjs';
 import { pickPhrase } from './phrases.mjs';
 import { createPlay } from './play.mjs';
 import { petAround, presenceSurface } from './presence.mjs';
@@ -674,11 +674,11 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     const terms = { day: next.day, today: clock.day(now()), by: '-', pet: s.kind, type: next.type, fits: true };
     if (!sceneCommit(stored, copy, terms)) return null;
     const record = sceneCommit(stored, copy, { ...terms, by: `${now().toString(36)}-${Math.floor(random() * 0x100000000).toString(36)}` });
-    // Копия дня: день и метка, у кота — его вариант (поле cat); вариант питомца кроме кота и собаки — отдельно в ext:v1
-    // scenes[petId] (variantPlace; PL11.2, D5).
+    // Копия дня — поля этой записи дня (как 0.1.4: копия и запись — одна запись { v, day, by, cat }): день, метка и
+    // строковое cat у любого питомца (copyVariant). Вариант питомца кроме кота и собаки — отдельно в ext:v1 scenes[petId]
+    // (variantPlace; PL11.2, D5).
     const place = variantPlace(s.kind);
-    const own = place ? [[place.path, next.type]] : [];
-    return { record, patch: [[['day'], record.day], [['by'], record.by], ...(place?.key === 'scene' ? own : [])], ext: place?.key === 'ext' ? own : [] };
+    return { record, patch: [[['day'], record.day], [['by'], record.by], ...copyVariant(record)], ext: place?.key === 'ext' ? [[place.path, next.type]] : [] };
   }
 
   // Шаг 4 — сразу после постановки записи, в том же синхронном шаге, что decide: начало показа — реакция сценки

@@ -701,6 +701,9 @@ async function lifecycle(browser, base, check, open) {
       window.qaViews.h = window.web.mountPetIn(document.getElementById('a'), { namespace: 'held', progress: () => window.qaCounts });
     });
     await page.clock.runFor(2000);
+    // Вид «на виду» только после настоящей загрузки своих стилей (не по поддельным часам); до этого занятие сценку не
+    // резервирует. Ждём visible по условию (не дольше 5 с; не дождались — отказ этой проверки), затем — занятие.
+    const shown = await until(page, () => window.qaViews.h.core.getState().visible === true);
     await call(page, 'h', 'core.notify', 'saved', { key: 'held-1', counted: true });
     await page.clock.runFor(1600);
     await until(page, () => window.qaHeld.length > 0);
@@ -714,7 +717,7 @@ async function lifecycle(browser, base, check, open) {
     await page.evaluate(() => window.qaHeld.forEach((run) => run()));
     await page.clock.runFor(200);
     const late = { reaction: JSON.stringify((await state(page, 'h2')).pose.reaction), copy: await page.evaluate(() => localStorage.getItem('held:scene:v1')) };
-    check(`${label}: резервирование ждало, вид отключён и подключён заново — поздний итог старого не меняет новый (реакция та же, копию дня не пишет)`, held > 0 && late.reaction === before && late.copy === null, JSON.stringify({ held, before, late }));
+    check(`${label}: резервирование ждало, вид отключён и подключён заново — поздний итог старого не меняет новый (реакция та же, копию дня не пишет)`, shown && held > 0 && late.reaction === before && late.copy === null, JSON.stringify({ shown, held, before, late }));
     await call(page, 'h2', 'destroy');
     // Несохранённая память прежнего ядра не наследуется: запись имени отказала (хранилище переполнено), вид отключён —
     // новый вид показывает подтверждённое имя.
