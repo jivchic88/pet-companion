@@ -102,7 +102,8 @@ assert.equal(pet.notify('saved', { key: 'lesson-1', counted: true }).ok, true);
 assert.equal(pet.getState().scene.waiting.type, 'hop');
 advance(lively.reactions.joy.ms);
 await settle();
-assert.deepEqual([pet.getState().pose.reaction.type, json('scene').variants], ['hop', { 'example.bunny': 'hop' }]);
+// Прошлый вариант своего питомца — в ext:v1 scenes (с 0.2.2); запись сценки — формат 0.1.4, без variants.
+assert.deepEqual([pet.getState().pose.reaction.type, json('ext').scenes, json('scene').variants], ['hop', { 'example.bunny': 'hop' }, undefined]);
 advance(10_000);
 pet.setPet('cat');
 advance(5000);

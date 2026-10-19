@@ -434,7 +434,9 @@ async function desktop(browser, base, check, open, layout) {
     const foreign = { other: await page.evaluate(() => !document.querySelector('[data-room-other]').hidden), told: (await told(page)).at(-1), state: await page.locator('[data-room-state]').textContent() };
     await page.locator('[data-room-save]').click();
     const both = await stored(page, 'gd:room:v1');
-    check(`${label}: две вкладки — чужая расстановка отмечена и объявлена, черновик цел; своё «Сохранить» — клубок, миска другой вкладки цела`, foreign.other && foreign.told.startsWith('В другой вкладке сохранена новая расстановка') && foreign.state === 'Не сохранено: миска, клубок' && both.cat.bowl?.x === 180 && both.cat.yarn?.x === 46, JSON.stringify({ foreign, both }));
+    // PL11.2, D2: до 0.2.2 ожидалось «миска другой вкладки цела» (180), хотя редактор показывал «Не сохранено: миска» — своё
+    // «Сохранить» побеждает для показанного питомца (как 0.1.4): миска черновика на исходном месте, координаты сняты.
+    check(`${label}: две вкладки — чужая расстановка отмечена и объявлена, черновик цел; своё «Сохранить» — видимый черновик: клубок и миска на исходном месте`, foreign.other && foreign.told.startsWith('В другой вкладке сохранена новая расстановка') && foreign.state === 'Не сохранено: миска, клубок' && both.cat.bowl === undefined && both.cat.yarn?.x === 46, JSON.stringify({ foreign, both }));
     await tab.close();
     // Место legacy-раскладки — команда ядра setPlace (запись через подключение ядра); «устроился» — эффект arrive ядра,
     // появление — отображение (уголок открыт после «Сохранить»).
