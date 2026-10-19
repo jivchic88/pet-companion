@@ -87,6 +87,7 @@ const initial = () => ({
   learnLater: false, // учебный шаг не обновляли, пока вводят имя
   sheetOpen: false, // диалог открыт (закрытие — один раз: событие close после закрытия кодом ничего не делает)
   fresh: [], // вещи, которые ядро отметило увиденными при открытом уголке (refresh), — для «Новое в уголке» (syncSheet)
+  freshAcc: [], // аксессуары той же отметки (эффект seen; PL11.2, D3: снимок после отметки их уже не перечисляет)
   namePage: 0, // страница готовых имён в открытом уголке
   play: false, // открыта сцена «Поиграть» (вместо уголка в том же диалоге)
   playY: 0, // прокрутка уголка до сцены — вернуть при выходе
@@ -733,9 +734,9 @@ export function createShell(spec) {
     </fieldset>`;
   }
 
-  // «Новое в уголке»: вещи и аксессуары, открытые после увиденной ступени (снимок ядра).
-  function freshText(fresh) {
-    const accessories = snap().progress?.unseen ? snap().progress.freshAccessories : [];
+  // «Новое в уголке»: вещи и аксессуары, открытые после увиденной ступени — отмеченные ядром увиденными в этом обновлении
+  // (эффект seen), иначе ещё не увиденные по снимку.
+  function freshText(fresh, accessories = unseenAccessories()) {
     const names = [...fresh, ...accessories].map(itemName);
     return names.length ? `Новое в уголке: ${names.join(', ')}.` : '';
   }
@@ -838,10 +839,10 @@ export function createShell(spec) {
     announce(`${item.title}.${result.save.status === 'failed' ? ' Не сохранилось в этом браузере — действует до перезагрузки.' : ''}`);
   }
 
-  function bodyHtml(fresh) {
+  function bodyHtml(fresh, accessories) {
     const info = ui.info;
     const parts = progressParts();
-    const fresher = freshText(fresh);
+    const fresher = freshText(fresh, accessories);
     const s = ui.settings;
     const who = defOf();
     return `<div class="cat-stage-wrap">
@@ -893,13 +894,13 @@ export function createShell(spec) {
   }
 
   // Целиком — только при открытии, пока в уголке нечего терять.
-  function renderSheet(fresh = []) {
+  function renderSheet(fresh = [], accessories = undefined) {
     if (!ui.sheet) return;
     ui.sheet.querySelector('#cat-sheet-title').textContent = name();
     ui.sheet.querySelector('[data-cat-sub]').textContent = `Ступень «${ui.info.current.title}»`;
     ui.namePage = R.namePageOf(defOf().names.presets, name());
     ui.treatLater = false;
-    ui.sheet.querySelector('[data-cat-body]').innerHTML = bodyHtml(fresh);
+    ui.sheet.querySelector('[data-cat-body]').innerHTML = bodyHtml(fresh, accessories);
     paintMeter(progressParts().width);
     ui.sheetStage = ui.info.stage;
     paintCorner();
@@ -909,6 +910,14 @@ export function createShell(spec) {
 
   // Вещи, которых ещё не видели (подсветка в сцене), — от увиденной ступени до текущей (снимок ядра).
   const unseenItems = () => (snap().progress?.unseen ? snap().progress.fresh : []);
+  const unseenAccessories = () => (snap().progress?.unseen ? snap().progress.freshAccessories : []);
+  // Отметка увиденного этим обновлением (эффект seen) — вещи и аксессуары вместе; забрать — значит очистить.
+  function takeSeen() {
+    const seen = { marked: ui.fresh.length > 0 || ui.freshAcc.length > 0, items: ui.fresh, accessories: ui.freshAcc };
+    ui.fresh = [];
+    ui.freshAcc = [];
+    return seen;
+  }
 
   // Открытый уголок после изменения знаков или ступени: адресно — знаки, «сегодня», шкала, что дальше; если ступень не
   // та, что показана (ui.sheetStage), — подзаголовок, сцена, «Новое в уголке», ступени и аксессуары. Сравнение — с
@@ -926,10 +935,10 @@ export function createShell(spec) {
     paintMeter(parts.width);
     ui.sheet.querySelector('[data-cat-next]').textContent = parts.next;
     if (ui.info.stage === ui.sheetStage) return;
-    const fresh = ui.fresh.length ? ui.fresh : unseenItems();
-    ui.fresh = [];
+    const seen = takeSeen();
+    const fresh = seen.marked ? seen.items : unseenItems();
     const note = ui.sheet.querySelector('[data-cat-fresh]');
-    note.textContent = freshText(fresh);
+    note.textContent = freshText(fresh, seen.marked ? seen.accessories : unseenAccessories());
     note.hidden = !note.textContent;
     ui.sheet.querySelector('[data-cat-sub]').textContent = `Ступень «${ui.info.current.title}»`;
     ui.sheet.querySelector('.cat-stage-wrap > .cat-scene-art').outerHTML = sceneHtml(ui.info.stage, fresh);
@@ -1086,9 +1095,9 @@ export function createShell(spec) {
     if (coat() !== was) applyCoat();
     showProgress();
     ui.sheetOpen = true;
-    const fresh = want === 'corner' ? ui.fresh : unseenItems();
-    ui.fresh = [];
-    renderSheet(fresh);
+    const seen = takeSeen();
+    const corner = want === 'corner';
+    renderSheet(corner ? seen.items : unseenItems(), corner && seen.marked ? seen.accessories : unseenAccessories());
     S.opened();
     for (const button of openers()) button.setAttribute('aria-expanded', 'true');
     if (want === 'play') {
@@ -1128,7 +1137,7 @@ export function createShell(spec) {
     unplayMarkup({ restore: false });
     unroomMarkup({ restore: false });
     ui.sheetOpen = false;
-    ui.fresh = [];
+    takeSeen();
     if (ui.sheet.open) ui.sheet.close();
     S.closed({ restore });
     for (const button of openers()) button.setAttribute('aria-expanded', 'false');
@@ -1851,7 +1860,11 @@ export function createShell(spec) {
       return;
     }
     const state = snap();
-    for (const effect of effects) if (effect.type === 'seen') ui.fresh = [...new Set([...ui.fresh, ...effect.items])];
+    for (const effect of effects) {
+      if (effect.type !== 'seen') continue;
+      ui.fresh = [...new Set([...ui.fresh, ...effect.items])];
+      ui.freshAcc = [...new Set([...ui.freshAcc, ...(effect.accessories ?? [])])];
+    }
     const reaction = state.pose.reaction;
     if (reaction && reaction.id !== ui.reaction) {
       ui.reaction = reaction.id;
@@ -1882,8 +1895,8 @@ export function createShell(spec) {
     }
     // «Сохранить» вывело в уголок (кнопкой или прямой командой room.save): итог — над сценой уголка.
     if (reason === 'room.save' && state.view.open === 'corner') roomDone([...effects].reverse().find((effect) => effect.type === 'announce')?.text ?? '');
-    // Вещи, не показанные этим обновлением, не переходят в следующее.
-    ui.fresh = [];
+    // Вещи и аксессуары, не показанные этим обновлением, не переходят в следующее.
+    takeSeen();
   }
 
   // Журнал ядра — «Питомец: …» в консоли. Во время core.start предупреждение о сбое — причина отказа подключения (её

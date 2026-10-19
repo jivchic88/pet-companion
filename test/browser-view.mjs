@@ -429,6 +429,133 @@ async function together(browser, base, check, open) {
   }
 }
 
+// Отменённый перенос legacy (PL11.2, D1): отметка вида data-pet-view на <html> — не контейнер питомца, поэтому click после
+// отпускания вне мест, Esc над питомцем, pointercancel, потери захвата и скрытия вкладки поглощается и уголок не
+// открывается; следующий обычный клик открывает. Нажатие внутри настоящего контейнера (data-pet-view на своём элементе)
+// legacy не трогает, даже пока ждёт своего click. pointercancel и скрытие вкладки — синтетические события (у мыши
+// настоящего pointercancel нет; document.hidden подменён на время события).
+async function cancelledMove(browser, base, check, open) {
+  const label = 'перенос legacy и контейнер 1280×900';
+  const { context, page } = await open(browser, { viewport: { width: 1280, height: 900 } }, viewInit);
+  try {
+    await page.goto(`${base}?manual`);
+    await page.waitForFunction(() => Boolean(window.stand));
+    await page.evaluate(async () => {
+      window.web = await import('/pet/web.mjs');
+      const box = Object.assign(document.createElement('div'), { id: 'x' });
+      box.style.width = '240px';
+      document.getElementById('site-main').append(box);
+      window.qaMoveId = null;
+      window.addEventListener('pointerdown', (event) => (window.qaMoveId = event.pointerId), true);
+      // Перенос — только к логотипу сайта (рамка шапки стенда).
+      window.stand.mount({ zone: (device, id) => (id === 'logo' ? document.getElementById('site-head').getBoundingClientRect().toJSON() : null) });
+    });
+    await mount(page, 'x', 'x', { namespace: 'vx' });
+    await page.clock.runFor(3000);
+    const legacy = () => page.evaluate(() => ({ open: Boolean(document.getElementById('cat-sheet')?.open), at: document.documentElement.dataset.petAt, view: document.documentElement.dataset.petView, move: document.documentElement.dataset.petMove ?? null, zones: document.querySelectorAll('.pet-zones').length }));
+    const start = await legacy();
+    const face = await page.locator('#cat-dock [data-pet-drag]').boundingBox();
+    const cx = face.x + face.width / 2;
+    const cy = face.y + face.height / 2;
+    check(`${label}: legacy с рамкой места — кот целиком в боковой панели, на <html> data-pet-view="full"; перенос включён`, start.at === 'sidebar' && start.view === 'full' && !start.open && face.width > 0, JSON.stringify(start));
+    // Начать перенос мышью: нажать на питомца и сдвинуть больше порога — места на экране.
+    const grab = async () => {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx + 12, cy + 4, { steps: 3 });
+      return legacy();
+    };
+    const after = async (name, run) => {
+      const moving = await grab();
+      await run();
+      await page.clock.runFor(200);
+      const end = await legacy();
+      check(`${label}: ${name} — уголок не открылся, место прежнее, мест и отметки переноса нет`, moving.move === 'drag' && moving.zones === 1 && !end.open && end.at === 'sidebar' && end.move === null && end.zones === 0, JSON.stringify({ moving, end }));
+      // Сценарии независимы: открытый по ошибке уголок закрыть.
+      if (end.open) {
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => !document.getElementById('cat-sheet').open);
+      }
+    };
+    await after('отпустили вне мест', async () => {
+      await page.mouse.move(640, 640, { steps: 4 });
+      await page.mouse.up();
+    });
+    await after('Esc с указателем над питомцем, затем отпустили на нём', async () => {
+      await page.mouse.move(cx, cy, { steps: 2 });
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+    });
+    await after('pointercancel, затем отпустили над питомцем', async () => {
+      await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: window.qaMoveId, isPrimary: true, pointerType: 'mouse' })));
+      await page.mouse.move(cx, cy, { steps: 2 });
+      await page.mouse.up();
+    });
+    await after('потеря захвата, затем отпустили над питомцем', async () => {
+      await page.evaluate(() => document.querySelector('#cat-dock [data-pet-drag]').releasePointerCapture(window.qaMoveId));
+      await page.mouse.move(cx, cy, { steps: 2 });
+      await page.mouse.up();
+    });
+    await after('вкладка скрыта, затем отпустили над питомцем', async () => {
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        document.dispatchEvent(new Event('visibilitychange'));
+        delete document.hidden;
+      });
+      await page.mouse.move(cx, cy, { steps: 2 });
+      await page.mouse.up();
+    });
+    // Изоляция контейнера: legacy ждёт своего click (Esc при нажатой кнопке, отпускание), click внутри контейнера проходит
+    // и открывает его уголок; следующий click по legacy-питомцу — часть отменённого переноса.
+    await grab();
+    await page.keyboard.press('Escape');
+    const inside = await page.evaluate(() => {
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: window.qaMoveId, isPrimary: true, pointerType: 'mouse' }));
+      const button = document.querySelector('#x > [data-pet-view]').shadowRoot.querySelector('.cat-view-btn');
+      const passed = button.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, detail: 1 }));
+      return { passed, legacy: Boolean(document.getElementById('cat-sheet')?.open) };
+    });
+    await finishOpen(page, 'x');
+    const box = await sheetOf(page, 'x');
+    await page.keyboard.press('Escape');
+    await closedIn(page, 'x');
+    await page.mouse.up();
+    await page.clock.runFor(200);
+    const muted = await legacy();
+    check(`${label}: click внутри контейнера, пока legacy ждёт click переноса, — не поглощён, уголок контейнера открыт; click по legacy после отпускания — поглощён`, inside.passed && !inside.legacy && box.open && !muted.open && muted.at === 'sidebar', JSON.stringify({ inside, box, muted }));
+    // Следующий обычный клик — открывает уголок.
+    await page.mouse.click(cx, cy);
+    await page.clock.runFor(200);
+    const plain = await legacy();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('cat-sheet').open);
+    check(`${label}: следующий обычный клик по питомцу открывает уголок`, plain.open, JSON.stringify(plain));
+    // Контроль: отпустили над местом — питомец у логотипа, уголок не открыт.
+    await grab();
+    const head = await page.locator('#site-head').boundingBox();
+    await page.mouse.move(head.x + head.width / 2, head.y + head.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await page.clock.runFor(200);
+    const dropped = await legacy();
+    check(`${label}: контроль — отпустили над местом: питомец у логотипа, уголок не открыт`, dropped.at === 'logo' && !dropped.open && dropped.move === null, JSON.stringify(dropped));
+    check(`${label}: без ошибок страницы и необработанных отклонений`, page.qaErrors.length === 0 && (await page.evaluate(() => window.qaRejections.length)) === 0, JSON.stringify(page.qaErrors));
+  } catch (error) {
+    check(`${label}: сценарий выполнен`, false, error.stack);
+  } finally {
+    await context.close();
+  }
+}
+
+// Только перенос legacy (PL11.2, D1) — для отдельного прогона; в составе test:browser — viewQa.
+export async function cancelledMoveQa(browser, check, open) {
+  const server = await serveView();
+  try {
+    await cancelledMove(browser, server.base, check, open);
+  } finally {
+    await server.close();
+  }
+}
+
 // Общий namespace: два контейнера на одном координаторе — независимые поля не теряются, правка соседа приходит тихо (без
 // объявлений у него), одно лакомство на день, один день редкой сценки (общая IndexedDB). Изоляция DOM не означает
 // изоляцию общих настроек.
@@ -1733,6 +1860,7 @@ export async function viewQa(browser, check, open, layout) {
   try {
     await basics(browser, server.base, check, open, layout);
     await together(browser, server.base, check, open);
+    await cancelledMove(browser, server.base, check, open);
     await shared(browser, server.base, check, open);
     await lifecycle(browser, server.base, check, open);
     await geometry(browser, server.base, check, open);

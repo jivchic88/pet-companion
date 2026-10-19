@@ -311,8 +311,8 @@ test('копия scene асинхронно: pending до подтвержден
   assert.deepEqual([port.steps.at(-1), core.getState().pose.reaction?.type, core.getState().save.scene.status], ['→ shown', 'fetch', 'pending']);
   core.destroy();
   await store.drain();
-  // PL06: прошлый вариант собаки — своё поле variants.dog (вариант кота не трогается).
-  assert.deepEqual(store.json('scene'), { v: 1, day: DAY, cat: 'curl', by: days.days.get('qa').by, variants: { dog: 'fetch' } }, 'запись до destroy выполнена, вариант кота прежний');
+  // PL11.2, D5: запись собаки — формат 0.1.4 (вариант кота прежний, variants нет), ключа ext нет.
+  assert.deepEqual([store.json('scene'), days.days.get('qa').variants, store.data.get('ext') ?? null], [{ v: 1, day: DAY, cat: 'curl', by: days.days.get('qa').by }, undefined, null], 'запись до destroy выполнена, вариант кота прежний');
 });
 
 // ---------- Л. Граница раунда ----------

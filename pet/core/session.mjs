@@ -24,7 +24,7 @@
 // окончательно — правило ядра, не оболочки. Узкий вход legacy-раскладки — stopScene (смена места, § 14.1.3).
 
 import { ACTIVITY_MS, basePose, blinkDelay, createDirector, effectiveMotion, finish, GREET_MS, MICRO_DEFAULT_MS, MICRO_MS, microDelay, OPEN_MICRO_MS, playing, REACTION_MIN_MS, request, REST_AFTER_MS, setBackground, setQuiet, setTable } from './director.mjs';
-import { variantPath } from './formats/legacy.mjs';
+import { variantPlace } from './formats/legacy.mjs';
 import { pickPhrase } from './phrases.mjs';
 import { createPlay } from './play.mjs';
 import { petAround, presenceSurface } from './presence.mjs';
@@ -591,7 +591,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
   // бросок при этом тот же (порядок random 0.1.4).
   function choose({ key, outcome, stage, day, at }, s) {
     if (!started || !alive) return;
-    const type = pickScene({ key, checked, outcome, celebrate: stage, day, record: s.scene, pet: s.kind, available: optionsOf(s), chance: s.pair.chance, order: s.pair.order, random });
+    const type = pickScene({ key, checked, outcome, celebrate: stage, day, record: s.scene, ext: s.sceneExt, pet: s.kind, available: optionsOf(s), chance: s.pair.chance, order: s.pair.order, random });
     const waits = d.current?.event === key || d.pending?.event === key;
     attempt = type && waits ? { type, key, day, at, until: at + SCENE_FRESH_MS, pet: s.kind, behavior: s.behavior } : null;
   }
@@ -659,6 +659,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     const decision = guard(() => judge(token, stored));
     if (!decision || !alive || token.cancelled) return null;
     token.patch = decision.patch;
+    token.ext = decision.ext;
     token.step = 'reserved';
     return decision.record;
   }
@@ -673,8 +674,11 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     const terms = { day: next.day, today: clock.day(now()), by: '-', pet: s.kind, type: next.type, fits: true };
     if (!sceneCommit(stored, copy, terms)) return null;
     const record = sceneCommit(stored, copy, { ...terms, by: `${now().toString(36)}-${Math.floor(random() * 0x100000000).toString(36)}` });
-    // Копия дня: день, метка и вариант показанного питомца (кот — поле cat, остальные — variants[petId]).
-    return { record, patch: [[['day'], record.day], [['by'], record.by], [variantPath(s.kind), next.type]] };
+    // Копия дня: день и метка, у кота — его вариант (поле cat); вариант питомца кроме кота и собаки — отдельно в ext:v1
+    // scenes[petId] (variantPlace; PL11.2, D5).
+    const place = variantPlace(s.kind);
+    const own = place ? [[place.path, next.type]] : [];
+    return { record, patch: [[['day'], record.day], [['by'], record.by], ...(place?.key === 'scene' ? own : [])], ext: place?.key === 'ext' ? own : [] };
   }
 
   // Шаг 4 — сразу после постановки записи, в том же синхронном шаге, что decide: начало показа — реакция сценки
@@ -714,7 +718,7 @@ export function createSession({ clock, random, scheduler, sense, emit, fault, ru
     const ran = stage('scene', () => {
       if (issue) warn(...issue);
       if (attempt === token.attempt) attempt = null;
-      if (result === 'shown' && token.patch) keep(token.patch);
+      if (result === 'shown' && token.patch) keep(token.patch, token.ext);
       else if (result !== 'shown' && token.step === 'shown' && token.id !== null && d.current?.id === token.id) {
         d.current = null;
         stop();

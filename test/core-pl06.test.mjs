@@ -15,7 +15,7 @@ import { cat } from '../pet/defs/cat.mjs';
 import { dog } from '../pet/defs/dog.mjs';
 import { bunny } from '../examples/extension/bunny.mjs';
 import { lively } from '../examples/extension/lively.mjs';
-import { defineBehavior } from '../pet/core.mjs';
+import { defineBehavior, definePet } from '../pet/core.mjs';
 import { DAY, flush, host, life, reserver, sceneStore } from './core-kit.mjs';
 
 const ALL = { pets: [cat, dog, bunny], behaviors: [calm, lively] };
@@ -249,7 +249,7 @@ test('шанс 0 и пустое пересечение: попытка испо
   }
 });
 
-test('fresh — не прошлый вариант этого питомца; random — любой; память варианта кота — scene.cat, других — variants[petId]', async () => {
+test('fresh — не прошлый вариант этого питомца; random — любой; память варианта кота — scene.cat, собаки — нет (0.1.4), других — ext.scenes[petId]', async () => {
   const randomCalm = defineBehavior({ ...JSON.parse(JSON.stringify(calm)), id: 'example.shuffle', scenes: { chance: 0.25, order: 'random' } });
   const defs = { pets: [cat, dog, bunny], behaviors: [calm, randomCalm] };
   // Прошлый вариант кота — stretch: fresh даёт только curl (без броска варианта), random — оба (бросок).
@@ -268,8 +268,10 @@ test('fresh — не прошлый вариант этого питомца; ra
     }
     assert.deepEqual([taken, [...found].sort()], [rolls, list], model);
   }
-  // Показ собаки пишет её вариант в variants.dog, вариант кота не трогает; кролика — в variants["example.bunny"].
-  for (const [pet, extra, path] of [['dog', PETS.dog, ['variants', 'dog']], ['example.bunny', PETS['example.bunny'], ['variants', 'example.bunny']]]) {
+  // PL11.2, D5: запись сценки (копия и запись дня) — формат 0.1.4: вариант кота прежний, variants не добавляется (до 0.2.2
+  // собака и кролик писали variants[petId] в старый ключ). Собака варианта не помнит, как 0.1.4 (вариант один); кролик —
+  // в ext:v1 scenes (выбор питомца и неизвестное ext целы).
+  for (const [pet, extra, ext] of [['dog', PETS.dog, null], ['example.bunny', PETS['example.bunny'], { ...PETS['example.bunny'].ext, scenes: { 'example.bunny': 'hop' } }]]) {
     const store = sceneStore();
     const port = reserver(store, 'qa');
     const L = life({ cat: COMMON, ...extra, scene: { v: 1, day: '2026-10-01', cat: 'curl', other: 1 } }, { defs, display: DISPLAY, scenes: port.port, counts: host(4, 1) });
@@ -280,8 +282,19 @@ test('fresh — не прошлый вариант этого питомца; ra
     await flush();
     assert.equal(playing(L), { dog: 'fetch', 'example.bunny': 'hop' }[pet]);
     const copy = L.json('scene');
-    assert.deepEqual([copy.cat, copy.other, copy[path[0]][path[1]], Object.keys(copy[path[0]])], ['curl', 1, { dog: 'fetch', 'example.bunny': 'hop' }[pet], [path[1]]]);
-    assert.equal(store.days.get('qa').cat, 'curl', 'запись дня: вариант кота прежний');
+    assert.deepEqual([copy.cat, copy.other, Object.hasOwn(copy, 'variants'), Object.keys(copy).sort()], ['curl', 1, false, ['by', 'cat', 'day', 'other', 'v']], `${pet}: копия — формат 0.1.4`);
+    assert.deepEqual([store.days.get('qa').cat, Object.hasOwn(store.days.get('qa'), 'variants')], ['curl', false], `${pet}: запись дня — вариант кота прежний, без variants`);
+    assert.deepEqual(L.raw('ext') === null ? null : L.json('ext'), ext, `${pet}: ext`);
+    L.core.destroy();
+  }
+  // Память кролика из ext — fresh не повторяет; прежнее variants записи сценки (0.2.0–0.2.1) — читается, если в ext нет.
+  const twice = definePet({ ...JSON.parse(JSON.stringify(bunny)), scenes: [...JSON.parse(JSON.stringify(bunny.scenes)), { ...JSON.parse(JSON.stringify(bunny.scenes[0])), id: 'skip' }] });
+  for (const [where, initial] of [['ext', { ext: { ...PETS['example.bunny'].ext, scenes: { 'example.bunny': 'hop' } } }], ['variants', { ...PETS['example.bunny'], scene: { v: 1, day: '2026-10-01', cat: 'curl', variants: { 'example.bunny': 'hop' } } }]]) {
+    const L = life({ cat: COMMON, ...initial }, { defs: { pets: [cat, dog, twice], behaviors: [calm] }, display: { ...DISPLAY, scenes: { ...DISPLAY.scenes, 'example.bunny': ['hop', 'skip'] } }, scenes: reserver().port, counts: host(4, 1) });
+    L.core.start();
+    L.random.push(0, 0, 0);
+    L.core.notify('saved', { key: 'w', counted: true });
+    assert.equal(L.state().scene.waiting?.type, 'skip', `${where}: прошлый вариант hop — fresh даёт skip`);
     L.core.destroy();
   }
 });

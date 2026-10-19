@@ -14,8 +14,9 @@ export function createMover(hooks, signal) {
   const st = { hooks, mode: false, source: null, drag: null, layer: null, zones: [], ghost: null, mute: false, held: null };
   const root = () => document.documentElement;
   const moving = () => st.mode || Boolean(st.drag?.started);
-  // Нажатие внутри контейнера питомца (свой Shadow DOM, PL07) — не часть переноса legacy.
-  const foreign = (event) => Boolean(event.target?.closest?.('[data-pet-view]'));
+  // Нажатие внутри контейнера питомца (свой элемент data-pet-view с Shadow DOM, PL07) — не часть переноса legacy. Та же
+  // метка на <html> — вид legacy-питомца (data-pet-view="full" и др.), не контейнер: её нажатия свои.
+  const foreign = (event) => Boolean(event.target?.closest?.('[data-pet-view]:not(:root)'));
 
   // Сбой при замере вёрстки — мест нет (режим не начинается, перенос кончится «вне мест»).
   function zonesNow() {

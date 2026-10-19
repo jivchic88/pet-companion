@@ -153,7 +153,9 @@ test('новая ступень при открытом редакторе: пе
   assert.deepEqual([out.fresh.length > 0, L.json('cat').seenStage, roomWrites(L)], [true, 3, 0], 'выход в уголок — ступень увидена');
 });
 
-test('чужая расстановка: постоянная часть — тихо, черновик не затирается, other и одно объявление; save пишет только передвинутые здесь', () => {
+// PL11.2, D2: до 0.2.2 save писал только передвинутые здесь предметы (подушка и клубок другой вкладки оставались) — это
+// противоречило ADR 0017 тренажёра; теперь видимый черновик показанного питомца побеждает, собака — из свежей записи.
+test('чужая расстановка: постоянная часть — тихо, черновик не затирается, other и одно объявление; save пишет видимый черновик питомца', () => {
   const L = editor({ cat: CAT, room: { v: 1, cat: { yarn: { x: 60, y: 230 } } } });
   L.core.room.move('bowl', [300, 230]);
   // Другая вкладка: кот — подушка и клубок, собака — канат.
@@ -166,17 +168,18 @@ test('чужая расстановка: постоянная часть — т�
   L.events.fire(L.keys.room);
   assert.equal(told(L).filter((text) => text.startsWith('В другой вкладке')).length, 1, 'объявление — одно');
   L.core.room.save();
-  assert.deepEqual(L.json('room'), { v: 1, cat: { rest: { x: 160, y: 210 }, yarn: { x: 120, y: 235 }, bowl: { x: 300, y: 230 } }, dog: { rope: { x: 330, y: 240 } } }, 'записана только миска: подушка и клубок другой вкладки и собака целы');
+  assert.deepEqual(L.json('room'), { v: 1, cat: { yarn: { x: 60, y: 230 }, bowl: { x: 300, y: 230 } }, dog: { rope: { x: 330, y: 240 } } }, 'видимый черновик кота: подушка на исходном месте (координаты сняты), клубок 60, миска 300; собака другой вкладки цела');
   // Чужая запись другого животного — не отметка.
   L.core.open('room');
   L.put('room', { ...L.json('room'), dog: { rope: { x: 40, y: 233 } } });
   L.events.fire(L.keys.room);
   assert.equal(draft(L).other, false, 'расстановка этого питомца та же');
-  // Сверка перед решением: запись без события storage находится save.
+  // Сверка перед решением: запись без события storage находится save — без сверки подушка черновика совпала бы с
+  // устаревшей подтверждённой и чужая подушка осталась бы.
   L.core.room.move('yarn', [250, 234]);
-  L.put('room', { ...L.json('room'), cat: { ...L.json('room').cat, rest: { x: 250, y: 212 } } });
+  L.put('room', { ...L.json('room'), cat: { ...L.json('room').cat, rest: { x: 250, y: 212 } }, dog: { rope: { x: 90, y: 233 } } });
   L.core.room.save();
-  assert.deepEqual([L.json('room').cat.rest, L.json('room').cat.yarn], [{ x: 250, y: 212 }, { x: 250, y: 234 }], 'свежее — перед решением, своё — поверх');
+  assert.deepEqual([L.json('room').cat.rest, L.json('room').cat.yarn, L.json('room').dog], [undefined, { x: 250, y: 234 }, { rope: { x: 90, y: 233 } }], 'свежее — перед решением, видимый черновик — поверх; собака — свежая');
 });
 
 test('запись: только передвинутые предметы; неизвестные точки, поля точек, предметы, животные и больший v сохраняются', () => {
@@ -335,7 +338,38 @@ test('поздний успех при снова открытом редакт�
   L.core.destroy();
 });
 
-test('поздний отказ и чужая расстановка: «Сохранить» пишет только свой несохранённый клубок — подушка другой вкладки, миска, собака, неизвестное и больший v целы', async () => {
+// PL11.2, D2 — контракт ADR 0017 тренажёра (как 0.1.4 roomRecord): «Сохранить» этой вкладки побеждает для показанного
+// питомца — пишется видимый черновик целиком, а не только передвинутое здесь; другое животное, неизвестные поля и
+// предметы, точки закрытых сейчас предметов и больший v берутся из свежей записи.
+test('D2: черновик с подушкой 150, передвинута только миска; другая вкладка — подушка 260 и канат собаки → после «Сохранить» подушка 150, своя миска, собака другой вкладки', () => {
+  const stored = { v: 1, cat: { rest: { x: 150, y: 210, tilt: 3 }, ball: { x: 70, y: 236, keep: 'closed' }, lamp2: { x: 1, y: 2 } }, 'example.bunny': { carrot: { x: 5, y: 6 } } };
+  const L = editor({ cat: CAT, room: stored });
+  assert.deepEqual([draft(L).pos.rest, Object.hasOwn(draft(L).pos, 'ball')], [[150, 210], false], 'черновик: подушка 150; мячика у кота нет');
+  L.core.room.move('bowl', [300, 230]);
+  const other = { ...stored, theme: 'night', cat: { ...stored.cat, rest: { x: 260, y: 210, tilt: 3 } }, dog: { rope: { x: 330, y: 240, knot: 1 } } };
+  L.put('room', other);
+  L.events.fire(L.keys.room);
+  assert.deepEqual([draft(L).other, draft(L).pos.rest], [true, [150, 210]], 'черновик не затёрт, отметка другой вкладки');
+  assert.equal(L.core.room.save().text, ROOM_TEXT.saved);
+  assert.deepEqual(L.json('room'), { ...other, cat: { ...other.cat, rest: { x: 150, y: 210, tilt: 3 }, bowl: { x: 300, y: 230 } } }, 'подушка 150 (видимый черновик), миска своя; собака, неизвестный предмет, закрытый мячик, другой питомец и поле — из свежей записи');
+  assert.deepEqual(L.state().room.pos.rest, [150, 210], 'уголок — сохранённая подушка');
+  // Без изменений против свежей записи — без записи.
+  const writes = roomWrites(L);
+  L.core.open('room');
+  assert.equal(L.core.room.save().text, ROOM_TEXT.same);
+  assert.equal(roomWrites(L), writes, 'без записи');
+  // Собака на ступени 0: мячик (ступень 2) закрыт — его сохранённая точка остаётся; канат черновика побеждает чужой.
+  const D = editor({ cat: CAT, companion: { v: 1, kind: 'dog' }, room: { v: 1, dog: { rope: { x: 60, y: 233 }, ball: { x: 250, y: 234, spin: 1 } } } });
+  assert.equal(Object.hasOwn(draft(D).pos, 'ball'), false, 'мячик на ступени 0 закрыт');
+  D.core.room.move('bowl', [300, 230]);
+  D.put('room', { v: 1, dog: { rope: { x: 120, y: 233 }, ball: { x: 250, y: 234, spin: 1 } }, cat: { yarn: { x: 200, y: 234 } } });
+  D.events.fire(D.keys.room);
+  D.core.room.save();
+  assert.deepEqual(D.json('room'), { v: 1, dog: { rope: { x: 60, y: 233 }, ball: { x: 250, y: 234, spin: 1 }, bowl: { x: 300, y: 230 } }, cat: { yarn: { x: 200, y: 234 } } }, 'канат 60 (черновик), закрытый мячик и кот — из свежей записи');
+});
+
+// PL11.2, D2: до 0.2.2 ожидалась подушка другой вкладки (160) — вопреки ADR 0017; теперь видимая подушка черновика (150).
+test('поздний отказ и чужая расстановка: «Сохранить» пишет несохранённый клубок и видимую подушку — поле точки, миска, собака, неизвестное и больший v целы', async () => {
   const stored = { v: 3, theme: 'night', cat: { rest: { x: 150, y: 210, tilt: 3 }, bowl: { x: 300, y: 230, keep: 'unknown' } }, dog: { rope: { x: 330, y: 240 } }, 'example.bunny': { carrot: { x: 5, y: 6 } } };
   const { store, L, first } = await pendingAgain({ cat: CAT, room: stored });
   // Другая вкладка — до чтения операции: подушка кота и канат собаки (свежее чтение участка — чужое, § 8.3, шаг 4а).
@@ -347,7 +381,7 @@ test('поздний отказ и чужая расстановка: «Сохр
   const retry = L.core.room.save();
   assert.equal(retry.save.status, 'pending');
   await store.drain();
-  assert.deepEqual([await retry.save.done, store.json('room')], ['saved', { ...other, cat: { ...other.cat, yarn: { x: 250, y: 234 } } }], 'только клубок: подушка другой вкладки, миска, собака, неизвестное и v 3 — как были');
+  assert.deepEqual([await retry.save.done, store.json('room')], ['saved', { ...other, cat: { ...other.cat, rest: { x: 150, y: 210, tilt: 3 }, yarn: { x: 250, y: 234 } } }], 'клубок и видимая подушка (x 150, tilt цел); миска с неизвестным полем, собака другой вкладки, неизвестное и v 3 — как были');
   L.core.destroy();
 });
 
@@ -435,4 +469,35 @@ test('точка — ровно два конечных числа: разреж
   assert.equal(L.core.room.save().save.status, 'saved');
   const out = L.json('room');
   assert.deepEqual([out.v, out.cat.bowl.keep, [out.cat.bowl.x, out.cat.bowl.y].every(Number.isFinite), out.cat.yarn, L.raw('room').includes('null')], [3, 'unknown', true, { x: 140, y: 234 }, false]);
+});
+
+// PL11.2: хранилище стало недоступно (чтение и запись бросают) при живой странице. Редактор открывается с той же
+// расстановкой, что показана в уголке (последнее известное, а не исходная), отказ «Сохранить» — честное сообщение, редактор
+// и черновик целы, подтверждённая запись не тронута; доступ вернулся — «Сохранить» пишет; перезагрузка видит сохранённое.
+test('хранилище недоступно: редактор — расстановка уголка, честный отказ записи, подтверждённое цело; доступ вернулся — запись; перезагрузка', () => {
+  const room = { v: 1, cat: { yarn: { x: 60, y: 230 } }, dog: { rope: { x: 46, y: 233 } } };
+  const L = life({ cat: CAT, room }, { counts: host(1, 1), display: LEGACY_DISPLAY });
+  assert.equal(L.core.start().ok, true);
+  assert.equal(L.core.open('corner').ok, true);
+  const corner = L.state().room.pos;
+  const before = L.store.raw(L.keys.room);
+  L.store.denyGet = /./;
+  L.store.denySet = /./;
+  assert.equal(L.core.open('room').ok, true);
+  assert.deepEqual(draft(L).pos, corner, 'редактор — расстановка уголка (клубок 60, не исходный)');
+  assert.deepEqual(draft(L).pos.yarn, [60, 230]);
+  L.core.room.move('yarn', [250, 234]);
+  const failed = L.core.room.save();
+  assert.deepEqual([failed.save.status, failed.closed, failed.text, draft(L).failed, draft(L).pos.yarn, told(L).at(-1)], ['failed', false, `${ROOM_TEXT.failed}.`, true, [250, 234], `${ROOM_TEXT.failed}.`], 'честный отказ: редактор открыт, черновик цел');
+  assert.equal(L.store.raw(L.keys.room), before, 'подтверждённая запись не тронута');
+  L.store.denyGet = null;
+  L.store.denySet = null;
+  const saved = L.core.room.save();
+  assert.deepEqual([saved.save.status, saved.closed, saved.text], ['saved', true, ROOM_TEXT.saved]);
+  assert.deepEqual(L.json('room'), { ...room, cat: { yarn: { x: 250, y: 234 } } }, 'клубок записан; собака цела');
+  L.core.destroy();
+  const again = life({ cat: L.json('cat'), room: L.json('room') }, { counts: host(1, 1), display: LEGACY_DISPLAY });
+  assert.equal(again.core.start().ok, true);
+  assert.deepEqual([again.state().room.pos.yarn, again.json('room').dog], [[250, 234], { rope: { x: 46, y: 233 } }], 'перезагрузка — сохранённая расстановка');
+  again.core.destroy();
 });

@@ -269,28 +269,31 @@ export function prefRecord(text, patch = {}) {
 }
 
 // ---------- вариант редкой сценки (ключ scene и запись дня резервирования) ----------
-// Прошлый вариант — чтобы fresh-модель не повторяла его: кот — поле cat формата 0.1.4, остальные питомцы (и собака) —
-// variants[petId] (PL06; вкладка 0.1.4 это поле может потерять — тогда только возможный повтор варианта).
+// Прошлый вариант — чтобы fresh-модель не повторяла его. Запись сценки (scene:v1 и запись дня резервирования) — формат
+// 0.1.4: { v, day, by, cat } и неизвестное как есть; новых полей в ней нет (PL11.2, D5: новые поля — не в старые ключи).
+// Кот — поле cat этой записи; собака — нигде, как 0.1.4 (у неё один вариант); остальные питомцы — ext:v1 scenes[petId]
+// (отдельный ключ с 0.2.0, его вкладки 0.1.4 не знают). variants[petId] записи сценки (так писали 0.2.0–0.2.1) только
+// читается: личные данные не переносятся.
 
-export const variantPath = (petId) => (petId === 'cat' ? ['cat'] : ['variants', petId]);
+// Где помнить вариант питомца: { key, path } или null (не помнить).
+export const variantPlace = (petId) => (petId === 'cat' ? { key: 'scene', path: ['cat'] } : petId === 'dog' ? null : { key: 'ext', path: ['scenes', petId] });
 
-// Прошлый вариант питомца petId в записи (как есть) или ''.
-export function lastVariant(raw, petId) {
-  if (!isRecord(raw)) return '';
-  const value = petId === 'cat' ? raw.cat : isRecord(raw.variants) ? raw.variants[petId] : undefined;
-  return typeof value === 'string' ? value : '';
+// Прошлый вариант питомца petId (как есть) или '': raw — запись сценки, ext — запись ext:v1.
+export function lastVariant(raw, petId, ext = null) {
+  if (petId === 'cat') return isRecord(raw) && typeof raw.cat === 'string' ? raw.cat : '';
+  const own = isRecord(ext) && isRecord(ext.scenes) ? ext.scenes[petId] : undefined;
+  if (typeof own === 'string') return own;
+  const old = isRecord(raw) && isRecord(raw.variants) ? raw.variants[petId] : undefined;
+  return typeof old === 'string' ? old : '';
 }
 
-// Поля варианта для записи дня: показанный — type; у кота поле cat, у остальных — variants[petId] (непонятное значение
-// variants — не объект — не заменяется: вариант тогда не запоминается). Поле cat у записи другого питомца — как 0.1.4:
-// своё сохранённое, пустое — из копии (mirror).
+// Поля варианта для записи дня: у кота поле cat — показанный type; у другого питомца — как 0.1.4: своё сохранённое cat,
+// пустое — из копии (mirror). Вариант другого питомца в запись не идёт (variantPlace).
 export function variantFields(raw, mirror, petId, type) {
   const own = isRecord(raw) ? raw : {};
   const copy = isRecord(mirror) ? mirror : {};
   if (petId === 'cat') return { cat: type };
-  const fields = { cat: own.cat === undefined || own.cat === '' ? (typeof copy.cat === 'string' ? copy.cat : '') : own.cat };
-  if (own.variants === undefined || isRecord(own.variants)) fields.variants = { ...(isRecord(copy.variants) ? copy.variants : {}), ...(isRecord(own.variants) ? own.variants : {}), [petId]: type };
-  return fields;
+  return { cat: own.cat === undefined || own.cat === '' ? (typeof copy.cat === 'string' ? copy.cat : '') : own.cat };
 }
 
 // Поля варианта из правки копии дня (патч путей variantPath): кот — cat (строка), остальные — variants, слитые с
@@ -303,7 +306,8 @@ export function variantPatch(raw, patch = {}) {
 }
 
 // ---------- расширения (ext:v1, § 7.7) ----------
-// { v: 1, pet?: { id, over }, behavior?: string, pets?: { [id]: { name, accessory } } }. pet — выбор питомца-расширения:
+// { v: 1, pet?: { id, over }, behavior?: string, pets?: { [id]: { name, accessory } }, scenes?: { [id]: string } } (scenes —
+// прошлый вариант редкой сценки питомцев кроме кота и собаки, с 0.2.2). pet — выбор питомца-расширения:
 // действителен, пока подтверждённый companion.kind === over (over — штатный, которого при выборе показывал companion;
 // его и видят вкладки 0.1.4). Новые данные — в новом ключе: вкладки 0.1.4 нормализуют cat и companion и отбросили бы их.
 
@@ -350,6 +354,12 @@ export function extRecord(text, patch = {}) {
       pets[id] = next;
     }
     out.pets = pets;
+  }
+  // Прошлый вариант сценки: слияние с сохранённым; непонятное сохранённое (не объект) не заменяется.
+  if (isRecord(patch.scenes) && (raw.scenes === undefined || isRecord(raw.scenes))) {
+    const scenes = { ...(isRecord(raw.scenes) ? raw.scenes : {}) };
+    for (const [id, type] of Object.entries(patch.scenes)) if (typeof type === 'string' && type) scenes[id] = type;
+    out.scenes = scenes;
   }
   out.v = keepVersion(raw.v, EXT_VERSION);
   return out;

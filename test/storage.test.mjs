@@ -142,7 +142,7 @@ test('сценка: запись дня сохраняет неизвестно�
   const base = { day: DAY, today: DAY, by: 'A', kind: 'cat', type: 'curl', fits: true };
   const shown = { v: 2, day: '2026-10-10', by: 'B', cat: 'jump', mood: { calm: [1] } };
   assert.deepEqual(R.sceneCommit(shown, null, base), { v: 2, day: DAY, by: 'A', cat: 'curl', mood: { calm: [1] } });
-  assert.deepEqual(R.sceneCommit(shown, null, { ...base, kind: 'dog', type: 'fetch' }), { v: 2, day: DAY, by: 'A', cat: 'jump', mood: { calm: [1] }, variants: { dog: 'fetch' } }, 'собака не нормализует вариант кота; её вариант — variants.dog (PL06)');
+  assert.deepEqual(R.sceneCommit(shown, null, { ...base, kind: 'dog', type: 'fetch' }), { v: 2, day: DAY, by: 'A', cat: 'jump', mood: { calm: [1] } }, 'собака не нормализует вариант кота; новых полей нет (PL11.2, D5)');
   // Транзакция: повреждённая запись — skip, ничего не записано и не показано; нет записи — показ.
   const run = async (initial, { getFails = false } = {}) => {
     const data = new Map(initial === undefined ? [] : [['shown', initial]]);

@@ -168,6 +168,20 @@ async function desktop(browser, base, check, open, layout) {
     chrome = { scene: (await scenes(page))[0] ?? '', record: { day: record?.day, cat: record?.cat }, copy: { day: copy?.day, cat: copy?.cat }, seen: (await stored(page, 'nr:cat:v1')).seenStage };
     await page.evaluate(() => window.stand.pet.destroy());
 
+    // ---- PL11.2, D5: сценка собаки в mountPet — запись дня в IndexedDB и копия scene:v1 — формат 0.1.4 (вариант кота
+    // прежний, variants нет), неизвестное поле копии цело, ключа ext нет ----
+    await mount(page, 'nd', { extra: { companion: { v: 1, kind: 'dog' }, scene: { v: 1, day: '2026-10-01', by: 'old', cat: 'curl', keep: 1 } } });
+    await page.evaluate(() => window.stand.set(5, 2));
+    await notify(page, 'd1');
+    await page.clock.runFor(1600);
+    await until(page, () => document.querySelectorAll('.cat-art[data-scene]').length > 0);
+    await page.clock.runFor(10);
+    const dogRecord = await sceneRecord(page, 'nd:scene');
+    const dogCopy = await stored(page, 'nd:scene:v1');
+    const dogScene = { scene: (await scenes(page))[0] ?? '', record: Object.keys(dogRecord ?? {}).sort().join(), recordCat: dogRecord?.cat, copy: Object.keys(dogCopy ?? {}).sort().join(), copyCat: dogCopy?.cat, keep: dogCopy?.keep, day: [dogRecord?.day, dogCopy?.day], ext: await page.evaluate(() => localStorage.getItem('nd:ext:v1')) };
+    check(`${label}: D5 — сценка собаки: запись дня IndexedDB и копия scene:v1 — формат 0.1.4 (by, cat, day, v; вариант кота прежний, без variants), неизвестное поле копии цело, ext:v1 нет`, dogScene.scene === 'fetch' && dogScene.record === 'by,cat,day,v' && dogScene.recordCat === 'curl' && dogScene.copy === 'by,cat,day,keep,v' && dogScene.copyCat === 'curl' && dogScene.keep === 1 && dogScene.day.every((day) => day === DAY) && dogScene.ext === null, JSON.stringify(dogScene));
+    await page.evaluate(() => window.stand.pet.destroy());
+
     // ---- «Приходит по зову» с клавиатуры ----
     await mount(page, 'pa', { marks: 2, today: 1, cat: { v: 1, seenStage: 0, greetDay: DAY } });
     await page.locator('#cat-dock .cat-dock-btn').focus();
@@ -258,6 +272,47 @@ async function desktop(browser, base, check, open, layout) {
     await page.locator('#cat-dock .cat-dock-btn').click();
     const reopened = { seen: (await stored(page, 'pe:cat:v1')).seenStage, fresh: await freshNote() };
     check(`${label}: уголок открыт, ступень поднялась без праздника — сразу увидена, «Новое в уголке» один раз`, quietStage.seen === 2 && quietStage.fresh.startsWith('Новое') && reopened.seen === 2 && reopened.fresh === '', JSON.stringify({ quietStage, reopened }));
+    await page.keyboard.press('Escape');
+    await page.clock.runFor(100);
+    await page.evaluate(() => window.stand.pet.destroy());
+
+    // ---- PL11.2, D3: аксессуары ступеней в «Новое в уголке» после отметки увиденной — в уже открытом уголке (ступень
+    // 0 → 4: клетчатый платок и бейдж, как 0.1.4; платок по умолчанию — не новое) с черновиком имени и фокусом в поле, и при
+    // открытии уголка с неувиденными ступенями; повторно — ни «Нового», ни праздника ----
+    await page.evaluate(() => {
+      window.qaProgress = { marks: 1, today: 1, limit: 3 };
+      localStorage.setItem('pd3:cat:v1', JSON.stringify({ v: 1, seenStage: 0, greetDay: '2026-10-11' }));
+      window.stand.mount({ storage: 'pd3', progress: () => window.qaProgress });
+    });
+    await page.clock.runFor(100);
+    await page.locator('#cat-dock .cat-dock-btn').click();
+    await page.locator('input[name="cat-name"]').focus();
+    await page.keyboard.type('Черновик');
+    await page.evaluate(() => {
+      window.qaProgress = { marks: 30, today: 2, limit: 3 };
+      window.stand.pet.notify('saved', { key: 'pd31', counted: false });
+    });
+    await page.clock.runFor(200);
+    const accOpen = await page.evaluate(() => ({ seen: JSON.parse(localStorage.getItem('pd3:cat:v1')).seenStage, name: document.activeElement?.getAttribute('name') ?? '', value: document.querySelector('input[name="cat-name"]')?.value, reaction: window.stand.pet.core.getState().pose.reaction?.type ?? null }));
+    accOpen.fresh = await freshNote();
+    check(`${label}: D3 — открытый уголок, ступень 0 → 4: «Новое в уголке» с клетчатым платком и бейджем (без платка по умолчанию), ступень увидена; фокус и черновик имени на месте, праздника нет`, accOpen.seen === 4 && accOpen.fresh.includes('клетчатый платок') && accOpen.fresh.includes('бейдж') && !accOpen.fresh.includes('терракотовый') && accOpen.name === 'cat-name' && accOpen.value === 'Черновик' && accOpen.reaction !== 'unlock', JSON.stringify(accOpen));
+    await page.keyboard.press('Escape');
+    await page.clock.runFor(100);
+    if (await page.evaluate(() => document.getElementById('cat-sheet').open)) await page.keyboard.press('Escape');
+    await page.clock.runFor(100);
+    await page.locator('#cat-dock .cat-dock-btn').click();
+    const accAgain = { fresh: await freshNote(), reaction: await page.evaluate(() => window.stand.pet.core.getState().pose.reaction?.type ?? null) };
+    await page.keyboard.press('Escape');
+    await page.clock.runFor(100);
+    await page.evaluate(() => {
+      window.stand.pet.destroy();
+      localStorage.setItem('pd3:cat:v1', JSON.stringify({ v: 1, seenStage: 0, greetDay: '2026-10-11' }));
+      window.stand.mount({ storage: 'pd3', progress: () => window.qaProgress });
+    });
+    await page.clock.runFor(100);
+    await page.locator('#cat-dock .cat-dock-btn').click();
+    const accFirst = { fresh: await freshNote(), seen: (await stored(page, 'pd3:cat:v1')).seenStage };
+    check(`${label}: D3 — повторное открытие без «Нового» и праздника; открытие с неувиденными ступенями 1–4 — клетчатый платок и бейдж, ступень увидена`, accAgain.fresh === '' && accAgain.reaction !== 'unlock' && accFirst.seen === 4 && accFirst.fresh.includes('клетчатый платок') && accFirst.fresh.includes('бейдж') && !accFirst.fresh.includes('терракотовый'), JSON.stringify({ accAgain, accFirst }));
     await page.keyboard.press('Escape');
     await page.clock.runFor(100);
     await page.evaluate(() => window.stand.pet.destroy());

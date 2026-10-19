@@ -208,3 +208,21 @@ test('графика: общий масштаб и опора поз, уника
   assert.equal(miniItemSvg('нет'), '');
 });
 
+
+// PL11.2, D4: аксессуар по умолчанию (первый в определении, открыт с начала) — не награда ступени: unlockedBetween его не
+// перечисляет, как 0.1.4 (STAGES[0] без accessory). Другой аксессуар ступени 0 у расширения — открываемая награда, остаётся.
+test('D4: unlockedBetween — без аксессуара по умолчанию; второй аксессуар ступени 0 у расширения перечисляется', async () => {
+  const { definePet } = await import('../pet/core.mjs');
+  const { cat, dog } = await import('../pet/pets.mjs');
+  const Core = await import('../pet/core/stages.mjs');
+  assert.deepEqual(R.unlockedBetween(-1, 0), { items: ['cushion'], accessories: [] });
+  assert.deepEqual(Core.unlockedBetween(cat, -1, 0), { items: ['cushion'], accessories: [] });
+  assert.deepEqual(Core.unlockedBetween(dog, -1, 0).accessories, []);
+  assert.deepEqual(Core.unlockedBetween(cat, -1, 4).accessories, ['plaid', 'badge'], 'награды ступеней 1 и 4 — как раньше');
+  assert.deepEqual(Core.unlockedBetween(cat, 0, 2), { items: ['mug', 'notebook'], accessories: ['plaid'] });
+  const src = JSON.parse(JSON.stringify(cat));
+  const ext = definePet({ ...src, id: 'example.cat2', accessories: [{ id: 'bow', title: 'Бант', stage: 0 }, { id: 'bell', title: 'Колокольчик', stage: 0 }, { id: 'cap', title: 'Шапка', stage: 2 }] });
+  assert.deepEqual(Core.unlockedBetween(ext, -1, 0).accessories, ['bell'], 'по умолчанию — только первый; второй ступени 0 — награда');
+  assert.deepEqual(Core.unlockedBetween(ext, -1, 2).accessories, ['bell', 'cap']);
+  assert.deepEqual(Core.unlockedBetween(ext, 0, 2).accessories, ['cap']);
+});

@@ -226,8 +226,9 @@ test('решение в транзакции: показ — только есл
   assert.deepEqual(R.sceneCommit({ v: 4, day: '2026-10-09', by: 'B', cat: 'curl', future: { a: [1] } }, null, base), { v: 4, day: DAY, by: 'A', cat: 'curl', future: { a: [1] } });
   // Собака не меняет прошлый вариант кота (из базы, иначе — из копии); непонятный этой версии — тоже (до PL02 — стирался).
   const dog = { ...base, kind: 'dog', type: 'fetch' };
-  // PL06: прошлый вариант собаки — своё поле variants.dog.
-  assert.deepEqual(R.sceneCommit({ day: '2026-10-09', cat: 'stretch' }, null, dog), { v: 1, day: DAY, by: 'A', cat: 'stretch', variants: { dog: 'fetch' } });
+  // PL11.2, D5: запись собаки — формат 0.1.4, без variants (до 0.2.2 добавлялось variants.dog — новое поле в старом ключе).
+  assert.deepEqual(R.sceneCommit({ day: '2026-10-09', cat: 'stretch' }, null, dog), { v: 1, day: DAY, by: 'A', cat: 'stretch' });
+  assert.deepEqual(R.sceneCommit({ day: '2026-10-09', cat: 'stretch', variants: { dog: 'fetch', 'example.bunny': 'hop' } }, null, dog).variants, { dog: 'fetch', 'example.bunny': 'hop' }, 'прежнее variants (0.2.0–0.2.1) — как есть');
   assert.equal(R.sceneCommit(undefined, { day: '2026-10-09', cat: 'curl' }, dog).cat, 'curl');
   assert.equal(R.sceneCommit({ cat: 'dance' }, null, dog).cat, 'dance');
 });

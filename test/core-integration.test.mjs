@@ -67,7 +67,9 @@ test('поза поверхностей: page — реакция (кроме с�
   assert.deepEqual([L.state().pose.shown.page, L.state().pose.shown.play], ['attentive', 'content']);
 });
 
-test('два ядра на одном координаторе: автор первым, второе — чужая расстановка (other), каждый пишет свои предметы; разные namespace — независимы', () => {
+// PL11.2, D2: до 0.2.2 ожидалось «миска B, клубок A» (A писал только передвинутое им) — вопреки контракту 0.1.4: теперь
+// «Сохранить» A пишет его видимый черновик, миска у A на исходном месте.
+test('два ядра на одном координаторе: автор первым, второе — чужая расстановка (other), последнее «Сохранить» — видимый черновик; разные namespace — независимы', () => {
   const site = web({ cat: CAT });
   assert.equal(site.storage.load(), 'ready');
   const A = life({}, { storage: site.storage, counts: host(1, 1), display: LEGACY_DISPLAY });
@@ -87,7 +89,8 @@ test('два ядра на одном координаторе: автор пе�
   assert.deepEqual([A.state().room.draft.other, A.state().room.draft.pos.yarn, A.state().room.draft.pos.bowl], [true, [250, 234], [170, 205]], 'черновик A цел: миска B — только в сохраняемой');
   assert.deepEqual(A.state().room.pos.bowl, [300, 230]);
   A.core.room.save();
-  assert.deepEqual(site.json('room'), { v: 1, cat: { bowl: { x: 300, y: 230 }, yarn: { x: 250, y: 234 } } }, 'по одному разу: миска B, клубок A');
+  assert.deepEqual(site.json('room'), { v: 1, cat: { yarn: { x: 250, y: 234 } } }, 'видимый черновик A: клубок A, миска на исходном месте (координаты B сняты)');
+  assert.deepEqual(B.state().room.pos.bowl, [170, 205], 'B поглотил запись A');
   // Другое пространство имён — свой координатор.
   const other = web({ cat: CAT });
   assert.equal(other.storage.load(), 'ready');

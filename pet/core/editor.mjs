@@ -27,11 +27,10 @@ const title = (draft, id) => itemTitle(draft.model, id, draft.stage);
 
 // Черновик: model — модель комнаты показанного питомца (room.mjs, его определение), saved — расстановка из памяти ключа (с
 // несохранёнными правками), baseline — подтверждённая и уже поставленная в запись (для «Не сохранено» и для того, что
-// писать); unsaved — предметы с несохранёнными полями: их пишет следующее «Сохранить» (и те, что станут несохранёнными
-// позже, — prepare). Выбран — место отдыха. Предмет черновика — только его собственный ключ (Object.hasOwn), не
-// унаследованное имя.
-export function openDraft({ model, stage, saved, baseline, unsaved = [] }) {
-  return { model, pet: model.pet, stage, pos: { ...saved }, baseline: { ...baseline }, pick: 'rest', touched: new Set(unsaved.filter((id) => Object.hasOwn(saved, id))), other: false, failed: false, drag: null };
+// писать); несохранённые предметы пишет следующее «Сохранить» (prepare). Выбран — место отдыха. Предмет черновика — только
+// его собственный ключ (Object.hasOwn), не унаследованное имя.
+export function openDraft({ model, stage, saved, baseline }) {
+  return { model, pet: model.pet, stage, pos: { ...saved }, baseline: { ...baseline }, pick: 'rest', other: false, failed: false, drag: null };
 }
 
 // Выбор для шага кнопками (без объявления: кнопка отмечена). Во время переноса — ничего (кнопки ждут его конца).
@@ -68,7 +67,6 @@ export function drop(draft) {
   const moved = !samePlaces({ [id]: at }, { [id]: draft.pos[id] });
   draft.pos = { ...draft.pos, [id]: at };
   if (!moved) return [];
-  draft.touched.add(id);
   return [`${title(draft, id)} на новом месте.`];
 }
 
@@ -87,7 +85,6 @@ export function move(draft, id, point) {
   const moved = !samePlaces({ [id]: at }, { [id]: draft.pos[id] });
   draft.pos = { ...draft.pos, [id]: at };
   if (!moved) return [];
-  draft.touched.add(id);
   return [`${title(draft, id)} на новом месте.`];
 }
 
@@ -99,7 +96,6 @@ export function step(draft, dir) {
   const p = nudge(layoutOf(draft), id, dir);
   if (!p) return { moved: false, told: [`${title(draft, id)}: дальше ${WORDS[dir][1]} нельзя.`] };
   draft.pos = { ...draft.pos, [id]: p };
-  draft.touched.add(id);
   return { moved: true, told: [`${title(draft, id)} ${WORDS[dir][0]}.`] };
 }
 
@@ -107,7 +103,6 @@ export function step(draft, dir) {
 export function reset(draft) {
   draft.drag = null;
   draft.pos = arrange(draft.model, draft.stage, {}).pos;
-  for (const id of Object.keys(draft.pos)) draft.touched.add(id);
   return [ROOM_TEXT.reset];
 }
 
@@ -131,17 +126,19 @@ export function rebase(draft, baseline, foreign) {
   return [`${ROOM_TEXT.other}.`];
 }
 
-// «Сохранить»: перенос отменяется, а не дописывается; черновик — по правилам текущей ступени; пишутся передвинутые здесь
-// предметы, чьё место отличается от подтверждённого (baseline — свежая расстановка после сверки), и unsaved — предметы
-// питомца, несохранённые сейчас (после сверки перед решением; в том числе поздний отказ записи, пришедший при открытом
-// редакторе, — его при открытии ещё не было). Несохранённый пишется местом черновика, даже совпавшим с подтверждённым:
+// «Сохранить»: перенос отменяется, а не дописывается; черновик — по правилам текущей ступени. Своё «Сохранить» побеждает
+// для показанного питомца (контракт 0.1.4, roomRecord; PL11.2, D2): пишется видимый черновик — каждый
+// предмет ступени, чьё место отличается от подтверждённого (baseline — свежая расстановка после сверки), в том числе не
+// тронутый здесь, если другая вкладка его передвинула. Место, показанное вместо непонятного значения, совпадает с
+// подтверждённым и не пишется. Ещё пишутся unsaved — предметы питомца, несохранённые сейчас (после сверки перед решением;
+// в том числе поздний отказ записи, пришедший при открытом редакторе), местом черновика, даже совпавшим с подтверждённым:
 // иначе в памяти ключа осталось бы несохранённое место, которого в черновике нет («Вернуть обычную расстановку» после
-// отказа). Нетронутые здесь сохранённые предметы (другой вкладки) не пишутся. Возвращает moved.
+// отказа). Предметов не этой ступени, других животных и неизвестного в черновике нет — их запись не трогает. Возвращает moved.
 export function prepare(draft, baseline, unsaved = []) {
   draft.drag = null;
   draft.pos = arrange(draft.model, draft.stage, draft.pos).pos;
   draft.baseline = { ...baseline };
-  const moved = movedItems(draft.pos, baseline, [...draft.touched]);
+  const moved = movedItems(draft.pos, baseline);
   for (const id of unsaved) if (Object.hasOwn(draft.pos, id)) moved[id] = draft.pos[id];
   return moved;
 }

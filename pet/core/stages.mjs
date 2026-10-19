@@ -54,12 +54,15 @@ export function stageToCelebrate(outcome, seenStage = -1) {
 }
 
 // Что открылось у питомца между ступенями (для объявления и подсветки в сцене): вещи и аксессуары его определения.
+// Аксессуар по умолчанию (первый, открыт с начала) — не награда и не перечисляется (как 0.1.4; PL11.2, D4); другой
+// аксессуар ступени 0 у расширения — награда.
 export function unlockedBetween(pet, from, to) {
   const items = [];
   const accessories = [];
+  const [fallback] = pet.accessories;
   for (let i = Math.max(0, from + 1); i <= to && i < STAGES.length; i += 1) {
     items.push(...stageItems(pet, i));
-    accessories.push(...pet.accessories.filter((item) => item.stage === i).map((item) => item.id));
+    accessories.push(...pet.accessories.filter((item) => item !== fallback && item.stage === i).map((item) => item.id));
   }
   return { items, accessories };
 }

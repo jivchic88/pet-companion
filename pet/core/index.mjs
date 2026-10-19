@@ -312,6 +312,7 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
       stage: progressInfo(host ? host.marks : 0, m.common.seenStage).stage,
       content: host !== null && treatState(host.day, m.treat.fedDay, host.today) === 'fed',
       scene: m.raw.scene,
+      sceneExt: m.raw.ext,
     };
   }
 
@@ -331,8 +332,9 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
     // Свежая копия дня для решения резервирования (§ 9.2, шаг 3): значение хранилища сейчас через координатор (без
     // фиксации и слушателей; асинхронный — подтверждённое) и поверх него свои ещё не подтверждённые правки; как есть.
     mirror: () => readRecord(memoryText('scene', client.peek('scene'))).raw,
-    // Копия дня после shown — неявная операция ключа scene в текущем шаге (повреждённое не заменяет); list — [путь, значение].
-    keep: (list) => apply(working, { writes: [{ key: 'scene', fields: edits(list), implicit: true }] }),
+    // Копия дня после shown — неявная операция ключа scene в текущем шаге (повреждённое не заменяет); list — [путь, значение];
+    // ext — прошлый вариант питомца кроме кота и собаки, той же неявной операцией ключа ext (PL11.2, D5).
+    keep: (list, ext = []) => apply(working, { writes: [{ key: 'scene', fields: edits(list), implicit: true }, ...(ext.length ? [{ key: 'ext', fields: edits(ext), implicit: true }] : [])] }),
     stage: (name, body) => stage(name, body),
     // Решение — критическая фаза раунда (§ 5.4, § 9.2): годится, только если её конец пуст и ядро не отключается. Порт,
     // отключивший ядро изнутри решения (random метки, чтение копии, часы), — destroy в конце фазы, доставка 'destroyed',
@@ -1230,7 +1232,7 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
     const m = memory();
     const pet = sense(m).kind;
     const stage = stageOf(m);
-    return Editor.openDraft({ model: catalog.pet(pet).room, stage, saved: roomPos(pet, stage, { m }), baseline: roomPos(pet, stage, { committed: true }), unsaved: roomUnsaved(pet) });
+    return Editor.openDraft({ model: catalog.pet(pet).room, stage, saved: roomPos(pet, stage, { m }), baseline: roomPos(pet, stage, { committed: true }) });
   }
 
   // Выход из редактора в уголок (room.save, room.cancel): как open('corner') из редактора — уголок виден, новая ступень
@@ -1764,8 +1766,9 @@ function core({ storage, catalog, scenes, progress, clock, random, scheduler, lo
         step.applied = true;
         return Editor.dragCancel(draft) ? {} : { changed: false };
       }),
-    // «Сохранить»: идущий перенос отменяется, а не дописывается; пишутся только передвинутые здесь предметы показанного
-    // питомца, отличные от подтверждённого (сверено перед решением), и его предметы, несохранённые сейчас — после отказа
+    // «Сохранить»: идущий перенос отменяется, а не дописывается; пишется видимый черновик показанного питомца — его предметы,
+    // отличные от подтверждённого (сверено перед решением; своё «Сохранить» побеждает, как 0.1.4 — PL11.2, D2), и его
+    // предметы, несохранённые сейчас — после отказа
     // записи, в том числе позднего, пришедшего уже при открытом редакторе (по независимой проверке PL04.3: иначе такой
     // предмет «Не сохранено» в черновике, а save — «не изменилась» без записи). Без изменений — выход без записи.
     // Синхронно: успех — выход; отказ — редактор открыт, черновик цел, failed, поля несохранённые (память ключа, § 8.4).

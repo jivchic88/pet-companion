@@ -66,7 +66,7 @@ export function sceneRecord(text, patch = {}) {
 // celebrate — stageToCelebrate, record — копия scene (как есть), pet — ID показанного питомца, available — допустимые
 // сценки (sceneOptions; пусто — без броска), chance и order — политика модели. random — порт случайности: сначала шанс,
 // затем вариант, если вариантов больше одного. fresh — не прошлый вариант этого питомца, если доступны другие.
-export function pickScene({ key = '', checked = new Set(), outcome = null, celebrate = null, day = '', record = null, pet = '', available = [], chance = 0, order = 'fresh', random } = {}) {
+export function pickScene({ key = '', checked = new Set(), outcome = null, celebrate = null, day = '', record = null, ext = null, pet = '', available = [], chance = 0, order = 'fresh', random } = {}) {
   if (!key || checked.has(key)) return '';
   checked.add(key);
   if (!outcome?.practice || !outcome.counted || celebrate !== null) return '';
@@ -75,7 +75,7 @@ export function pickScene({ key = '', checked = new Set(), outcome = null, celeb
   // Пересечение пусто или шанс 0 — попытка использована, случайность не тратится, резервирования и показа нет.
   if (!available.length || !(chance > 0)) return '';
   if (!(random() < chance)) return '';
-  const was = lastVariant(last.raw, pet);
+  const was = lastVariant(last.raw, pet, ext);
   const fresh = order === 'fresh' ? available.filter((type) => type !== was) : available;
   const from = fresh.length ? fresh : available;
   return from.length > 1 ? from[Math.min(from.length - 1, Math.floor(random() * from.length))] : from[0];
@@ -93,8 +93,8 @@ export const sceneWaited = (next, started) => !next || started > next.at + SCENE
 // Решение в защищённом участке: запись дня (показать) или null. stored — запись резервирования как есть (undefined —
 // записи нет; не объект, в том числе null, — повреждена: это не свободный день, неявно её не заменяем — сценки нет),
 // mirror — копия scene как есть (её мог занять прежний код другой вкладки), day — день занятия, today — день сейчас
-// (полночь между ними — без сценки). Запись — та же запись с днём, меткой и вариантом показанного питомца (variantFields:
-// кот — поле cat, остальные — variants[petId]): неизвестные поля, варианты других питомцев и больший v остаются.
+// (полночь между ними — без сценки). Запись — та же запись с днём, меткой и вариантом кота (variantFields: формат 0.1.4,
+// вариант другого питомца в неё не идёт — variantPlace): неизвестные поля и больший v остаются.
 export function sceneCommit(stored, mirror, { day = '', today = '', by = '', pet = '', type = '', fits = false } = {}) {
   if (stored !== undefined && !isRecord(stored)) return null;
   const raw = stored ?? {};
