@@ -10,6 +10,11 @@
 // жеста ничего не нажимает: поглощается только внутри своего корня (legacy — документ, как 0.1.4; контейнер — свой
 // Shadow DOM), на касании — событиями, без таймера: до самого click или следующего основного нажатия; нажатия с
 // клавиатуры (detail 0) не трогаются.
+//
+// Палец ведёт жест — его touchmove отменяются, пока жест идёт или прерванный ждёт отпускания (контейнеры сцен — watch).
+// Иначе браузер считает сдвиг прокруткой: её нет (touch-action: none), но после быстрого отпускания он запускает свою
+// инерцию, и Chrome на Android, Linux, Windows и ChromeOS глотает следующее касание — оно только останавливает невидимую
+// инерцию (кнопка не нажимается ещё 0,3–0,9 с после броска; PL11.1). События указателя от отмены touchmove не меняются.
 
 // signal — отключение экземпляра (снимает постоянные слушатели); root — корень нажатий и прокрутки (document или
 // ShadowRoot); win, doc — окно и документ страницы.
@@ -115,6 +120,11 @@ export function createPointer({ signal, root, win = globalThis.window, doc = glo
     if (moved) release('scroll');
   }
 
+  // Сдвиг пальца жеста — не прокрутка и не инерция браузера (вступление выше).
+  function onTouchMove(event) {
+    if ((one.id !== null || rest.held !== null) && event.cancelable) event.preventDefault();
+  }
+
   root.addEventListener('click', onClick, { capture: true, signal });
   root.addEventListener('scroll', onScroll, { capture: true, passive: true, signal });
   doc.addEventListener('visibilitychange', () => doc.hidden && release('hidden'), { signal });
@@ -125,6 +135,12 @@ export function createPointer({ signal, root, win = globalThis.window, doc = glo
     grab,
     release,
     gesturing: () => one.id !== null,
+    // Постоянный контейнер, в котором начинаются жесты (сцена «Поиграть», редактор): не пассивный touchmove — только на
+    // нём, а не на странице, поэтому прокрутке сайта он не мешает. Слушатель есть до касания: браузер решает, ждать ли
+    // ответа страницы, по первому touchmove, и поздно добавленный не успел бы. Тот же контейнер повторно — без изменений.
+    watch(box) {
+      box.addEventListener('touchmove', onTouchMove, { passive: false, signal });
+    },
     // Отключение: идущий жест отменён, ожидание нажатия снято (постоянные слушатели снимает signal).
     destroy() {
       release('close');

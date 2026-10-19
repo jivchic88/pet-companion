@@ -2072,6 +2072,7 @@ export function createShell(spec) {
     ui.stroke.watch(ui.sheet.querySelector('[data-cat-play-view]'));
     ui.toys.watch(ui.sheet.querySelector('[data-cat-play-view]'));
     ui.arrange.watch(ui.sheet.querySelector('[data-cat-room-view]'));
+    for (const view of ['[data-cat-play-view]', '[data-cat-room-view]']) ui.pointer.watch(ui.sheet.querySelector(view));
     on(ui.sheet.querySelector('[data-cat-room-view]'), 'keydown', safe(onRoomKey));
 
     ui.live = document.createElement('div');

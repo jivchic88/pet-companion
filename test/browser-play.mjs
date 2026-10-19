@@ -40,6 +40,38 @@ function init() {
   window.qaPointer = { n: 0, type: '', x: 0, y: 0 };
   for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'])
     document.addEventListener(type, (event) => Object.assign(window.qaPointer, { n: window.qaPointer.n + 1, type, x: event.clientX, y: event.clientY }), true);
+  // Сдвиги пальца, дошедшие до документа (после слушателей модуля): сколько не отменено.
+  window.qaMoves = { n: 0, free: 0 };
+  document.addEventListener('touchmove', (event) => Object.assign(window.qaMoves, { n: window.qaMoves.n + 1, free: window.qaMoves.free + (event.defaultPrevented ? 0 : 1) }), { passive: true });
+}
+
+// Инерция браузера (fling) в трассе Chrome: начатые FlingController с начала трассы; трасса остановлена.
+async function flings(browser) {
+  const trace = JSON.parse(String(await browser.stopTracing()));
+  return (trace.traceEvents ?? trace).filter((event) => event.name === 'FlingController::HandlingGestureFling' && ['b', 'B'].includes(event.ph)).length;
+}
+
+// Проба трассы без модуля: быстрый свайп пальцем по прокручиваемой полосе — браузер докручивает её инерцией, и трасса это
+// видит. Без пробы «инерции нет» в сценарии телефона ничего бы не доказывало (другая версия Chrome, другие имена событий).
+async function flingProbe(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  let tracing = false;
+  try {
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><div id="strip" style="height:300px;overflow-y:scroll"><div style="height:6000px"></div></div>');
+    await page.evaluate(() => document.getElementById('strip').addEventListener('scrollend', () => (window.qaScrollEnd = true)));
+    await browser.startTracing(page, { categories: ['input'] });
+    tracing = true;
+    for (const [type, y] of [['touchStart', 250], ['touchMove', 230], ['touchMove', 150], ['touchEnd']]) await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: y ? [{ x: 200, y, id: 1 }] : [] });
+    // Прокрутка кончилась (после инерции — когда та докрутила) — её начало уже в трассе.
+    await page.waitForFunction(() => window.qaScrollEnd === true);
+    tracing = false;
+    return await flings(browser);
+  } finally {
+    if (tracing) await browser.stopTracing().catch(() => {});
+    await context.close();
+  }
 }
 
 // Ввод доходит до страницы по её кадрам, а не по page.clock: после отправки ждём, что событие указателя дошло (номер вырос;
@@ -470,10 +502,14 @@ async function feedEdges(page, ns, label, check, opener = '#cat-dock .cat-dock-b
 }
 
 // Телефон: собака, палец (CDP). Долгое поглаживание с вторым пальцем, лапа, перенос миски и предмета редактора пальцем;
-// blur, resize и фон снимают жест.
+// blur, resize и фон снимают жест. Сдвиги пальца в жестах отменены: браузер не запускает инерцию (fling), а Chrome на
+// Android и Linux иначе глотает касание, которое её останавливает (PL11.1: «Закрыть» после миски, «Сохранить» после
+// каната); на Mac Chrome не глотает, поэтому инерцию проверяет трасса, а не только нажатие.
 async function phone(browser, base, check, open, layout) {
   const label = 'игра и комната 390×844 (палец)';
+  const probe = await flingProbe(browser).catch((error) => error.message);
   const { context, page, cdp } = await open(browser, { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }, init);
+  let tracing = false;
   const outside = watchNetwork(page, base);
   // Палец 1 (и второй — extra); движение без сдвига события не даёт — его не ждём.
   let last = null;
@@ -489,6 +525,8 @@ async function phone(browser, base, check, open, layout) {
     await page.goto(`${base}?manual`);
     await page.waitForFunction(() => Boolean(window.stand));
     const baseline = await windowListeners(cdp);
+    await browser.startTracing(page, { categories: ['input'] });
+    tracing = true;
     await mount(page, 'ha', { keys: { companion: { v: 1, kind: 'dog' } } });
     await page.locator('.cat-face').tap();
     await finishOpen(page);
@@ -572,12 +610,16 @@ async function phone(browser, base, check, open, layout) {
     await page.clock.runFor(100);
     const saved = await stored(page, 'ha:room:v1');
     check(`${label}: канат пальцем — «Не сохранено: канат»; «Сохранить» — записан канат собаки`, state === 'Не сохранено: канат' && saved?.dog?.rope?.x > 36 && !saved.cat, JSON.stringify({ state, saved }));
+    tracing = false;
+    const thrown = { probe, flings: await flings(browser), moves: await page.evaluate(() => window.qaMoves) };
+    check(`${label}: сдвиги пальца в жестах (поглаживание, второй палец, миска, канат) отменены — инерции браузера после быстрого отпускания нет, касание следующей кнопки не глотается (проба: инерция без модуля видна в трассе)`, thrown.probe >= 1 && thrown.flings === 0 && thrown.moves.n > 0 && thrown.moves.free === 0, JSON.stringify(thrown));
     await layout(page, `${label}, уголок`);
     check(`${label}: чужой ключ сайта не тронут, внешних запросов нет`, (await raw(page, 'site:other')) === FOREIGN && outside.length === 0, outside.join(', '));
     check(`${label}: ошибок страницы и предупреждений модуля нет`, page.qaErrors.length === 0, page.qaErrors.join(' | '));
   } catch (error) {
     check(`${label}: сценарий выполнен`, false, error.stack);
   } finally {
+    if (tracing) await browser.stopTracing().catch(() => {});
     await context.close();
   }
 }
