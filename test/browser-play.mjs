@@ -63,7 +63,10 @@ async function flingProbe(browser) {
     await page.evaluate(() => document.getElementById('strip').addEventListener('scrollend', () => (window.qaScrollEnd = true)));
     await browser.startTracing(page, { categories: ['input'] });
     tracing = true;
-    for (const [type, y] of [['touchStart', 250], ['touchMove', 230], ['touchMove', 150], ['touchEnd']]) await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: y ? [{ x: 200, y, id: 1 }] : [] });
+    // Скорость броска — отметками времени событий (через 16 мс), а не временем их обработки: под нагрузкой отпускание
+    // приходило позже, браузер считал палец остановившимся, и инерции не было.
+    const t0 = Date.now() / 1000;
+    for (const [type, y, ms] of [['touchStart', 250, 0], ['touchMove', 230, 16], ['touchMove', 150, 32], ['touchEnd', 0, 48]]) await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: y ? [{ x: 200, y, id: 1 }] : [], timestamp: t0 + ms / 1000 });
     // Прокрутка кончилась (после инерции — когда та докрутила) — её начало уже в трассе.
     await page.waitForFunction(() => window.qaScrollEnd === true);
     tracing = false;
