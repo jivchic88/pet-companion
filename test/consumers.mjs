@@ -583,6 +583,33 @@ async function lifecycle(browser, dir, base, tag, dev) {
       s = await state();
       check(`${name}: персонаж (U01) — серверная разметка с заглушкой, после эффекта один вид в контейнере (${pairs} — onCore ${JSON.stringify(dev ? ['core', null, 'core'] : ['core'])}), хук — «Бип|calm|started»; событие продукта — поза happy в хуке и в рисунке; ни ключей персонажа в localStorage`, html.includes(`<div class="hero-box"></div><p id="hero-state">${HERO_PLACEHOLDER}</p>`) && heroBefore.heroes === 1 && heroBefore.text === 'Бип|calm|started' && JSON.stringify(heroBefore.log) === JSON.stringify(dev ? ['core', null, 'core'] : ['core']) && heroBefore.status === 'started' && reacted.ok && reacted.played && s.heroText === 'Бип|happy|started' && (await page.evaluate(() => document.querySelector('.hero-box > [data-pet-character]').shadowRoot.querySelector('svg').dataset.pose)) === 'happy' && (await page.evaluate(() => Object.keys(localStorage).every((key) => key.startsWith('qa')))), JSON.stringify({ heroBefore, reacted, heroText: s.heroText }));
       await page.clock.runFor(2000);
+      // По проверке Codex: строка подписи, функция подписи и появление/снятие onActivate — живому виду без пересоздания.
+      const liveProps = await page.evaluate(async () => {
+        const wait = () => new Promise((resolve) => setTimeout(resolve, 30));
+        const coreBefore = window.qa.hero();
+        const out = {};
+        window.qa.heroProps({ label: 'Первая подпись', onActivate: null });
+        await wait();
+        out.first = window.qa.heroFigure();
+        window.qa.heroProps({ label: 'Вторая подпись', onActivate: null });
+        await wait();
+        out.second = window.qa.heroFigure();
+        window.qa.heroProps({ label: (state) => `${state.name.display}: функция`, onActivate: null });
+        await wait();
+        out.fn = window.qa.heroFigure();
+        window.qaHeroClicks = 0;
+        window.qa.heroProps({ label: (state) => `${state.name.display}: функция`, onActivate: () => (window.qaHeroClicks += 1) });
+        await wait();
+        out.button = window.qa.heroFigure();
+        document.querySelector('.hero-box > [data-pet-character]').shadowRoot.querySelector('.pet-character-figure').click();
+        out.clicks = window.qaHeroClicks;
+        window.qa.heroProps({ label: undefined, onActivate: null });
+        await wait();
+        out.plain = window.qa.heroFigure();
+        out.sameCore = window.qa.hero() === coreBefore && coreBefore.status === 'started';
+        return out;
+      });
+      check(`${name}: живые свойства персонажа — вторая строка подписи и функция применяются к тому же экземпляру, onActivate после подключения делает рисунок кнопкой (нажатие — действие), снятие — снова рисунок; персонаж не пересоздан`, liveProps.first?.label === 'Первая подпись' && liveProps.first.tag === 'DIV' && liveProps.second?.label === 'Вторая подпись' && liveProps.fn?.label === 'Бип: функция' && liveProps.button?.tag === 'BUTTON' && liveProps.button.svg === 1 && liveProps.clicks === 1 && liveProps.plain?.tag === 'DIV' && liveProps.plain.role === 'img' && liveProps.plain.label === 'Бип — Робот' && liveProps.sameCore === true, JSON.stringify(liveProps));
       check(`${name}: подписка хука — с initial: false (без синхронной доставки), на живом ядре одна${dev ? ', на отключённом core1 активной нет (onCore двойного эффекта — один рендер)' : ''}; подтверждённое имя после подключения — «Пиксель»`, s.subs[live]?.active === 1 && s.subs[live].options.every((one) => one === '{"initial":false}') && s.subs[live].early === 0 && (!dev || !(s.subs[1]?.active > 0)) && s.text === 'Пиксель|1|running', JSON.stringify({ subs: s.subs, text: s.text }));
       // Повторный destroy core1: в development — уже отключённое ядро StrictMode (безопасно, живое не тронуто); в production —
       // живое ядро страницы (прямое отключение, проверка ниже).

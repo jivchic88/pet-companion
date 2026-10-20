@@ -89,6 +89,8 @@ export function App({ qa, initial }) {
   const kept = usePetState(held);
   const [heroCore, setHeroCore] = useState(null);
   const hero = useCharacterState(heroCore);
+  // Живые свойства персонажа (по проверке Codex): подпись и действие меняются пультом без пересоздания.
+  const [heroProps, setHeroProps] = useState({ label: undefined, onActivate: null });
   const onHero = (next) => {
     qa.heroLog.push(next ? 'core' : null);
     if (next) qa.hero = next;
@@ -96,7 +98,7 @@ export function App({ qa, initial }) {
   };
   // Пульт проверок — только на клиенте.
   useEffect(() => {
-    qa.connect?.({ setProps, setShown });
+    qa.connect?.({ setProps, setShown, setHeroProps });
   }, [qa]);
   const onCore = (next) => {
     qa.log.push({ core: qa.idOf(next), tag: props.tag, ...qa.observe(next) });
@@ -113,7 +115,7 @@ export function App({ qa, initial }) {
     shown ? h(PetCompanion, { ...own, ...extra, className: 'pet-box', onCore }) : null,
     h('p', { id: 'pet-state' }, pet ? `${pet.name.display}|${pet.progress?.marks ?? '-'}|${pet.status}` : PLACEHOLDER),
     h('p', { id: 'pet-held' }, kept ? `${kept.name.display}|${kept.status}` : PLACEHOLDER),
-    shown ? h(Character, { character: robot, kit: robotKit, name: 'Бип', className: 'hero-box', onCore: onHero }) : null,
+    shown ? h(Character, { character: robot, kit: robotKit, name: 'Бип', className: 'hero-box', onCore: onHero, label: heroProps.label, onActivate: heroProps.onActivate }) : null,
     h('p', { id: 'hero-state' }, hero ? `${hero.name.display}|${hero.pose.shown}|${hero.status}` : HERO_PLACEHOLDER),
     h('button', { id: 'home-A', type: 'button' }, 'Дом A'),
     h('button', { id: 'home-B', type: 'button' }, 'Дом B'),

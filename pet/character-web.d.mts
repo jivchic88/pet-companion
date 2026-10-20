@@ -33,6 +33,12 @@ export interface CharacterView {
   readonly mounted: boolean;
   /** Экземпляр персонажа (`null` при отказе; после отключения — тот же отключённый). */
   readonly core: Character | null;
+  /**
+   * Подпись и действие по последним значениям продукта без пересоздания персонажа: `label` — строка, функция от снимка или
+   * `null` (подпись по умолчанию); `onActivate` — функция (рисунок становится кнопкой) или `null` (снова рисунок с ролью img).
+   * Фокус, если был на рисунке, остаётся. После отключения — ничего.
+   */
+  update(changes: { label?: string | ((state: CharacterSnapshot) => string) | null; onActivate?: ((view: CharacterView) => void) | null }): void;
   /** Отключить экземпляр и вид (элемент, слушатели, таймеры, наблюдатели); повторно — ничего. */
   destroy(): void;
 }

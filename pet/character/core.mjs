@@ -411,7 +411,11 @@ function instance({ model, name: initialName, clock, random, scheduler, log }) {
       const problem = flagsOf(flags, ['focus', ...QUIET_REASONS], 'Контекст');
       if (problem) return argument(problem);
       if ('focus' in flags) focus = flags.focus;
-      for (const key of QUIET_REASONS) if (key in flags) quietOn(key, flags[key]);
+      // Пакет причин — одно итоговое состояние (по независимой проверке): сначала все включения, затем все снятия. Так
+      // отложенная реакция извлекается и объявляется один раз — только когда снята последняя причина, — а не на промежуточном
+      // шаге «timer снят, typing ещё не включён».
+      for (const key of QUIET_REASONS) if (flags[key] === true) quietOn(key, true);
+      for (const key of QUIET_REASONS) if (flags[key] === false) quietOn(key, false);
       return { ok: true };
     });
 

@@ -12,7 +12,8 @@ export { usePetState as useCharacterState } from './hooks/state.mjs';
 
 // Свойства самой обёртки; остальное — настройки mountCharacterIn как есть (неизвестное — отказ подключения с причиной).
 const OWN = ['onCore', 'className'];
-// Функции продукта читаются через ref при каждом вызове: новая функция при новом рендере персонажа не пересоздаёт.
+// Живые свойства: подпись (строка или функция) и действие читаются через ref при каждом вызове и передаются виду заново
+// при смене (view.update) — новая функция, новая строка, появление или снятие действия персонажа не пересоздают.
 const LIVE = ['onActivate', 'label'];
 
 // <Character character kit name label onActivate watchTyping className onCore />: настройки подключения — character, kit,
@@ -24,25 +25,31 @@ export function Character(props) {
   useInsertionEffect(() => {
     latest.current = props;
   });
-  const { character, kit, watchTyping, name } = props;
+  const { character, kit, watchTyping, name, label, onActivate } = props;
   const [core, keepCore] = useState(null);
+  const held = useRef(null);
+  // Обёртки живых свойств — одни на всё время жизни компонента: подпись — последняя строка или результат последней функции,
+  // действие — последняя функция.
+  const wraps = useRef(null);
+  if (!wraps.current)
+    wraps.current = {
+      label: (state) => {
+        const value = latest.current.label;
+        return typeof value === 'function' ? value(state) : value;
+      },
+      onActivate: (view) => {
+        const fn = latest.current.onActivate;
+        return typeof fn === 'function' ? fn(view) : undefined;
+      },
+    };
+  const liveOptions = () => ({ label: latest.current.label == null ? undefined : wraps.current.label, onActivate: typeof latest.current.onActivate === 'function' ? wraps.current.onActivate : null });
 
   useEffect(() => {
     const own = latest.current;
     const options = {};
-    for (const key of Object.keys(own)) if (!OWN.includes(key)) options[key] = own[key];
+    for (const key of Object.keys(own)) if (!OWN.includes(key) && !LIVE.includes(key)) options[key] = own[key];
     for (const [key, value] of Object.entries({ character, kit, watchTyping })) if (value !== undefined) options[key] = value;
-    for (const key of LIVE) {
-      const value = own[key];
-      if (value == null) continue;
-      options[key] =
-        typeof value === 'function'
-          ? (...args) => {
-              const fn = latest.current[key];
-              return typeof fn === 'function' ? fn(...args) : undefined;
-            }
-          : value;
-    }
+    for (const [key, value] of Object.entries(liveOptions())) if (value !== undefined) options[key] = value;
     const report = (next) => {
       try {
         latest.current.onCore?.(next);
@@ -51,6 +58,7 @@ export function Character(props) {
       }
     };
     const view = mountCharacterIn(box.current, options);
+    held.current = view.mounted ? view : null;
     let told = null;
     let off = null;
     if (view.mounted) {
@@ -72,11 +80,18 @@ export function Character(props) {
       told = null;
       off?.();
       off = null;
+      held.current = null;
       keepCore(null);
       if (was) report(null);
       view.destroy();
     };
   }, [character, kit, watchTyping]);
+
+  // Смена подписи (строка, функция, снятие) или появление/снятие действия — живому виду, без пересоздания.
+  const hasActivate = typeof onActivate === 'function';
+  useEffect(() => {
+    held.current?.update(liveOptions());
+  }, [label, hasActivate]);
 
   // Имя — командой живого экземпляра, без пересоздания (начальное имя уходит в подключение).
   useEffect(() => {

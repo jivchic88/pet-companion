@@ -10,7 +10,7 @@
 // art({ id }) — строка <svg …>: позу, одиночное движение и режим движения показывают атрибуты data-pose, data-micro,
 // data-motion, которые ставит вид; styles? — абсолютные адреса CSS набора }. Проверка — до любых действий.
 
-import { esc, fragment, safe, TEXT_INPUT } from '../web/parts.mjs';
+import { fragment, safe, TEXT_INPUT } from '../web/parts.mjs';
 import { createCharacter } from './core.mjs';
 import { defineCharacter } from './define.mjs';
 
@@ -85,6 +85,12 @@ export function mountCharacterIn(container, options) {
     get core() {
       return core;
     },
+    // Подпись и действие — по последним значениям продукта без пересоздания персонажа: строка ↔ функция подписи, появление
+    // или снятие onActivate (рисунок становится кнопкой или снова рисунком; фокус, если был на нём, остаётся).
+    update(changes) {
+      if (!alive) return;
+      safe(() => apply(changes))();
+    },
     destroy() {
       if (!alive) return;
       alive = false;
@@ -107,6 +113,8 @@ export function mountCharacterIn(container, options) {
   if (why) return refuse(why);
   const o = options;
   const kit = o.kit;
+  // Живые настройки продукта (update): подпись и действие.
+  const own = { label: o.label, onActivate: typeof o.onActivate === 'function' ? o.onActivate : null };
 
   // ---------- состояние вида (на экземпляр) ----------
   const abort = new AbortController();
@@ -135,9 +143,51 @@ export function mountCharacterIn(container, options) {
   }
 
   const labelOf = (state) => {
-    const own = typeof o.label === 'function' ? safe(() => o.label(state))() : o.label;
-    return typeof own === 'string' && own.trim() ? own : state.name.value ? `${state.name.display} — ${state.character.title}` : state.character.title;
+    const text = typeof own.label === 'function' ? safe(() => own.label(state))() : own.label;
+    return typeof text === 'string' && text.trim() ? text : state.name.value ? `${state.name.display} — ${state.character.title}` : state.character.title;
   };
+
+  // Рисунок — кнопка (есть действие) или рисунок с ролью img; SVG набора переносится из прежнего элемента.
+  function buildFigure(interactive, state, art = null) {
+    const element = document.createElement(interactive ? 'button' : 'div');
+    element.className = 'pet-character-figure';
+    if (interactive) element.type = 'button';
+    else element.setAttribute('role', 'img');
+    element.setAttribute('aria-label', labelOf(state));
+    if (art) element.append(art);
+    if (interactive)
+      on(
+        element,
+        'click',
+        safe(() => {
+          core.activity();
+          own.onActivate?.(view);
+        }),
+      );
+    return element;
+  }
+
+  function apply(changes) {
+    if (!isRecord(changes)) throw new Error('update — объект { label?, onActivate? }');
+    for (const key of Object.keys(changes)) if (key !== 'label' && key !== 'onActivate') throw new Error(`update: неизвестное поле ${key}`);
+    if ('label' in changes) {
+      if (changes.label != null && typeof changes.label !== 'string' && typeof changes.label !== 'function') throw new Error('label — строка или функция от снимка');
+      own.label = changes.label ?? undefined;
+    }
+    if ('onActivate' in changes) {
+      if (changes.onActivate != null && typeof changes.onActivate !== 'function') throw new Error('onActivate — функция или null');
+      own.onActivate = changes.onActivate ?? null;
+    }
+    const interactive = own.onActivate !== null;
+    if (figure && (figure.tagName === 'BUTTON') !== interactive) {
+      const had = shadow.activeElement === figure;
+      const next = buildFigure(interactive, core.getState(), figure.querySelector('svg'));
+      figure.replaceWith(next);
+      figure = next;
+      if (had) figure.focus({ preventScroll: true });
+    }
+    render(core.getState());
+  }
 
   // Персонаж на виду: стили загружены, у своего элемента есть размеры, вкладка видна.
   const showing = () => ready && Boolean(host?.isConnected) && host.clientWidth > 0 && host.clientHeight > 0 && !document.hidden;
@@ -167,11 +217,21 @@ export function mountCharacterIn(container, options) {
     say.hidden = !text;
   }
 
+  // Объявление доставляется, только если к моменту доставки персонаж не в тишине и на виду; вход в тишину или фон снимает
+  // ждущее объявление (по независимой проверке: реакция, остановленная тишиной, не должна прозвучать).
+  const hushed = (state) => state.context.quiet.length > 0 || !state.visible;
   function announce(text) {
     live.textContent = '';
     later('announce', ANNOUNCE_MS, () => {
+      if (hushed(core.getState())) return;
       live.textContent = text;
     });
+  }
+
+  function dropAnnounce() {
+    clearTimeout(timers.announce);
+    delete timers.announce;
+    live.textContent = '';
   }
 
   function showMicro(kind, ms) {
@@ -190,6 +250,7 @@ export function mountCharacterIn(container, options) {
       return;
     }
     render(snapshot);
+    if (hushed(snapshot)) dropAnnounce();
     for (const effect of effects) {
       if (effect.type === 'announce') announce(effect.text);
       else if (effect.type === 'micro') showMicro(effect.kind, effect.ms);
@@ -261,32 +322,20 @@ export function mountCharacterIn(container, options) {
     box = document.createElement('div');
     box.className = 'pet-character';
     box.hidden = true;
-    const interactive = typeof o.onActivate === 'function';
     const state = core.getState();
-    box.innerHTML = `${interactive ? `<button class="pet-character-figure" type="button" aria-label="${esc(labelOf(state))}"></button>` : `<div class="pet-character-figure" role="img" aria-label="${esc(labelOf(state))}"></div>`}
-      <p class="pet-character-say" aria-hidden="true" hidden><span class="pet-character-bubble"></span></p>
+    box.innerHTML = `<p class="pet-character-say" aria-hidden="true" hidden><span class="pet-character-bubble"></span></p>
       <div class="pet-character-live" aria-live="polite"></div>`;
-    figure = box.querySelector('.pet-character-figure');
     say = box.querySelector('.pet-character-say');
     live = box.querySelector('.pet-character-live');
-    figure.append(fragment(kit.art({ id: `pet-character-${Math.floor(Math.random() * 1e9).toString(36)}` })));
-    const art = figure.querySelector('svg');
-    if (art) {
-      art.setAttribute('aria-hidden', 'true');
-      art.setAttribute('focusable', 'false');
-      art.dataset.pose = state.pose.shown;
+    const drawn = fragment(kit.art({ id: `pet-character-${Math.floor(Math.random() * 1e9).toString(36)}` })).querySelector('svg');
+    if (drawn) {
+      drawn.setAttribute('aria-hidden', 'true');
+      drawn.setAttribute('focusable', 'false');
+      drawn.dataset.pose = state.pose.shown;
     }
+    figure = buildFigure(own.onActivate !== null, state, drawn);
+    box.prepend(figure);
     shadow.append(box);
-    if (interactive) {
-      on(
-        figure,
-        'click',
-        safe(() => {
-          core.activity();
-          o.onActivate(view);
-        }),
-      );
-    }
 
     // Страница: действия пользователя (пробуждение), ввод в поля (тишина), видимость вкладки, уменьшение движения.
     for (const type of ACTIVITY_EVENTS) on(document, type, () => core.activity(), { passive: true, capture: true });

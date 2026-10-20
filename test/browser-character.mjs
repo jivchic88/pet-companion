@@ -246,6 +246,67 @@ async function desktop(browser, server, check, open, layout) {
     });
     check(`${label}: неполный набор, неизвестная настройка и описание с полем room — отказ до действий (mounted false, core null, контейнер пуст, одно console.error на отказ)`, refusals.partial === false && refusals.unknown === false && refusals.noRoomFormat === false && refusals.core.every((core) => core === null) && refusals.children === 0 && refusals.errors.length === 3 && refusals.errors.every((text) => text.startsWith('Персонаж не подключён:')) && refusals.errors[0].includes('не нарисовано (poses)') && refusals.errors[1].includes('zone') && refusals.errors[2].includes('room'), JSON.stringify(refusals));
 
+    // ---- По независимой проверке Codex: объявление не переживает тишину и фон; подпись и действие — по последним значениям ----
+    const hushed = await page.evaluate(() => {
+      const core = window.demoCharacters.b.core;
+      core.react('done', { key: 'announce-quiet' });
+      core.setContext({ dialog: true });
+      return core.getState().context.quiet;
+    });
+    await page.clock.runFor(200);
+    const quietLive = await info(page);
+    await page.evaluate(() => window.demoCharacters.b.core.setContext({ dialog: false }));
+    await page.clock.runFor(1600);
+    await page.evaluate(() => window.demoCharacters.b.core.react('done', { key: 'announce-after' }));
+    await page.clock.runFor(200);
+    const afterLive = await info(page);
+    await page.evaluate(() => {
+      window.demoCharacters.b.core.react('done', { key: 'announce-bg' });
+      window.demoCharacters.b.core.setVisible(false);
+    });
+    await page.clock.runFor(200);
+    const bgLive = await info(page);
+    await page.evaluate(() => window.demoCharacters.b.core.setVisible(true));
+    check(`${label}: реакция, остановленная тишиной сразу после начала, не объявляется (aria-live пуст); после снятия тишины новая реакция объявляется; уход в фон тоже снимает ждущее объявление`, hushed.join() === 'dialog' && quietLive.b.live === '' && quietLive.b.bubble === '' && afterLive.b.live !== '' && bgLive.b.live === '', JSON.stringify({ hushed, quietLive: quietLive.b, afterLive: afterLive.b, bgLive: bgLive.b }));
+    await page.clock.runFor(2500);
+    const updated = await page.evaluate(() => {
+      const view = window.demoCharacters.b;
+      const host = document.querySelector('#robot-b [data-pet-character]');
+      const figure = () => host.shadowRoot.querySelector('.pet-character-figure');
+      const out = {};
+      view.update({ label: 'Второй робот' });
+      out.string = [figure().tagName, figure().getAttribute('aria-label'), figure().getAttribute('role')];
+      view.update({ label: (state) => `${state.name.display}: нажми` });
+      out.fn = figure().getAttribute('aria-label');
+      view.core.setName('Зум-2');
+      out.renamed = figure().getAttribute('aria-label');
+      view.update({ label: null });
+      out.reset = figure().getAttribute('aria-label');
+      window.qaActivated = 0;
+      view.update({ onActivate: () => (window.qaActivated += 1) });
+      const button = figure();
+      button.focus();
+      out.button = [button.tagName, button.getAttribute('type'), button.getAttribute('role'), host.shadowRoot.activeElement === button, Boolean(button.querySelector('svg'))];
+      button.click();
+      out.clicked = window.qaActivated;
+      view.update({ onActivate: () => (window.qaActivated += 10) });
+      figure().click();
+      out.replaced = [figure() === button, window.qaActivated];
+      view.update({ onActivate: null });
+      out.plain = [figure().tagName, figure().getAttribute('role'), host.shadowRoot.activeElement === figure(), Boolean(figure().querySelector('svg')), host.shadowRoot.querySelectorAll('.pet-character-figure').length, host.shadowRoot.querySelectorAll('svg').length];
+      figure().click();
+      out.plainClick = window.qaActivated;
+      return out;
+    });
+    check(`${label}: view.update — строка подписи, функция (и после setName), сброс к умолчанию; появление onActivate — рисунок стал кнопкой с тем же SVG и фокусом, нажатие вызывает действие; замена функции — тот же элемент; снятие — снова рисунок с ролью img (не фокусируемый), один рисунок, нажатие ничего не вызывает`, updated.string.join('|') === 'DIV|Второй робот|img' && updated.fn === 'Боб: нажми' && updated.renamed === 'Зум-2: нажми' && updated.reset === 'Зум-2 — Робот' && updated.button.join('|') === 'BUTTON|button||true|true' && updated.clicked === 1 && updated.replaced.join('|') === 'true|11' && updated.plain.join('|') === 'DIV|img|false|true|1|1' && updated.plainClick === 11, JSON.stringify(updated));
+    await page.evaluate(() => window.demoCharacters.b.update({ onActivate: () => window.demoCharacters.b.core.react('wave', { key: `kb-${Date.now()}` }) }));
+    await page.evaluate(() => document.querySelector('#robot-b [data-pet-character]').shadowRoot.querySelector('button').focus());
+    await page.keyboard.press('Enter');
+    await page.clock.runFor(100);
+    const kb = await info(page);
+    check(`${label}: кнопка, появившаяся через update, работает с клавиатуры (Enter — реакция wave)`, kb.b.pose === 'wave', JSON.stringify(kb.b));
+    await page.clock.runFor(1500);
+
     const stored = await page.evaluate(async () => ({ keys: Object.keys(localStorage), dbs: (await indexedDB.databases()).map((db) => db.name), rejections: window.qaRejections }));
     const errors = page.qaErrors.filter((text) => !text.startsWith('Персонаж не подключён:'));
     check(`${label}: ни localStorage, ни IndexedDB; внешних запросов, ошибок страницы и необработанных отклонений нет`, stored.keys.length === 0 && stored.dbs.length === 0 && stored.rejections.length === 0 && outside.length === 0 && errors.length === 0, JSON.stringify({ stored, outside, errors }));

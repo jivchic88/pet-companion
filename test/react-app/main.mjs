@@ -28,6 +28,11 @@ window.qa = {
   show: (on) => control.setShown(on),
   core: (n) => qa.cores[n - 1] ?? null,
   hero: () => qa.hero,
+  heroProps: (own) => control.setHeroProps(own),
+  heroFigure: () => {
+    const figure = root.querySelector('.hero-box > [data-pet-character]')?.shadowRoot?.querySelector('.pet-character-figure');
+    return figure ? { tag: figure.tagName, role: figure.getAttribute('role'), label: figure.getAttribute('aria-label'), svg: figure.querySelectorAll('svg').length } : null;
+  },
   // Сводка журнала простыми данными.
   state: () => ({
     log: qa.log.map((entry) => ({ ...entry })),

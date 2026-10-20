@@ -390,3 +390,52 @@ test('два экземпляра независимы: реакции, тиши
   assert.equal(c.hero.react('done').ok, true);
   assert.equal(c.hero.status, 'destroyed');
 });
+
+// По независимой проверке Codex (кандидат 0.3.0): пакет причин тишины — одно итоговое состояние.
+test('пакет причин тишины (по проверке Codex): смена одной причины на другую одной командой не извлекает отложенную реакцию и не объявляет её; реакция ждёт снятия последней причины; все перестановки независимых причин; контроли — одна причина и две команды', () => {
+  const announced = (seen) => seen.filter((line) => line.includes('announce')).length;
+  // Контроль: одна причина снята — реакция играет и объявляется один раз.
+  const one = make();
+  one.hero.setContext({ timer: true });
+  one.hero.react('done', { key: 'event' });
+  one.seen.length = 0;
+  one.hero.setContext({ timer: false });
+  assert.deepEqual([one.hero.getState().pose.shown, announced(one.seen)], ['happy', 1]);
+  // Контроль: сначала включить замену, затем снять прежнюю отдельной командой.
+  const two = make();
+  two.hero.setContext({ timer: true });
+  two.hero.react('done', { key: 'event' });
+  two.seen.length = 0;
+  two.hero.setContext({ typing: true });
+  two.hero.setContext({ timer: false });
+  assert.deepEqual([two.hero.getState().pose.shown, announced(two.seen)], ['attentive', 0]);
+  two.hero.setContext({ typing: false });
+  assert.deepEqual([two.hero.getState().pose.shown, announced(two.seen)], ['happy', 1]);
+  // Пакет: снять одну и включить другую одной командой — тихо, без объявления, реакция не потеряна.
+  for (const [from, to] of [
+    ['timer', 'typing'],
+    ['typing', 'dialog'],
+    ['dialog', 'dictation'],
+    ['dictation', 'timer'],
+  ]) {
+    const { hero, seen } = make();
+    hero.setContext({ [from]: true });
+    hero.react('done', { key: 'event' });
+    seen.length = 0;
+    // Порядок ключей в объекте не важен: и «снять, включить», и «включить, снять».
+    hero.setContext(from < to ? { [from]: false, [to]: true } : { [to]: true, [from]: false });
+    assert.deepEqual(hero.getState().context.quiet, [to], `${from} → ${to}`);
+    assert.deepEqual([hero.getState().pose.shown, hero.getState().phrase, announced(seen)], ['attentive', null, 0], `${from} → ${to}: тихо`);
+    hero.setContext({ [to]: false });
+    assert.deepEqual([hero.getState().pose.shown, announced(seen)], ['happy', 1], `${from} → ${to}: реакция после снятия последней`);
+  }
+  // Пакет из трёх: две сняты, одна включена — тихо; снять все три сразу — реакция один раз.
+  const three = make();
+  three.hero.setContext({ timer: true, dialog: true });
+  three.hero.react('done', { key: 'event' });
+  three.seen.length = 0;
+  three.hero.setContext({ timer: false, dialog: false, typing: true });
+  assert.deepEqual([three.hero.getState().context.quiet, announced(three.seen)], [['typing'], 0]);
+  three.hero.setContext({ typing: false, timer: false, dialog: false });
+  assert.deepEqual([three.hero.getState().pose.shown, announced(three.seen)], ['happy', 1]);
+});
