@@ -360,7 +360,7 @@ function Screen() {
   const running = Boolean(core && state);
   // Кнопки — данные: та же функция у кнопки и у моста разработки.
   // PL10.2.4: модель поведения — штатная «спокойная» или «живая» примера расширения (core.setBehavior).
-  const models = BEHAVIORS.map((one) => ({ id: `model-${one.id}`, title: one.title, selected: state?.behavior === one.id, disabled: !running, onPress: command(`Модель «${one.title}»`, (c) => c.setBehavior(one.id)) }));
+  const models = BEHAVIORS.map((one) => ({ id: `model-${one.id}`, title: one.title, selected: state?.behavior.shown === one.id, disabled: !running, onPress: command(`Модель «${one.title}»`, (c) => c.setBehavior(one.id)) }));
   const kinds = PETS.map((one) => ({ id: `kind-${one.id}`, title: one.title, selected: state?.pet.shown === one.id, disabled: !running, onPress: command(`Питомец «${one.title}»`, (c) => c.setPet(one.id)) }));
   const coats = def.coats.map((coat) => ({ id: `coat-${coat.id}`, title: coat.title, selected: state?.look.coat === coat.id, disabled: !running, onPress: command(`Облик «${coat.title}»`, (c) => c.setAppearance({ coat: coat.id })) }));
   const accessories = def.accessories.map((item) => ({

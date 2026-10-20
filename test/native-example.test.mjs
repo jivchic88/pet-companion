@@ -326,6 +326,11 @@ test('настройки (PL10.1): выбор собаки, облик, плат
   assert.deepEqual(core.getState().context.quiet, []);
   assert.equal(core.getState().name.display.length, 24, 'ядро ограничило имя');
   assert.equal(S.node('pet-touch').accessibilityLabel, `${core.getState().name.display}, собака`);
+  // Модель поведения (PL10.2.4): выбор — командой ядра, кнопка выбранной модели отмечена (снимок — behavior.shown).
+  assert.deepEqual([S.node('model-calm').accessibilityState.selected, S.node('model-example.lively').accessibilityState.selected], [true, false]);
+  await S.press('model-example.lively');
+  await act();
+  assert.deepEqual([core.getState().behavior.shown, S.node('model-calm').accessibilityState.selected, S.node('model-example.lively').accessibilityState.selected], ['example.lively', false, true]);
   await S.unmount();
 });
 
