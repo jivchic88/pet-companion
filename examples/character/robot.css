@@ -1,0 +1,92 @@
+/* Пример минимального режима (вне пакета): стили набора робота — позы по data-pose, одиночные движения по data-micro,
+   дыхание только при обычном движении (data-motion="normal"). Подключает вид в своё теневое дерево (styles набора). */
+
+.robot-art {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.robot-mouth {
+  display: none;
+}
+
+.robot-art[data-pose='calm'] .robot-mouth-line,
+.robot-art[data-pose='attentive'] .robot-mouth-line,
+.robot-art[data-pose='rest'] .robot-mouth-line,
+.robot-art[data-pose='wave'] .robot-mouth-smile,
+.robot-art[data-pose='happy'] .robot-mouth-smile,
+.robot-art[data-pose='think'] .robot-mouth-o {
+  display: block;
+}
+
+/* Внимание: зрачки крупнее; дремота: глаза полузакрыты, лампа погашена. */
+.robot-art[data-pose='attentive'] .robot-pupil {
+  r: 5;
+}
+
+.robot-art[data-pose='rest'] .robot-eye {
+  transform: scaleY(0.25);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.robot-art[data-pose='rest'] .robot-pupil,
+.robot-art[data-pose='rest'] .robot-light {
+  opacity: 0.25;
+}
+
+/* Радость: антенна светится; размышление: зрачки вверх; приветствие: правая рука поднята. */
+.robot-art[data-pose='happy'] .robot-light {
+  fill: #f6d77f;
+  r: 8;
+}
+
+.robot-art[data-pose='think'] .robot-pupil {
+  transform: translateY(-3px);
+}
+
+.robot-art[data-pose='wave'] .robot-arm-r {
+  transform: rotate(-110deg);
+  transform-box: fill-box;
+  transform-origin: 50% 15%;
+}
+
+/* Одиночные движения покоя: моргание, антенна, взгляд в сторону. */
+.robot-art[data-micro='blink'] .robot-eye {
+  transform: scaleY(0.1);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.robot-art[data-micro='antenna'] .robot-light {
+  fill: #ff9f43;
+}
+
+.robot-art[data-micro='look'] .robot-pupil {
+  transform: translateX(3px);
+}
+
+/* Дыхание — только при обычном движении; переходы поз — плавные, кроме режима без анимации. */
+.robot-art[data-motion='normal'] .robot-all {
+  animation: robot-breathe 4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.robot-art:not([data-motion='none']) .robot-arm-r,
+.robot-art:not([data-motion='none']) .robot-eye,
+.robot-art:not([data-motion='none']) .robot-pupil,
+.robot-art:not([data-motion='none']) .robot-light {
+  transition: transform 0.25s ease, opacity 0.25s ease, fill 0.25s ease;
+}
+
+@keyframes robot-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}

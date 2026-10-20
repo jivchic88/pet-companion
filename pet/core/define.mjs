@@ -62,6 +62,8 @@ const LAST_STAGE = STAGES.length - 1;
 
 // ID: штатные без точки (питомцы — совместимость 0.1.4, модель — calm); сторонние — с точкой.
 const DOTTED = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+// Сторонний ID с точкой (без штатных): общий для питомцев, моделей и персонажей (character/define.mjs).
+export const isDottedId = (value) => typeof value === 'string' && value.length <= 80 && DOTTED.test(value);
 export const BUILTIN_BEHAVIORS = Object.freeze(['calm']);
 const LOCAL = /^[a-z0-9-]{1,40}$/;
 const GROUP = /^[a-z][a-zA-Z0-9]{0,39}$/;
@@ -80,8 +82,8 @@ export function sceneRef(value) {
 // ---------- путь и отказ ----------
 
 const NAME = /^[A-Za-z_$][\w$]*$/;
-const join = (path, key) => (typeof key === 'number' ? `${path}[${key}]` : NAME.test(key) ? (path ? `${path}.${key}` : key) : `${path}[${JSON.stringify(key)}]`);
-const invalid = (path, message) => new PetError('definition-invalid', `Определение${path ? ` ${path}` : ''}: ${message}.`, { path });
+export const join = (path, key) => (typeof key === 'number' ? `${path}[${key}]` : NAME.test(key) ? (path ? `${path}.${key}` : key) : `${path}[${JSON.stringify(key)}]`);
+export const invalid = (path, message) => new PetError('definition-invalid', `Определение${path ? ` ${path}` : ''}: ${message}.`, { path });
 
 // ---------- копия: только данные ----------
 
@@ -89,7 +91,7 @@ const invalid = (path, message) => new PetError('definition-invalid', `Опре�
 // перечисляемые данные (аксессор, неперечисляемое, символ, пропуск массива, лишнее свойство массива — отказ): проверка
 // идёт по копии, поэтому геттер и последующая правка исходника её не обходят. Ключ __proto__ — обычное собственное поле
 // копии (его затем отклонит проверка как неизвестное).
-function copyData(value, path, depth = 0, seen = new Set()) {
+export function copyData(value, path, depth = 0, seen = new Set()) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return value;
   if (typeof value !== 'object') throw invalid(path, `не данные формата 1 (${value === undefined ? 'undefined' : typeof value})`);
   if (depth > 12) throw invalid(path, 'слишком глубокая вложенность');
@@ -129,7 +131,7 @@ function copyData(value, path, depth = 0, seen = new Set()) {
   }
 }
 
-function deepFreeze(value) {
+export function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const item of Object.values(value)) deepFreeze(item);
     Object.freeze(value);
@@ -139,37 +141,37 @@ function deepFreeze(value) {
 
 // ---------- проверки полей ----------
 
-const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+export const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
-function shape(value, path, required, optional = []) {
+export function shape(value, path, required, optional = []) {
   if (!isObject(value)) throw invalid(path, 'ожидается объект');
   for (const key of Object.keys(value)) if (!required.includes(key) && !optional.includes(key)) throw invalid(join(path, key), 'неизвестное поле формата 1');
   for (const key of required) if (!Object.hasOwn(value, key)) throw invalid(join(path, key), 'обязательное поле отсутствует');
 }
 
-function list(value, path, min, max) {
+export function list(value, path, min, max) {
   if (!Array.isArray(value)) throw invalid(path, 'ожидается массив');
   if (value.length < min || value.length > max) throw invalid(path, `ожидается от ${min} до ${max} элементов`);
 }
 
-function text(value, path, max = 60) {
+export function text(value, path, max = 60) {
   if (typeof value !== 'string' || !value.trim() || value.length > max || CONTROL.test(value)) throw invalid(path, `строка 1…${max} знаков без управляющих символов`);
 }
 
-function number(value, path, min, max, integer = false) {
+export function number(value, path, min, max, integer = false) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) throw invalid(path, `${integer ? 'целое ' : ''}число от ${min} до ${max}`);
 }
 
-function bool(value, path) {
+export function bool(value, path) {
   if (typeof value !== 'boolean') throw invalid(path, 'true или false');
 }
 
-function local(value, path) {
+export function local(value, path) {
   if (!isLocalId(value)) throw invalid(path, 'ID — строчные латинские буквы, цифры и дефис (1…40)');
 }
 
-function unique(items, path, key = (item) => item) {
+export function unique(items, path, key = (item) => item) {
   const seen = new Set();
   items.forEach((item, i) => {
     const id = key(item);

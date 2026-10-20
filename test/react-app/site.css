@@ -8,3 +8,7 @@ body {
 .pet-box {
   width: min(100%, 300px);
 }
+
+.hero-box {
+  width: min(100%, 160px);
+}

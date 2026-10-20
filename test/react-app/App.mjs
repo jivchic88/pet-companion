@@ -6,8 +6,12 @@
 // смена свойств и размонтирование без перезагрузки.
 import { createElement as h, useEffect, useState } from 'react';
 import { PetCompanion, usePetState } from 'pet-companion/react';
+import { Character, useCharacterState } from 'pet-companion/character-react';
+import { robot, robotKit } from './hero.mjs';
 
 export const PLACEHOLDER = 'Питомец появится после загрузки страницы.';
+// U01: персонаж минимального режима на той же странице — свой экземпляр, свой журнал onCore.
+export const HERO_PLACEHOLDER = 'Персонаж появится после загрузки страницы.';
 
 // Журнал страницы. observe(next) — снимок обстановки в момент onCore (только клиент: читает DOM).
 export function createQa(observe = () => ({})) {
@@ -59,7 +63,7 @@ export function createQa(observe = () => ({})) {
     }
     return own;
   };
-  return { idOf, cores, log, subs, counts, counted, observe, last: null };
+  return { idOf, cores, log, subs, counts, counted, observe, last: null, heroLog: [], hero: null };
 }
 
 // Свойства PetCompanion: tag — метка набора функций (новые функции каждого набора — новые ссылки).
@@ -83,6 +87,13 @@ export function App({ qa, initial }) {
   const [held, setHeld] = useState(null);
   const pet = usePetState(qa.counted(core));
   const kept = usePetState(held);
+  const [heroCore, setHeroCore] = useState(null);
+  const hero = useCharacterState(heroCore);
+  const onHero = (next) => {
+    qa.heroLog.push(next ? 'core' : null);
+    if (next) qa.hero = next;
+    setHeroCore(next);
+  };
   // Пульт проверок — только на клиенте.
   useEffect(() => {
     qa.connect?.({ setProps, setShown });
@@ -102,6 +113,8 @@ export function App({ qa, initial }) {
     shown ? h(PetCompanion, { ...own, ...extra, className: 'pet-box', onCore }) : null,
     h('p', { id: 'pet-state' }, pet ? `${pet.name.display}|${pet.progress?.marks ?? '-'}|${pet.status}` : PLACEHOLDER),
     h('p', { id: 'pet-held' }, kept ? `${kept.name.display}|${kept.status}` : PLACEHOLDER),
+    shown ? h(Character, { character: robot, kit: robotKit, name: 'Бип', className: 'hero-box', onCore: onHero }) : null,
+    h('p', { id: 'hero-state' }, hero ? `${hero.name.display}|${hero.pose.shown}|${hero.status}` : HERO_PLACEHOLDER),
     h('button', { id: 'home-A', type: 'button' }, 'Дом A'),
     h('button', { id: 'home-B', type: 'button' }, 'Дом B'),
     h('button', { id: 'home-C', type: 'button' }, 'Дом C'),

@@ -50,6 +50,18 @@
       "types": "./pet/react.d.mts",
       "default": "./pet/react.mjs"
     },
+    "./character": {
+      "types": "./pet/character.d.mts",
+      "default": "./pet/character.mjs"
+    },
+    "./character-web": {
+      "types": "./pet/character-web.d.mts",
+      "default": "./pet/character-web.mjs"
+    },
+    "./character-react": {
+      "types": "./pet/character-react.d.mts",
+      "default": "./pet/character-react.mjs"
+    },
     "./native": {
       "types": "./pet/native.d.mts",
       "default": "./pet/native.mjs"

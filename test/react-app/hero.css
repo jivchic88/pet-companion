@@ -1,0 +1,22 @@
+/* Только QA: стили набора персонажа страницы жизненного цикла. */
+.qa-robot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.qa-robot-body {
+  fill: #a7b0b8;
+}
+
+.qa-robot-eye {
+  fill: #2f3a44;
+}
+
+.qa-robot[data-pose='happy'] .qa-robot-body {
+  fill: #5cc5a7;
+}
+
+.qa-robot[data-pose='attentive'] .qa-robot-eye {
+  r: 8;
+}

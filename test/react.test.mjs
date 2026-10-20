@@ -134,3 +134,41 @@ test('неверные свойства на сервере — тот же пу
   assert.deepEqual(calls, { onCore: 0, progress: 0, home: 0, onOpenChange: 0, timers: 0, console: [] });
   assert.deepEqual(touched, []);
 });
+
+// U01: вход pet-companion/character-react на сервере — как /react: импорт без браузерных глобалов, поверхность — Character и
+// useCharacterState (тот же хук), пустой контейнер и заглушка продукта, без вызовов onCore, таймеров и консоли; хук для
+// живого экземпляра на сервере — null без подписки.
+test('pet-companion/character-react на сервере (U01): импорт без браузерных глобалов; Character — пустой <div> с классом, onCore не вызван; useCharacterState — null и для живого экземпляра', async () => {
+  touched.length = 0;
+  const Hero = await import('../pet/character-react.mjs');
+  const { createCharacter, defineCharacter } = await import('../pet/character.mjs');
+  assert.deepEqual(touched, [], 'импорт');
+  assert.deepEqual(Object.keys(Hero).sort(), ['Character', 'useCharacterState']);
+  assert.equal(Hero.useCharacterState, usePetState, 'тот же хук');
+  assert.match(await readFile(new URL('../pet/character-react.mjs', import.meta.url), 'utf8'), /^'use client';\n/);
+  const robot = defineCharacter({ format: 1, id: 'qa.robot', title: 'Робот', poses: ['calm'], reactions: {} });
+  const kit = { character: 'qa.robot', poses: ['calm'], art: () => '<svg></svg>' };
+  const live = createCharacter({ character: robot, scheduler: { later: () => () => {} } });
+  live.start();
+  let onCore = 0;
+  const subscribed = [];
+  const spy = { ...live, subscribe: (...args) => (subscribed.push(args), live.subscribe(...args)), getState: () => live.getState() };
+  function Page() {
+    const state = Hero.useCharacterState(spy);
+    return h('section', null, h(Hero.Character, { character: robot, kit, name: 'Бип', className: 'hero', onCore: () => (onCore += 1) }), h('p', null, state ? state.name.display : 'нет снимка'));
+  }
+  const { calls, stop } = watch();
+  let html;
+  let strict;
+  try {
+    html = renderToString(h(Page));
+    strict = renderToString(h(StrictMode, null, h(Page)));
+  } finally {
+    stop();
+  }
+  assert.equal(html, '<section><div class="hero"></div><p>нет снимка</p></section>');
+  assert.equal(strict, html);
+  assert.deepEqual([onCore, subscribed.length, calls.timers, calls.console], [0, 0, 0, []]);
+  assert.deepEqual(touched, []);
+  live.destroy();
+});

@@ -24,7 +24,7 @@ const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const stored = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
-const JS_ENTRIES = ['.', './core', './pets', './behaviors', './web', './react', './native', './native-sqlite'];
+const JS_ENTRIES = ['.', './core', './pets', './behaviors', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite'];
 
 // Копия пакета (package.json, manifest.json, pet/) во временной папке; правка files: { путь: текст | (текст) => текст }.
 async function copy(edits = {}) {
@@ -63,7 +63,7 @@ test('входы: стили страницы — только у mountPet (по
   const { entries } = stored;
   assert.deepEqual(entries['.'].styles, PAGE_STYLES['.'].map((style) => ({ ...style })));
   assert.deepEqual(entries['.'].styles.map((style) => [style.file, style.required]), [['pet/pet-base.css', false], ['pet/pet.css', true], ['pet/dog.css', true]]);
-  for (const entry of ['./core', './pets', './behaviors', './web', './react', './native', './native-sqlite']) assert.deepEqual(entries[entry].styles, [], entry);
+  for (const entry of ['./core', './pets', './behaviors', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite']) assert.deepEqual(entries[entry].styles, [], entry);
   for (const entry of ['./web', './react']) for (const file of ['pet/pet-base.css', 'pet/pet.css', 'pet/dog.css', 'pet/web/view.css']) assert.ok(entries[entry].files.includes(file), `${entry}: ${file}`);
   assert.deepEqual(entries['./react'].peers, { react: pkg.peerDependencies.react });
   // PL09: натив — только свой слой, общий хук и ядро; SQLite — только адаптер и ядро.

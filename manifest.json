@@ -240,6 +240,76 @@
         "pet/web/view.mjs"
       ]
     },
+    "./character": {
+      "module": "pet/character.mjs",
+      "styles": [],
+      "peers": {},
+      "files": [
+        "pet/character.mjs",
+        "pet/character/core.mjs",
+        "pet/character/define.mjs",
+        "pet/core/day.mjs",
+        "pet/core/define.mjs",
+        "pet/core/director.mjs",
+        "pet/core/errors.mjs",
+        "pet/core/formats/legacy.mjs",
+        "pet/core/pets.mjs",
+        "pet/core/phrases.mjs",
+        "pet/core/ports.mjs",
+        "pet/core/round.mjs",
+        "pet/core/stages.mjs",
+        "pet/core/version.mjs"
+      ]
+    },
+    "./character-web": {
+      "module": "pet/character-web.mjs",
+      "styles": [],
+      "peers": {},
+      "files": [
+        "pet/character-web.mjs",
+        "pet/character/core.mjs",
+        "pet/character/define.mjs",
+        "pet/character/view.css",
+        "pet/character/view.mjs",
+        "pet/core/day.mjs",
+        "pet/core/define.mjs",
+        "pet/core/director.mjs",
+        "pet/core/errors.mjs",
+        "pet/core/formats/legacy.mjs",
+        "pet/core/pets.mjs",
+        "pet/core/phrases.mjs",
+        "pet/core/ports.mjs",
+        "pet/core/round.mjs",
+        "pet/core/stages.mjs",
+        "pet/web/parts.mjs"
+      ]
+    },
+    "./character-react": {
+      "module": "pet/character-react.mjs",
+      "styles": [],
+      "peers": {
+        "react": "^18.3.1 || ^19.0.0"
+      },
+      "files": [
+        "pet/character-react.mjs",
+        "pet/character/core.mjs",
+        "pet/character/define.mjs",
+        "pet/character/view.css",
+        "pet/character/view.mjs",
+        "pet/core/day.mjs",
+        "pet/core/define.mjs",
+        "pet/core/director.mjs",
+        "pet/core/errors.mjs",
+        "pet/core/formats/legacy.mjs",
+        "pet/core/pets.mjs",
+        "pet/core/phrases.mjs",
+        "pet/core/ports.mjs",
+        "pet/core/round.mjs",
+        "pet/core/stages.mjs",
+        "pet/hooks/state.mjs",
+        "pet/web/parts.mjs"
+      ]
+    },
     "./native": {
       "module": "pet/native.mjs",
       "styles": [],

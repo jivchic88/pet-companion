@@ -1,0 +1,143 @@
+/* Персонаж в контейнере (вход pet-companion/character-web, mountCharacterIn; U01): стили своего теневого дерева. Подключается
+   видом сам (<link> в Shadow DOM вместе со стилями набора) — сайт этот файл не подключает. Наружу ничего не выходит.
+   Изоляция: свой элемент сбрасывает всё, что мог бы получить от правил сайта, кроме переменных темы --pet-*, которые
+   наследуются от контейнера (те же имена и умолчания, что у pet.css и web/view.css: светлые и тёмные). */
+
+:host {
+  all: initial !important;
+  display: block !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  --pet-v-surface: var(--pet-surface, #ffffff);
+  --pet-v-ink: var(--pet-ink, #1f2328);
+  --pet-v-ink-2: var(--pet-ink-2, #5b6168);
+  --pet-v-line: var(--pet-line, #e2dfd6);
+  --pet-v-accent: var(--pet-accent, #1f6f5c);
+  --pet-v-radius: var(--pet-radius, 14px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --pet-v-surface: var(--pet-surface, #191d1c);
+    --pet-v-ink: var(--pet-ink, #e7e5df);
+    --pet-v-ink-2: var(--pet-ink-2, #a2aaa6);
+    --pet-v-line: var(--pet-line, #2d3432);
+    --pet-v-accent: var(--pet-accent, #5cc5a7);
+  }
+}
+
+.pet-character {
+  --pet-surface: var(--pet-v-surface);
+  --pet-ink: var(--pet-v-ink);
+  --pet-ink-2: var(--pet-v-ink-2);
+  --pet-line: var(--pet-v-line);
+  --pet-accent: var(--pet-v-accent);
+  --pet-radius: var(--pet-v-radius);
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  color: var(--pet-ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.pet-character[hidden] {
+  display: none;
+}
+
+.pet-character *,
+.pet-character *::before,
+.pet-character *::after {
+  box-sizing: border-box;
+}
+
+/* Рисунок — по ширине контейнера; кнопка — без рамок сайта, с видимым фокусом с клавиатуры. */
+.pet-character-figure {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--pet-radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.pet-character-figure {
+  cursor: pointer;
+}
+
+button.pet-character-figure:focus-visible {
+  outline: 2px solid var(--pet-accent);
+  outline-offset: 2px;
+}
+
+.pet-character-figure > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Облако реплики — над рисунком, слева сверху; текст — только textContent. */
+.pet-character-say {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: min(70%, 260px);
+  margin: 0;
+  pointer-events: none;
+}
+
+.pet-character-say[hidden] {
+  display: none;
+}
+
+.pet-character-bubble {
+  display: inline-block;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--pet-line);
+  border-radius: var(--pet-radius);
+  background: var(--pet-surface);
+  color: var(--pet-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Область объявлений скринридеру — визуально скрыта. */
+.pet-character-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Вкладка в фоне или персонаж не на виду — анимации набора стоят. */
+:host([data-pet-paused]) svg,
+:host([data-pet-paused]) svg * {
+  animation-play-state: paused !important;
+}
+
+/* Без анимации (настройка или «уменьшить движение» системы): всё стоит. */
+:host([data-pet-motion='none']) .pet-character,
+:host([data-pet-motion='none']) .pet-character * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media print {
+  .pet-character {
+    display: none !important;
+  }
+}

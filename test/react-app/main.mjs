@@ -27,6 +27,7 @@ window.qa = {
   set: (options) => control.setProps(propsOf(qa, options)),
   show: (on) => control.setShown(on),
   core: (n) => qa.cores[n - 1] ?? null,
+  hero: () => qa.hero,
   // Сводка журнала простыми данными.
   state: () => ({
     log: qa.log.map((entry) => ({ ...entry })),
@@ -35,6 +36,10 @@ window.qa = {
     renders: qa.counts.renders,
     added,
     views: views(),
+    heroes: root.querySelectorAll('[data-pet-character]').length,
+    heroLog: [...qa.heroLog],
+    heroStatus: qa.hero?.status ?? null,
+    heroText: document.getElementById('hero-state').textContent,
     text: document.getElementById('pet-state').textContent,
     held: document.getElementById('pet-held').textContent,
     recoverable: [...recoverable],

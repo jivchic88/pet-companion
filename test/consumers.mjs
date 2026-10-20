@@ -39,6 +39,7 @@ const REACT = { 19: { react: pkg.devDependencies.react, types: pkg.devDependenci
 const CSP = "default-src 'self'; style-src 'self'";
 const START = new Date('2026-10-12T10:00:00');
 const PLACEHOLDER = 'Питомец появится после загрузки страницы.';
+const HERO_PLACEHOLDER = 'Персонаж появится после загрузки страницы.';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json' };
 const SIZES = [
   { label: '1280×900', options: { viewport: { width: 1280, height: 900 } } },
@@ -573,6 +574,15 @@ async function lifecycle(browser, dir, base, tag, dev) {
       const cores = dev ? [1, null, 2] : [1];
       check(`${name}: hydrateRoot разметки сервера — без восстанавливаемых ошибок и сообщений консоли; ${pairs} — onCore ${JSON.stringify(cores)}, null — до отключения (ядро running, вид в контейнере); живёт ровно один вид, стили применены`, html.includes(`<div class="pet-box"></div><p id="pet-state">${PLACEHOLDER}</p>`) && JSON.stringify(s.log.map((entry) => entry.core)) === JSON.stringify(cores) && (!dev || (s.log[1].prev === 'running' && s.log[1].views === 1)) && s.views === 1 && s.added === (dev ? 2 : 1) && JSON.stringify(s.statuses) === JSON.stringify(dev ? ['destroyed', 'running'] : ['running']) && view.ready && view.sheet === 'fixed' && s.recoverable.length === 0 && page.qaErrors.length === 0 && page.qaConsole.length === 0, JSON.stringify({ s, view, errors: page.qaErrors, console: page.qaConsole }));
       const live = dev ? 2 : 1;
+      // U01: персонаж минимального режима на той же странице — свой экземпляр без хранения; серверная разметка — заглушка.
+      await page.waitForFunction(() => document.querySelector('.hero-box > [data-pet-character]')?.shadowRoot?.querySelector('.pet-character')?.hidden === false && document.getElementById('hero-state').textContent === 'Бип|calm|started', null, { timeout: 5000 }).catch(() => {});
+      s = await state();
+      const heroBefore = { heroes: s.heroes, text: s.heroText, log: s.heroLog, status: s.heroStatus };
+      const reacted = await call(() => window.qa.hero().react('done', { key: 'qa-1' }));
+      await page.waitForFunction(() => document.getElementById('hero-state').textContent === 'Бип|happy|started', null, { timeout: 5000 }).catch(() => {});
+      s = await state();
+      check(`${name}: персонаж (U01) — серверная разметка с заглушкой, после эффекта один вид в контейнере (${pairs} — onCore ${JSON.stringify(dev ? ['core', null, 'core'] : ['core'])}), хук — «Бип|calm|started»; событие продукта — поза happy в хуке и в рисунке; ни ключей персонажа в localStorage`, html.includes(`<div class="hero-box"></div><p id="hero-state">${HERO_PLACEHOLDER}</p>`) && heroBefore.heroes === 1 && heroBefore.text === 'Бип|calm|started' && JSON.stringify(heroBefore.log) === JSON.stringify(dev ? ['core', null, 'core'] : ['core']) && heroBefore.status === 'started' && reacted.ok && reacted.played && s.heroText === 'Бип|happy|started' && (await page.evaluate(() => document.querySelector('.hero-box > [data-pet-character]').shadowRoot.querySelector('svg').dataset.pose)) === 'happy' && (await page.evaluate(() => Object.keys(localStorage).every((key) => key.startsWith('qa')))), JSON.stringify({ heroBefore, reacted, heroText: s.heroText }));
+      await page.clock.runFor(2000);
       check(`${name}: подписка хука — с initial: false (без синхронной доставки), на живом ядре одна${dev ? ', на отключённом core1 активной нет (onCore двойного эффекта — один рендер)' : ''}; подтверждённое имя после подключения — «Пиксель»`, s.subs[live]?.active === 1 && s.subs[live].options.every((one) => one === '{"initial":false}') && s.subs[live].early === 0 && (!dev || !(s.subs[1]?.active > 0)) && s.text === 'Пиксель|1|running', JSON.stringify({ subs: s.subs, text: s.text }));
       // Повторный destroy core1: в development — уже отключённое ядро StrictMode (безопасно, живое не тронуто); в production —
       // живое ядро страницы (прямое отключение, проверка ниже).
@@ -602,7 +612,7 @@ async function lifecycle(browser, dir, base, tag, dev) {
         await call(() => window.qa.show(false));
         await settled();
         s = await state();
-        check(`${name}: касание — уголок открыт, без горизонтальной прокрутки; размонтирование — ни вида, ни активных подписок, все ядра отключены`, opened.open && (await overflow(page)) <= 0 && s.views === 0 && Object.values(s.subs).every((stat) => stat.active === 0) && s.statuses.every((status) => status === 'destroyed'), JSON.stringify({ opened, s }));
+        check(`${name}: касание — уголок открыт, без горизонтальной прокрутки; размонтирование — ни вида, ни активных подписок, все ядра отключены; персонаж — снят, экземпляр destroyed, onCore(null), хук — заглушка`, opened.open && (await overflow(page)) <= 0 && s.views === 0 && Object.values(s.subs).every((stat) => stat.active === 0) && s.statuses.every((status) => status === 'destroyed') && s.heroes === 0 && s.heroStatus === 'destroyed' && s.heroLog.at(-1) === null && s.heroText === HERO_PLACEHOLDER, JSON.stringify({ opened, s }));
         continue;
       }
       // Новые функции и progress при рендере: без пересоздания, без onCore, без обновлений и награды; refresh — новый счёт.
@@ -689,7 +699,7 @@ async function lifecycle(browser, dir, base, tag, dev) {
       s = await state();
       const gone = s.log.slice(unmountFrom);
       const focus = await page.evaluate(() => (document.activeElement === document.body ? 'body' : (document.activeElement?.id ?? document.activeElement?.tagName ?? null)));
-      check(`${name}: размонтирование (фокус был в виде) — onCore(null) до отключения (ядро running), затем ни вида, ни активных подписок, все ядра destroyed; фокус — у страницы (body)`, focusedIn && gone.length === 1 && gone[0].core === null && gone[0].prev === 'running' && s.views === 0 && Object.values(s.subs).every((stat) => stat.active === 0) && s.statuses.every((status) => status === 'destroyed') && focus === 'body', JSON.stringify({ gone, focus, s }));
+      check(`${name}: размонтирование (фокус был в виде) — onCore(null) до отключения (ядро running), затем ни вида, ни активных подписок, все ядра destroyed; фокус — у страницы (body); персонаж — снят, экземпляр destroyed, хук — заглушка`, focusedIn && gone.length === 1 && gone[0].core === null && gone[0].prev === 'running' && s.views === 0 && Object.values(s.subs).every((stat) => stat.active === 0) && s.statuses.every((status) => status === 'destroyed') && focus === 'body' && s.heroes === 0 && s.heroStatus === 'destroyed' && s.heroText === HERO_PLACEHOLDER, JSON.stringify({ gone, focus, s }));
       // Отказ подключения: неизвестное свойство и children — console.error с причиной, onCore(null), вида нет; без лишних вызовов при снятии.
       for (const [extra, reason] of [
         [{ places: {} }, 'неизвестная настройка: places'],

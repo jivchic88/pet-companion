@@ -9,6 +9,7 @@
 | Ядро | `pet-companion/core`, `/pets`, `/behaviors` | готово | Node: команды, снимок, хранение, определения; установленный архив и типы |
 | Веб | `pet-companion` (`mountPet`), `/web` (`mountPetIn`), стили, `manifest.json` | готово | Google Chrome (macOS; CI — Linux): компьютер и ширина телефона, касания, CSP, сайт без сборщика, Vite 8.3.4 |
 | React | `pet-companion/react` | готово | React 18.3.1 и 19.3.1, SSR и гидратация, StrictMode |
+| Персонаж (минимальный режим, U01) | `pet-companion/character`, `/character-web`, `/character-react` | с 0.3.0 | Node (описание, реакции, тишина, покой, подписка, отключение, два экземпляра), Chrome (два робота, клавиатура, тишина при вводе, «уменьшить движение», фон, отключение и повторное подключение, 320×740; пример на установленном архиве), React 18/19 (SSR, гидратация, StrictMode) |
 | iOS | `pet-companion/native`, `/native-sqlite` | **предварительно** | iOS Simulator (Xcode 26.3, iOS 26.3.1, Expo Go 58.0.4) с настоящим вводом XCUITest: питомец, уголок, «Поиграть», «по зову», «Обустроить уголок», редкие сценки, кролик и модель «живая» примера, хранение SQLite, перезапуск, фон, поворот, крупный текст |
 | Android | те же | **не проверено в 0.2.4** | эмулятор — только до 0.2.3 (PL10.1–PL10.2.2); жест «Поиграть» не отменяется потерей фокуса окна; новый выпуск на Android решением владельца не проверялся |
 
@@ -26,11 +27,12 @@
 - **Сайт без сборки:** архив выпуска GitHub → `package/pet/` и `package/manifest.json` → `example.html` (README, «Быстрый старт», «Файлы пакета без сборщика»).
 - **npm и сборщик:** `npm install --save-exact pet-companion@<версия>`, `import { mountPet } from 'pet-companion'` и стили `pet-companion/pet.css`, `pet-companion/dog.css` (README, «Подключение из npm»); контейнер — `mountPetIn` (`examples/container.html`); Vite — `examples/vite/`.
 - **React:** `PetCompanion`, `usePetState` (`examples/react/`; README, «React и серверный рендер»).
+- **Персонаж без комнаты (минимальный режим):** `defineCharacter` + набор `{ character, poses, art, styles }` → `mountCharacterIn(container, { character, kit, name, onActivate })` или `<Character …/>`; продукт подтверждает события `core.react(id, { key, text })` и ведёт свои награды сам (`examples/character/`; README, «Персонаж: минимальный режим»).
 - **iOS (Expo):** `examples/expo/` — `npm ci`, `npm run lib` (архив этой библиотеки), Metro и Expo Go в iOS Simulator (README примера, «Запуск в iOS Simulator»); экран — `PetProvider` с `PetView`, `PetCorner`, `PetPlay`, `PetRoom`, хранение `createSqliteStorage`, жизненный цикл `useNativeLifecycle`.
 
 ## Пример расширения
 
-`examples/extension/` — третий питомец (кролик: определение, набор веба, стили) и вторая модель поведения (`lively`) только через публичные входы; браузер (`index.html`, `container.html`) и Node (`node.mjs`). Руководство — README, «Питомцы и модели поведения»; правила — CONTRIBUTING, «Новый питомец или модель». На нативе свой питомец требует своего нативного набора (`NativePetKit`): пример — `examples/expo/extension.mjs` (`bunnyNative`: позы, облики, аксессуары, морковка уголка, сценка `hop`; только публичные входы).
+`examples/extension/` — третий питомец (кролик: определение, набор веба, стили) и вторая модель поведения (`lively`) только через публичные входы; браузер (`index.html`, `container.html`) и Node (`node.mjs`). `examples/character/` (U01) — персонаж минимального режима (робот: описание без комнаты и кормления, набор, стили, страница стороннего продукта с двумя экземплярами, Node) только через `pet-companion/character` и `/character-web`. Руководство — README, «Питомцы и модели поведения»; правила — CONTRIBUTING, «Новый питомец или модель». На нативе свой питомец требует своего нативного набора (`NativePetKit`): пример — `examples/expo/extension.mjs` (`bunnyNative`: позы, облики, аксессуары, морковка уголка, сценка `hop`; только публичные входы).
 
 ## Диагностика
 

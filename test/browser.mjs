@@ -35,6 +35,7 @@ import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
 import { commandsQa } from './browser-commands.mjs';
 import { coreQa, freshQa } from './browser-core.mjs';
+import { characterQa } from './browser-character.mjs';
 import { extensionQa } from './browser-extension.mjs';
 import { kitsQa } from './browser-kits.mjs';
 import { lifeQa } from './browser-life.mjs';
@@ -1140,6 +1141,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await kitsQa(browser, server.base, check, open);
     await extensionQa(browser, check, open, layout);
     await viewQa(browser, check, open, layout);
+    await characterQa(browser, check, open, layout);
   } finally {
     await server.close();
   }

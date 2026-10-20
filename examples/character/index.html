@@ -1,0 +1,108 @@
+<!doctype html>
+<!-- Пример минимального режима (вне пакета; README, «Персонаж: минимальный режим»): два робота в контейнерах страницы
+     стороннего продукта — только публичные входы pet-companion/character и pet-companion/character-web из node_modules
+     (карта импортов), ни комнаты, ни кормления, ни учебных правил. Продукт сам подтверждает события и считает очки; имя
+     и тема — его. Робот А — кнопка (нажатие — приветствие), робот Б — рисунок без действия. Поле ввода — тишина реакций,
+     пока в нём печатают. «Отключить» / «Подключить» — жизненный цикл робота А. -->
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Пример: персонаж в своём продукте</title>
+    <style>
+      body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; color: #1f2328; background: #f6f5f1; }
+      main { max-width: 720px; margin: 0 auto; }
+      .row { display: flex; flex-wrap: wrap; gap: 16px; }
+      .card { flex: 1 1 200px; min-width: 0; padding: 12px; border: 1px solid #e2dfd6; border-radius: 12px; background: #fff; }
+      .card h2 { margin: 0 0 8px; font-size: 16px; }
+      .box { width: 100%; max-width: 220px; margin: 0 auto; }
+      /* Тема робота Б — переменные --pet-* на его карточке. */
+      #card-b { --pet-surface: #1d2a3a; --pet-ink: #e7e5df; --pet-line: #39413e; --pet-accent: #e5b646; }
+      .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+      button { font: inherit; padding: 8px 12px; border: 1px solid #c9c4b8; border-radius: 8px; background: #fff; cursor: pointer; }
+      label { display: block; margin: 8px 0; }
+      input { font: inherit; padding: 6px 8px; width: 100%; max-width: 320px; box-sizing: border-box; }
+      #status { min-height: 1.4em; color: #5b6168; }
+    </style>
+    <script type="importmap">
+      { "imports": { "pet-companion/character": "../node_modules/pet-companion/pet/character.mjs", "pet-companion/character-web": "../node_modules/pet-companion/pet/character-web.mjs" } }
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>Персонаж в своём продукте</h1>
+      <p>Продукт подтверждает свои события и сам считает очки: <strong id="score">0</strong>.</p>
+      <div class="row">
+        <section class="card" id="card-a"><h2>Робот А (нажми — поздоровается)</h2><div class="box" id="robot-a"></div></section>
+        <section class="card" id="card-b"><h2>Робот Б (своя тема)</h2><div class="box" id="robot-b"></div></section>
+      </div>
+      <div class="buttons">
+        <button id="done" type="button">Задача выполнена</button>
+        <button id="oops" type="button">Не вышло</button>
+        <button id="hello" type="button">Поздороваться (Б)</button>
+        <button id="off" type="button">Отключить А</button>
+        <button id="on" type="button" disabled>Подключить А</button>
+      </div>
+      <label>Имя робота А <input id="name" type="text" value="Бип" maxlength="24" /></label>
+      <label>Заметка (пока печатаете, роботы молчат) <input id="note" type="text" /></label>
+      <p id="status" aria-live="polite"></p>
+    </main>
+    <script type="module">
+      import { mountCharacterIn } from 'pet-companion/character-web';
+      import { robot } from './robot.mjs';
+      import { robotWeb } from './robot-web.mjs';
+
+      const status = (text) => (document.getElementById('status').textContent = text);
+      let score = 0;
+      let tasks = 0;
+      const a = { view: null };
+      function mountA() {
+        a.view = mountCharacterIn(document.getElementById('robot-a'), {
+          character: robot,
+          kit: robotWeb,
+          name: document.getElementById('name').value,
+          label: (state) => `${state.name.display}: нажмите, чтобы поздороваться`,
+          onActivate: (view) => view.core.react('wave'),
+        });
+        document.getElementById('off').disabled = !a.view.mounted;
+        document.getElementById('on').disabled = a.view.mounted;
+      }
+      mountA();
+      const b = mountCharacterIn(document.getElementById('robot-b'), { character: robot, kit: robotWeb, name: 'Боб' });
+      if (!b.mounted) status('Робот Б не подключён — причина в консоли.');
+
+      // Продукт: сохранил задачу, учёл очки, затем подтверждённое событие с постоянным ключом — обоим роботам.
+      document.getElementById('done').addEventListener('click', () => {
+        tasks += 1;
+        score += 10;
+        document.getElementById('score').textContent = String(score);
+        const key = `task-${tasks}`;
+        const ra = a.view.core?.react('done', { key });
+        const rb = b.core?.react('done', { key, text: `Задача ${tasks} — есть!` });
+        status(`done: А ${ra ? (ra.ok ? (ra.played ? 'играет' : ra.queued ? 'отложено' : 'нет') : ra.error.code) : '—'}, Б ${rb ? (rb.ok ? (rb.played ? 'играет' : rb.queued ? 'отложено' : 'нет') : rb.error.code) : '—'}`);
+      });
+      document.getElementById('oops').addEventListener('click', () => {
+        const r = a.view.core?.react('oops');
+        status(`oops: ${r ? (r.ok ? (r.played ? 'играет' : 'нет (пауза повтора или тишина)') : r.error.code) : '—'}`);
+      });
+      document.getElementById('hello').addEventListener('click', () => {
+        const r = b.core?.react('wave');
+        status(`wave Б: ${r ? (r.ok ? (r.played ? 'играет' : 'нет') : r.error.code) : '—'}`);
+      });
+      document.getElementById('off').addEventListener('click', () => {
+        a.view.destroy();
+        document.getElementById('off').disabled = true;
+        document.getElementById('on').disabled = false;
+        status('Робот А отключён; Б продолжает.');
+      });
+      document.getElementById('on').addEventListener('click', () => {
+        mountA();
+        status('Робот А подключён заново.');
+      });
+      document.getElementById('name').addEventListener('input', (event) => {
+        a.view.core?.setName(event.target.value);
+      });
+      window.demoCharacters = { a, b };
+    </script>
+  </body>
+</html>
