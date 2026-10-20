@@ -815,6 +815,8 @@ try {
   // устройство: React Native, Metro и настоящий expo-sqlite здесь не участвуют.
   await mkdir(path.join(project, 'expo', 'fake'), { recursive: true });
   await cp(path.join(root, 'examples', 'expo', 'diagnostics.mjs'), path.join(project, 'expo', 'diagnostics.mjs'));
+  // PL10.2.4: данные примера расширения (кролик, «живая») — их импортирует diagnostics.mjs; только публичные входы.
+  await cp(path.join(root, 'examples', 'expo', 'extension.mjs'), path.join(project, 'expo', 'extension.mjs'));
   for (const file of ['sqlite-driver.mjs', 'sqlite-worker.mjs']) await cp(path.join(root, 'test', file), path.join(project, 'expo', 'fake', file));
   await writeFile(
     path.join(project, 'expo', 'fake', 'expo-sqlite.mjs'),

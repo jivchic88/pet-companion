@@ -726,7 +726,7 @@ test('экран PL10.2.2: прямые команды хоста — откры
 });
 
 test('пример расширения на нативе (PL10.2.4): кролик и «живая» в примере — те же данные, что examples/extension; набор кролика проходит проверки уголка и игры, рисует сценку hop', async () => {
-  const E = await import('../examples/expo/extension.mjs');
+  const E = { ...(await import('../examples/expo/extension.mjs')), ...(await import('../examples/expo/bunny-native.mjs')) };
   const { bunny } = await import('../examples/extension/bunny.mjs');
   const { lively } = await import('../examples/extension/lively.mjs');
   assert.equal(JSON.stringify(E.bunny), JSON.stringify(bunny), 'определение кролика совпадает');
