@@ -7,8 +7,10 @@
 // Объявление: { full: true, moving: false, pets — питомцы с набором, views — виды, чьи поверхности сейчас подключены
 // (PetCorner — 'corner', PetPlay — 'play', PetRoom — 'room'), scenes — сценки, которые рисуют наборы (поле scenes набора, PL10.2.4;
 // без него — ни резервирования дня, ни показа) и только пока подключена поверхность, где сценку видно (PetView в композиции,
-// открытый измеренный уголок — register('figure')); без неё — {}: ядро не резервирует день невидимой сценке, а изменение
-// scenes отменяет идущий показ. Смена наборов с теми же ID тоже объявляется (сценки текущего каталога); playFloor, playTouch —
+// открытый измеренный уголок — register('figure', scenes)): объявляется объединение сценок подключённых поверхностей рисунка
+// (PetView с собственными kits — сценки своих наборов; без scenes — сценки каталога координатора); без них — {}: ядро не
+// резервирует день невидимой сценке, а изменение scenes отменяет идущий показ. Смена наборов с теми же ID тоже объявляется
+// (сценки текущего каталога); playFloor, playTouch —
 // пол игры, когда он измерен }. Поверхность подключается
 // register(view) → отписка; подключение объявляется сразу, отключение — микрозадачей (StrictMode и пересоздание той же
 // поверхности не дают промежуточного сброса), открытый вид без поверхности закрывается ядром (core.close) перед
@@ -129,11 +131,23 @@ function seat(b, c) {
 // Пол игры для объявления: последний замер подключённой поверхности (Map хранит порядок: свежий — в конце) или null.
 const floorOf = (floors) => [...floors.values()].at(-1) ?? null;
 
+// Объединение сценок нескольких поверхностей рисунка: по питомцу — сценки в порядке первого упоминания, без повторов.
+export function mergeScenes(list) {
+  const merged = {};
+  for (const scenes of list) {
+    for (const [id, items] of Object.entries(scenes ?? {})) {
+      const have = merged[id] ?? (merged[id] = []);
+      for (const item of items) if (!have.includes(item)) have.push(item);
+    }
+  }
+  return merged;
+}
+
 // Состояние координатора (на экземпляр): подключённые поверхности по виду, ядро, к которому он подключён, ключ его
 // действующего объявления (declared — пока владелец), подключён ли сам (live), ядро и каталог последней отрисовки, замеры
 // пола поверхностей игры (floors: поверхность → { playFloor, playTouch }) и входы для возврата фокуса (entries).
 function coordinator() {
-  const b = { views: new Map(), core: null, declared: null, live: false, latest: { core: null, ids: [] }, floors: new Map(), entries: new Map() };
+  const b = { views: new Map(), figures: new Map(), core: null, declared: null, live: false, latest: { core: null, ids: [] }, floors: new Map(), entries: new Map() };
   // Владелец ли объявления своего ядра (объявления скринридеру — только у него).
   b.owns = () => b.core !== null && ownerOf(b.core) === b;
   // Объявить текущее (без повтора того же): ядро и каталог — последней отрисовки, виды — подключённых поверхностей;
@@ -144,7 +158,7 @@ function coordinator() {
     seat(b, alive(c) && list.length ? c : null);
     if (!b.owns()) return;
     const views = VIEW_ORDER.filter((view) => (b.views.get(view) ?? 0) > 0);
-    const shown = (b.views.get('figure') ?? 0) > 0 ? scenes : {};
+    const shown = (b.views.get('figure') ?? 0) > 0 ? mergeScenes([...b.figures.values()].map((own) => own ?? scenes)) : {};
     const floor = views.includes('play') ? floorOf(b.floors) : null;
     const key = `${list.join('\n')}|${views.join(',')}|${JSON.stringify(shown)}|${floor ? `${floor.playFloor.join(',')}/${floor.playTouch}` : ''}`;
     if (b.declared === key) return;
@@ -159,17 +173,21 @@ function coordinator() {
     } else if (result) systemLog.warn(`PetProvider: объявление отображения не принято (${result.error?.code})`);
   };
   // Поверхность вида view подключена: объявить сразу; отписка — микрозадачей (повторное подключение той же поверхности
-  // в этом такте отменяет снятие), затем объявление без вида (открытый вид без поверхности закрыт).
-  b.register = (view) => {
+  // в этом такте отменяет снятие), затем объявление без неё (открытый вид без поверхности закрыт; сценки — оставшихся
+  // поверхностей рисунка). Поверхность рисунка ('figure') несёт сценки своего каталога (scenes; null — каталог координатора).
+  b.register = (view, scenes = null) => {
+    const token = {};
     b.views.set(view, (b.views.get(view) ?? 0) + 1);
+    if (view === 'figure') b.figures.set(token, scenes);
     b.sync();
     let done = false;
     return () => {
       if (done) return;
       done = true;
       b.views.set(view, (b.views.get(view) ?? 1) - 1);
+      b.figures.delete(token);
       queueMicrotask(() => {
-        if (b.live && (b.views.get(view) ?? 0) === 0) b.sync();
+        if (b.live && (view === 'figure' || (b.views.get(view) ?? 0) === 0)) b.sync();
       });
     };
   };
