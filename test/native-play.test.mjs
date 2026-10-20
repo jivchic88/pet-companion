@@ -1613,3 +1613,125 @@ test('сценки (PL10.2.4): наборы объявляют свои сцен
   assert.equal(C.L.core.getState().pose.reaction?.scene ?? false, false);
   assert.equal(C.L.scenes.calls.reserve, 0, 'не на виду — день не расходуется');
 });
+
+// По повторной проверке Codex (кандидат 81b4f94): сценка — только там, где её видно; фазы и отмена — на странице и в уголке.
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function sceneAt(L, V, { motion = 'normal', where = 'page', key = 'x' } = {}) {
+  await V.render();
+  await started(L, V);
+  if (motion !== 'normal') await V.act(() => L.core.setPreferences({ motion }));
+  if (where === 'corner') {
+    await V.act(() => L.core.open('corner'));
+    await V.fire('corner-sheet', 'onLayout', layout(390, 844));
+    await V.fire('corner-body', 'onLayout', layout(390, 760));
+  }
+  await V.act(() => L.counts.set(1, 1));
+  L.rand.push(0, 0, 0);
+  await V.act(() => L.core.notify('saved', { key, counted: true }));
+  await V.act(() => L.plan.advance(3000));
+  await until(V, () => Boolean(L.core.getState().pose.reaction?.scene));
+  const reaction = L.core.getState().pose.reaction;
+  const art = where === 'corner' ? 'corner-pet-art' : 'pet-art';
+  return { reaction, ms: reaction?.type === 'curl' ? 4600 : 3600, pose: () => V.node(art)?.children?.props?.pose };
+}
+
+test('сценки (PL10.2.4, по проверке Codex): фазы normal и calm — вход поза покоя, середина поза сценки, выход до конца реакции — снова покой; на странице и в открытом уголке; none — сразу', async () => {
+  for (const motion of ['normal', 'calm']) {
+    for (const where of ['page', 'corner']) {
+      const L = await lab();
+      const V = mount(`phase-${motion}-${where}`, tree(L, { view: where === 'page', corner: true, play: false }));
+      const S = await sceneAt(L, V, { motion, where, key: `${motion}-${where}` });
+      assert.equal(S.reaction?.scene, true, `${motion}/${where}: ${JSON.stringify(S.reaction)}`);
+      assert.ok(L.scenes.calls.reserve >= 1 && L.scenes.calls.show >= 1, JSON.stringify(L.scenes.calls));
+      assert.notEqual(S.pose(), S.reaction.type, `${motion}/${where}: вход — поза покоя`);
+      await V.act(() => wait(Math.round(S.ms * 0.2) + 80));
+      assert.equal(S.pose(), S.reaction.type, `${motion}/${where}: середина — поза сценки`);
+      await V.act(() => wait(Math.round(S.ms * 0.6) + 80));
+      assert.equal(L.core.getState().pose.reaction?.scene, true, 'реакция ещё идёт');
+      assert.notEqual(S.pose(), S.reaction.type, `${motion}/${where}: выход — снова покой`);
+    }
+  }
+  const L = await lab();
+  const V = mount('phase-none-corner', tree(L, { view: false, corner: true, play: false }));
+  const S = await sceneAt(L, V, { motion: 'none', where: 'corner', key: 'none-corner' });
+  assert.equal(S.pose(), S.reaction.type, 'без движения — поза сценки в уголке сразу');
+});
+
+test('сценки (PL10.2.4, по проверке Codex): отмена касанием в уголке, фоном и сменой ядра — поза сценки снята сразу', async () => {
+  // Касание в открытом уголке: ядро отменяет сценку.
+  const A = await lab();
+  const VA = mount('cancel-touch-corner', tree(A, { view: false, corner: true, play: false }));
+  const SA = await sceneAt(A, VA, { where: 'corner', key: 'touch' });
+  await VA.act(() => wait(Math.round(SA.ms * 0.2) + 80));
+  assert.equal(SA.pose(), SA.reaction.type);
+  await VA.act(() => A.core.interact({ type: 'pet' }));
+  assert.equal(A.core.getState().pose.reaction?.scene ?? false, false);
+  assert.notEqual(SA.pose(), SA.reaction.type, 'касание — снято');
+  // Фон: приложение не на виду — рисунок сразу в покое.
+  const B = await lab();
+  const VB = mount('cancel-background', tree(B, { view: true, corner: false, play: false }));
+  const SB = await sceneAt(B, VB, { key: 'background' });
+  await VB.act(() => wait(Math.round(SB.ms * 0.2) + 80));
+  assert.equal(SB.pose(), SB.reaction.type);
+  await VB.act(() => B.core.setVisible(false));
+  assert.notEqual(SB.pose(), SB.reaction.type, 'фон — снято');
+  // Смена ядра посреди сценки: рисунок нового ядра без сценки прежнего.
+  const C = await lab();
+  const VC = mount('cancel-core', tree(C, { view: true, corner: false, play: false }));
+  const SC = await sceneAt(C, VC, { key: 'core' });
+  await VC.act(() => wait(Math.round(SC.ms * 0.2) + 80));
+  assert.equal(SC.pose(), SC.reaction.type);
+  const D = await lab();
+  await VC.render(tree(D, { view: true, corner: false, play: false }));
+  await VC.act(() => D.core.start());
+  assert.notEqual(SC.pose(), SC.reaction.type, 'смена ядра — снято');
+  await VC.act(turn);
+  assert.deepEqual(C.core.getState().display.scenes, {}, 'прежнее ядро: координатор ушёл — сценок не объявлено');
+});
+
+test('сценки (PL10.2.4, по проверке Codex): день не расходуется без видимого рисунка — открытый уголок без замера (нулевой размер), закрытый уголок без PetView; StrictMode и второй отдельный PetView объявление не снимают, последний ушедший снимает', async () => {
+  const reward = async (L, V, key) => {
+    await V.act(() => L.counts.set(1, 1));
+    L.rand.push(0, 0, 0);
+    await V.act(() => L.core.notify('saved', { key, counted: true }));
+    await V.act(() => L.plan.advance(8000));
+  };
+  // Открытый уголок, тело нулевого размера, PetView нет.
+  const A = await lab();
+  const VA = mount('day-zero', tree(A, { view: false, corner: true, play: false }));
+  await VA.render();
+  await started(A, VA);
+  await VA.act(() => A.core.open('corner'));
+  await VA.fire('corner-sheet', 'onLayout', layout(390, 844));
+  await VA.fire('corner-body', 'onLayout', layout(0, 0));
+  assert.deepEqual(A.core.getState().display.scenes, {});
+  await reward(A, VA, 'zero');
+  assert.equal(A.scenes.calls.reserve, 0, 'уголок нулевого размера — день не занят');
+  // Закрытый уголок без PetView.
+  const B = await lab();
+  const VB = mount('day-closed', tree(B, { view: false, corner: true, play: false }));
+  await VB.render();
+  await started(B, VB);
+  await reward(B, VB, 'closed');
+  assert.equal(B.scenes.calls.reserve, 0, 'закрытый уголок — день не занят');
+  // StrictMode: PetView в композиции объявляет сценки и после двойного подключения.
+  const C = await lab();
+  const VC = mount('day-strict', tree(C, { view: true, corner: true, play: false }), { strict: true });
+  await VC.render();
+  await started(C, VC);
+  await VC.act(turn);
+  assert.deepEqual(C.core.getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'] });
+  // Отдельные PetView одного ядра: ушёл один — сценки остаются (второй рисует), ушёл последний — сняты.
+  const D = await lab();
+  const two = (n) => h(React.Fragment, null, ...Array.from({ length: n }, (_, i) => h(PetView, { key: i, core: D.spy, pets: PETS, kits: KITS, testID: `p${i}` })));
+  const VD = mount('day-owners', two(2));
+  await VD.render();
+  await VD.act(turn);
+  assert.deepEqual(D.core.getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'] });
+  await VD.render(two(1));
+  await VD.act(turn);
+  assert.deepEqual(D.core.getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'] }, 'второй ещё рисует');
+  await VD.render(two(0));
+  await VD.act(turn);
+  assert.deepEqual(D.core.getState().display.scenes, {}, 'последний ушёл — сценки сняты');
+});

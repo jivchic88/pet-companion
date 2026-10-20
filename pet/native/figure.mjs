@@ -10,6 +10,8 @@
 // кадры веба: начало и конец — поза поверхности, середина (SCENE_ON…SCENE_OFF длительности сценки определения) — поза
 // сценки; без движения (effectiveMotion none) — поза сценки статично всё время. Выбор, отмену, резервирование дня и
 // длительность ведёт ядро: конец реакции, отмена, смена ядра, фон (visible) и размонтирование снимают показ сразу.
+// Сценки рисуют страница (PetView) и открытый уголок; редактор расстановки и «Поиграть» — нет (scenes: false; ядро там
+// сценок и не начинает).
 
 import { createElement as h, useEffect, useState } from 'react';
 import { Animated } from 'react-native';
@@ -19,11 +21,11 @@ import { motionPlan } from './motion.mjs';
 
 // props: core — ядро поверхности (его смена снимает движение); snapshot — снимок; kit, def — набор и определение
 // показанного; width — ширина в точках экрана; pose — поза поверхности из снимка; prefix — префикс id экземпляра; testID —
-// префикс узлов ('-motion', '-art'); room — рисунок в сцене комнаты (необязательно).
+// префикс узлов ('-motion', '-art'); room — рисунок в сцене комнаты (необязательно); scenes — рисовать ли редкие сценки.
 export const SCENE_ON = 0.2;
 export const SCENE_OFF = 0.8;
 
-export function PetFigure({ core, snapshot, kit, def, width, pose, prefix, testID, room = null }) {
+export function PetFigure({ core, snapshot, kit, def, width, pose, prefix, testID, room = null, scenes = true }) {
   const [liftX] = useState(() => new Animated.Value(0));
   const [liftY] = useState(() => new Animated.Value(0));
   const reaction = snapshot.pose.reaction;
@@ -32,7 +34,7 @@ export function PetFigure({ core, snapshot, kit, def, width, pose, prefix, testI
   const units = width / def.size.width;
   const plan = active && reaction && !reaction.scene ? motionPlan(reaction.type, motion) : null;
   const run = plan ? `${reaction.id}:${reaction.type}:${motion}:${units}` : '';
-  const scene = active && !room ? kitScene(kit, def, reaction) : null;
+  const scene = active && scenes ? kitScene(kit, def, reaction) : null;
   const sceneRun = scene ? `${reaction.id}:${scene.id}:${motion}` : '';
   const [phase, setPhase] = useState(null);
 

@@ -11,6 +11,10 @@
 // — композиция (внутри PetProvider, без core или с тем же core): ядро и каталог — координатора, объявление отображения и
 //   объявления скринридеру — только у координатора (один владелец на ядро): PetView их не повторяет и views/scenes,
 //   объявленные уголком, не сбрасывает. Свои pets и kits в композиции — только для рисунка, проверяются так же.
+// Сценки (PL10.2.4) объявлены, только пока PetView подключён: в композиции он — поверхность рисунка координатора
+// (register('figure')), отдельно — снимает свои сценки при размонтировании и смене ядра, если других отдельных PetView этого
+// ядра не осталось (микрозадачей: StrictMode и повторное подключение не дают промежуточного снятия). Иначе ядро
+// резервировало бы день сценке, которую никто не рисует.
 // Неверные pets или kits — отказ до любых побочных действий: читаемый текст вместо питомца, без подписок и команд.
 
 import { createElement as h, useEffect, useId } from 'react';
@@ -22,6 +26,8 @@ import { kitFor, nativeScenes } from './kits.mjs';
 import { useAnnounce, useCatalog, usePetContext } from './provider.mjs';
 
 const SIZE = 180;
+// Отдельные PetView по ядру: ядро → множество подключённых (последний ушедший снимает сценки).
+const standalone = new WeakMap();
 
 export function PetView(props) {
   const { size = SIZE, style, label, hint = 'Погладить', announce = true, touch = true, testID = 'pet' } = props;
@@ -44,13 +50,32 @@ export function PetView(props) {
   const ids = catalog.ids.join('\n');
   const scenes = JSON.stringify(nativeScenes(catalog));
   useEffect(() => {
-    if (composed || !usable || !ids) return;
+    if (composed || !usable || !ids) return undefined;
+    const mine = {};
+    const owners = standalone.get(usable) ?? new Set();
+    standalone.set(usable, owners);
+    owners.add(mine);
     try {
       usable.setDisplay({ full: true, moving: false, pets: ids.split('\n'), views: [], scenes: JSON.parse(scenes) });
     } catch (error) {
       systemLog.warn('PetView: объявление отображения не принято', error);
     }
+    return () => {
+      owners.delete(mine);
+      queueMicrotask(() => {
+        if (owners.size || usable.status === 'destroyed') return;
+        try {
+          usable.setDisplay({ scenes: {} });
+        } catch (error) {
+          systemLog.warn('PetView: сценки не сняты', error);
+        }
+      });
+    };
   }, [composed, usable, ids, scenes]);
+
+  // В композиции — поверхность рисунка координатора (сценки объявлены, пока она подключена).
+  const register = composed ? (shared?.register ?? null) : null;
+  useEffect(() => (register && usable ? register('figure') : undefined), [register, usable]);
 
   // Объявления ядра — скринридеру, по одному на эффект (в композиции — координатор).
   useAnnounce(composed ? null : usable, announce, 'PetView');

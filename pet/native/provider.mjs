@@ -6,7 +6,9 @@
 //
 // Объявление: { full: true, moving: false, pets — питомцы с набором, views — виды, чьи поверхности сейчас подключены
 // (PetCorner — 'corner', PetPlay — 'play', PetRoom — 'room'), scenes — сценки, которые рисуют наборы (поле scenes набора, PL10.2.4;
-// без него — ни резервирования дня, ни показа); playFloor, playTouch —
+// без него — ни резервирования дня, ни показа) и только пока подключена поверхность, где сценку видно (PetView в композиции,
+// открытый измеренный уголок — register('figure')); без неё — {}: ядро не резервирует день невидимой сценке, а изменение
+// scenes отменяет идущий показ. Смена наборов с теми же ID тоже объявляется (сценки текущего каталога); playFloor, playTouch —
 // пол игры, когда он измерен }. Поверхность подключается
 // register(view) → отписка; подключение объявляется сразу, отключение — микрозадачей (StrictMode и пересоздание той же
 // поверхности не дают промежуточного сброса), открытый вид без поверхности закрывается ядром (core.close) перед
@@ -83,12 +85,12 @@ const queues = new WeakMap();
 const ownerOf = (c) => queues.get(c)?.at(-1) ?? null;
 const keyable = (c) => alive(c) && (typeof c === 'object' || typeof c === 'function');
 
-// Снять объявление с ядра c: открытый вид закрыт, видов нет.
+// Снять объявление с ядра c: открытый вид закрыт, видов и сценок нет.
 function withdraw(c) {
   if (!alive(c)) return;
   const open = quiet('снимок не прочитан', () => c.getState().view.open);
   if (open && VIEW_ORDER.includes(open)) quiet('вид не закрыт', () => c.close());
-  quiet('объявление не снято', () => c.setDisplay({ views: [] }));
+  quiet('объявление не снято', () => c.setDisplay({ views: [], scenes: {} }));
 }
 
 // Координатор b покидает своё ядро. Его объявление действовало — оно переходит к предыдущему подключённому (тот
@@ -142,12 +144,13 @@ function coordinator() {
     seat(b, alive(c) && list.length ? c : null);
     if (!b.owns()) return;
     const views = VIEW_ORDER.filter((view) => (b.views.get(view) ?? 0) > 0);
+    const shown = (b.views.get('figure') ?? 0) > 0 ? scenes : {};
     const floor = views.includes('play') ? floorOf(b.floors) : null;
-    const key = `${list.join('\n')}|${views.join(',')}|${JSON.stringify(scenes)}|${floor ? `${floor.playFloor.join(',')}/${floor.playTouch}` : ''}`;
+    const key = `${list.join('\n')}|${views.join(',')}|${JSON.stringify(shown)}|${floor ? `${floor.playFloor.join(',')}/${floor.playTouch}` : ''}`;
     if (b.declared === key) return;
     const open = quiet('снимок не прочитан', () => c.getState().view.open);
     if (open && VIEW_ORDER.includes(open) && !views.includes(open)) quiet('вид не закрыт', () => c.close());
-    const display = { full: true, moving: false, pets: list, views, scenes };
+    const display = { full: true, moving: false, pets: list, views, scenes: shown };
     if (floor) Object.assign(display, { playFloor: [...floor.playFloor], playTouch: floor.playTouch });
     const result = quiet('объявление отображения не принято', () => c.setDisplay(display));
     if (result?.ok) {
@@ -276,6 +279,7 @@ export function PetProvider({ core = null, pets, kits, announce = true, children
   const catalog = useCatalog(pets, kits);
   const usable = catalog.problem ? null : core;
   const ids = catalog.ids.join('\n');
+  const sceneKey = JSON.stringify(nativeScenes(catalog));
   const book = useRef(null);
   if (!book.current) book.current = coordinator();
   const b = book.current;
@@ -285,7 +289,7 @@ export function PetProvider({ core = null, pets, kits, announce = true, children
     b.latest = { core: usable, ids: catalog.ids, scenes: nativeScenes(catalog) };
   });
 
-  // Подключение координатора и смена ядра или каталога — объявление; размонтирование — уход от ядра микрозадачей (StrictMode
+  // Подключение координатора и смена ядра или каталога (состава или сценок наборов) — объявление; размонтирование — уход от ядра микрозадачей (StrictMode
   // подключает снова в том же такте — без промежуточного сброса; заменивший координатор к этому времени уже владелец).
   useEffect(() => {
     b.live = true;
@@ -296,7 +300,7 @@ export function PetProvider({ core = null, pets, kits, announce = true, children
         if (!b.live && b.core) leave(b);
       });
     };
-  }, [b, usable, ids]);
+  }, [b, usable, ids, sceneKey]);
 
   useEffect(() => {
     if (catalog.problem && core) systemLog.warn(`PetProvider: ${catalog.problem}`);

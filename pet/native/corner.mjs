@@ -15,7 +15,7 @@
 // «Приходит по зову» — core.setPresence, «Скрыть …» — core.hide() (окно закрывает ядро), спрятан — вместо входа
 // «Показать …» — core.show() (по зову — снова вызов, игра сама не открывается). «Обустроить уголок» (PL10.2.3) — кнопка у
 // сцены, только когда вид 'room' объявлен ядру (подключён PetRoom): core.open('room'); возврат из редактора — фокус на неё.
-// Сцену уголка (CornerScene) рисует и редактор — с черновиком расстановки. Сценок нет (scenes: {} у координатора). Окно — по очереди с окном игры (useWindow координатора: iOS не покажет новое
+// Сцену уголка (CornerScene) рисует и редактор — с черновиком расстановки. Редкие сценки рисует только открытый уголок (PL10.2.4), редактор — нет. Окно — по очереди с окном игры (useWindow координатора: iOS не покажет новое
 // модальное окно, пока прежнее уходит).
 //
 // Привязка окна — пара «ядро и показанный питомец» (доработка PL10.2.1): черновик имени, страница готовых имён, отказ и
@@ -122,6 +122,10 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
 
   // Поверхность уголка — у координатора, пока она годна: вид 'corner' объявлен ядру ровно на это время.
   useEffect(() => (register && !problem ? register('corner') : undefined), [register, problem]);
+  // Рисунок открытого уголка (PL10.2.4): окно показано и тело измерено — сценку видно; координатор объявляет ядру сценки,
+  // только пока есть такая поверхность (иначе ядро резервировало бы день невидимой сценке).
+  const drawn = Boolean(register && !problem && open && slot.visible && (body?.width ?? 0) > 32 && (body?.height ?? 0) > 0);
+  useEffect(() => (drawn ? register('figure') : undefined), [register, drawn]);
 
   // Ядро последней фиксации — для проверки обработчиков (замыканий отрисовки) в момент вызова.
   const bound = useRef(null);
@@ -608,7 +612,7 @@ export function CornerScene({ width, def, kit, who, snapshot, stage, fresh, pref
     h(
       View,
       { testID: `${testID}-pet`, style: { position: 'absolute', left: box.x * k, top: box.y * k }, pointerEvents: 'none', accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' },
-      h(PetFigure, { core, snapshot, kit, def, width: box.width * k, pose, prefix: `${prefix}-pet`, testID: `${testID}-pet`, room: { feed: snapshot.room.feedShift } }),
+      h(PetFigure, { core, snapshot, kit, def, width: box.width * k, pose, prefix: `${prefix}-pet`, testID: `${testID}-pet`, room: { feed: snapshot.room.feedShift }, scenes: !editor }),
     ),
     h(Svg, { testID: `${testID}-front`, style: layer, width, height, viewBox: `0 0 ${SCENE[0]} ${SCENE[1]}`, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' }, roomFront({ ...parts, bowl: { shown: editor || treat !== 'waiting', full: !editor && pose === 'feed' }, own })),
   );

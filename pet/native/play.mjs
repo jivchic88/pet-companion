@@ -723,7 +723,7 @@ export function PetPlay({ insets, entry = true, label, hint = 'Открыть и
           h(
             View,
             { key: 'pet', pointerEvents: 'none', style: { position: 'absolute', left: L.pet.left, top: L.pet.top }, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' },
-            h(PetFigure, { core, snapshot, kit, def, width: L.pet.width, pose: snapshot.pose.shown.play, prefix: `${prefix}-pet`, testID: `${testID}-figure` }),
+            h(PetFigure, { core, snapshot, kit, def, width: L.pet.width, pose: snapshot.pose.shown.play, prefix: `${prefix}-pet`, testID: `${testID}-figure`, scenes: false }),
           ),
           ...TOYS.map((toy) => (play?.toys[toy]?.at ? h(Toy, { key: toy, toy, L, t: toyState.current[toy], testID: `${testID}-toy-${toy}`, dragging: play.drag?.toy === toy, motion }) : null)),
           h(
