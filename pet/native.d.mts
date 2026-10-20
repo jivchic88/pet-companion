@@ -193,3 +193,21 @@ export interface PetPlayProps {
  * координатор по замеру сцены. Наборы координатора обязаны иметь ресурсы игры (`play: true`), иначе — отказ.
  */
 export declare function PetPlay(props: PetPlayProps): ReactElement | null;
+
+/** Свойства PetRoom (только внутри PetProvider). */
+export interface PetRoomProps {
+  /** Отступы безопасной области от хоста; без них окно оставляет системные отступы. */
+  readonly insets?: PetInsets;
+  /** Префикс testID узлов (по умолчанию 'room'): '-modal', '-sheet', '-title', '-stage', '-pick-frame', '-pick-<id>', '-chosen', '-move-left|right|up|down', '-reset', '-bowl', '-other', '-failed', '-note', '-state', '-cancel', '-save'. */
+  readonly testID?: string;
+}
+
+/**
+ * «Обустроить уголок» (PL10.2.3): окно открыто, пока в снимке `view.open === 'room'` и есть черновик (`room.draft`) —
+ * кнопка «Обустроить уголок» уголка (видна, когда подключён PetRoom) или `core.open('room')`. Черновик, выбор, шаги, упоры,
+ * обычная расстановка, «Сохранить» (`room.save`), «Отмена» (`room.cancel`), другая запись и отказ — ядро; перенос пальцем —
+ * `room.drag` / `room.drop` / `room.dragCancel` (порог — точки экрана). Назад (Android «Назад», жест VoiceOver): идущий
+ * перенос — `room.dragCancel`, иначе `room.cancel()`. Фон, закрытие и поворот ничего не сохраняют. Наборы координатора
+ * обязаны иметь ресурсы уголка, иначе — отказ.
+ */
+export declare function PetRoom(props: PetRoomProps): ReactElement | null;

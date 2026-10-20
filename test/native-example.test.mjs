@@ -669,12 +669,12 @@ test('сверка перезапуска (diagnostics): прежние запи
   core.destroy();
 });
 
-test('экран PL10.2.1–PL10.2.2: координатор PetProvider — одно объявление { views: ["corner", "play"], scenes: {} }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
+test('экран PL10.2.1–PL10.2.3: координатор PetProvider — одно объявление { views: ["corner", "play", "room"], scenes: {} }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
   globalThis.__petInsets = { top: 47, right: 0, bottom: 34, left: 0 };
   try {
     const { S, core } = await running('pl1021');
     const display = core.getState().display;
-    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play'], {}, ['cat', 'dog']]);
+    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play', 'room'], {}, ['cat', 'dog']]);
     assert.equal(S.node('pet-art').children.type, catNative.Figure, 'PetView в композиции рисует');
     const page = S.node('screen').contentContainerStyle[1];
     assert.deepEqual([page.paddingTop, page.paddingBottom, page.paddingLeft, page.paddingRight], [47 + 12, 34 + 48, 16, 16]);
@@ -683,7 +683,7 @@ test('экран PL10.2.1–PL10.2.2: координатор PetProvider — о�
     assert.equal(core.getState().view.open, 'corner');
     assert.equal(S.node('corner-modal').visible, true);
     assert.equal(S.node('corner-sheet').style[1].paddingTop, 47, 'уголок — те же отступы хоста');
-    assert.deepEqual(core.getState().display.views, ['corner', 'play'], 'открытие уголка объявление не меняет');
+    assert.deepEqual(core.getState().display.views, ['corner', 'play', 'room'], 'открытие уголка объявление не меняет');
     await act(() => S.node('corner-modal').onRequestClose());
     assert.deepEqual([core.getState().view.open, S.node('corner-modal').visible], [null, false]);
     await S.press('pet-off');

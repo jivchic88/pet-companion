@@ -71,14 +71,14 @@ const WEB = ['web/catalog.mjs', 'web/kits.mjs', 'web/legacy/places.mjs', 'web/pa
 const REACT = ['hooks/state.mjs', 'react.d.mts', 'react.mjs'];
 // PL09: входы натива с типами, жизненный цикл и SQLite-адаптер; PL10.1: отображение, наборы и рисунки; PL10.2.1: рисунок
 // поверхности, координатор, общий уголок и уголок; PL10.2.2: распознавание жестов и «Поиграть».
-const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/cat.mjs', 'native/corner.mjs', 'native/dog.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/play.mjs', 'native/provider.mjs', 'native/room.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
+const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/arrange.mjs', 'native/cat.mjs', 'native/corner.mjs', 'native/dog.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/play.mjs', 'native/provider.mjs', 'native/room.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
 const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', ...REACT, ...NATIVE, 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
 // Голые имена партнёров — только в своих файлах (PL08 — react, PL09 — react-native и expo-sqlite, PL10.1 — отображение и
 // рисунки натива: react и react-native-svg; PL10.2.1 — рисунок поверхности, координатор, общий уголок, уголок; PL10.2.2 —
 // «Поиграть»).
 const PEER_FILES = {
-  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
-  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
+  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
+  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
   'react-native-svg': (file) => ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/room.mjs', 'native/figure.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
   'expo-sqlite': (file) => file === 'native-sqlite.mjs',
 };
@@ -97,6 +97,7 @@ const NATIVE_LOCAL = {
   'native/corner.mjs': ['core/pets.mjs', 'core/ports.mjs', 'core/room.mjs', 'core/stages.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/room.mjs'],
   'native/gesture.mjs': ['core/toys.mjs'],
   'native/play.mjs': ['core/play.mjs', 'core/ports.mjs', 'core/toys.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/svg.mjs'],
+  'native/arrange.mjs': ['core/editor.mjs', 'core/ports.mjs', 'core/room.mjs', 'hooks/state.mjs', 'native/corner.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/room.mjs'],
 };
 // Пример расширения (вне архива): файлы для Node и для браузера (legacy и контейнер).
 const EXTENSION = ['bunny.mjs', 'bunny-web.mjs', 'bunny.css', 'container.html', 'index.html', 'lively.mjs', 'node.mjs'];
@@ -1217,7 +1218,7 @@ export { styles };
     path.join(project, 'native.mts'),
     `import { calm } from '${NAME}/behaviors';
 import { createPetCore, type PetCore, type PetLoadStatus, type PetSceneReserver, type PetView as PetViewName } from '${NAME}/core';
-import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetView, useNativeLifecycle, usePetState, type NativePetKit, type PetCornerProps, type PetInsets, type PetPlayProps, type PetViewProps } from '${NAME}/native';
+import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetRoom, PetView, useNativeLifecycle, usePetState, type NativePetKit, type PetCornerProps, type PetInsets, type PetPlayProps, type PetRoomProps, type PetViewProps } from '${NAME}/native';
 import { createSqliteScenes, createSqliteStorage, type PetSqliteOptions } from '${NAME}/native-sqlite';
 import { cat, dog } from '${NAME}/pets';
 declare const db: { databasePath: string; execAsync(source: string): Promise<void> };
@@ -1282,7 +1283,13 @@ const playable: NativePetKit = { ...room, play: true };
 const notPlay: NativePetKit = { ...own, play: false };
 // @ts-expect-error entry — boolean
 PetPlay({ entry: 'yes' });
-export { loaded, ready, idle, name, sync, view, kind, own, web, notView, provider, composed, corner, bare, room, feedIn, notRoom, play, playBare, playable, notPlay };
+// PL10.2.3: «Обустроить уголок».
+const editorProps: PetRoomProps = { insets, testID: 'room' };
+const editor = PetRoom(editorProps);
+const editorBare = PetRoom({});
+// @ts-expect-error testID — строка
+PetRoom({ testID: 1 });
+export { editor, editorBare, loaded, ready, idle, name, sync, view, kind, own, web, notView, provider, composed, corner, bare, room, feedIn, notRoom, play, playBare, playable, notPlay };
 `,
   );
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');

@@ -86,8 +86,8 @@ test('публичные входы: mountPet, localDay, VERSION; ядро (PL05
 // рисунок поверхности figure.mjs, координатор provider.mjs, общий уголок room.mjs и уголок corner.mjs).
 const NATIVE_ART = ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/room.mjs'];
 const PEER_FILES = {
-  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
-  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
+  react: (file) => file === 'react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
+  'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
   'react-native-svg': (file) => ['native/figure.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file) || NATIVE_ART.includes(file),
   'expo-sqlite': (file) => file === 'native-sqlite.mjs',
 };
@@ -107,6 +107,8 @@ const NATIVE_LAYERS = {
   // PL10.2.2: распознавание и геометрия игры — без React (только размеры предметов ядра); «Поиграть» — отображение.
   'native/gesture.mjs': { bare: [], local: ['core/toys.mjs'] },
   'native/play.mjs': { bare: ['react', 'react-native', 'react-native-svg'], local: ['core/play.mjs', 'core/ports.mjs', 'core/toys.mjs', 'hooks/state.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/svg.mjs'] },
+  // PL10.2.3: «Обустроить уголок» — отображение (сцена уголка, команды room.*); рисунков своих нет.
+  'native/arrange.mjs': { bare: ['react', 'react-native'], local: ['core/editor.mjs', 'core/ports.mjs', 'core/room.mjs', 'hooks/state.mjs', 'native/corner.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/provider.mjs', 'native/room.mjs'] },
 };
 // Экспорты значений модуля разбором исходника (для входов, которые без партнёров не импортируются).
 const exported = (text) =>
@@ -257,7 +259,7 @@ test('граф натива (PL09, PL10.1, PL10.2.1, PL10.2.2): pet/storage/** �
     assert.ok(![...seen].some((file) => /^(native|storage)(\/|\.|-)/.test(file)), `${entry} достигает натива`);
     assert.ok(!bare.has('react-native') && !bare.has('expo-sqlite') && !bare.has('react-native-svg'), `${entry}: ${[...bare].join(', ')}`);
   }
-  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetCorner', 'PetPlay', 'PetProvider', 'PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
+  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetCorner', 'PetPlay', 'PetProvider', 'PetRoom', 'PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
   assert.deepEqual(exported(await read('pet/native-sqlite.mjs')), ['createSqliteScenes', 'createSqliteStorage']);
 });
 

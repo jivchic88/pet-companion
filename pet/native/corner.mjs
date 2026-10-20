@@ -13,8 +13,9 @@
 // показывается его текстом. «Поиграть» (PL10.2.2) — кнопка у сцены, только когда вид 'play' объявлен ядру (подключена
 // годная поверхность PetPlay): core.open('play'); возврат из игры — фокус на неё. Присутствие (PL10.2.2): «Всегда рядом» /
 // «Приходит по зову» — core.setPresence, «Скрыть …» — core.hide() (окно закрывает ядро), спрятан — вместо входа
-// «Показать …» — core.show() (по зову — снова вызов, игра сама не открывается). «Обустроить уголок» — PL10.2.3: кнопки нет.
-// Сценок нет (scenes: {} у координатора). Окно — по очереди с окном игры (useWindow координатора: iOS не покажет новое
+// «Показать …» — core.show() (по зову — снова вызов, игра сама не открывается). «Обустроить уголок» (PL10.2.3) — кнопка у
+// сцены, только когда вид 'room' объявлен ядру (подключён PetRoom): core.open('room'); возврат из редактора — фокус на неё.
+// Сцену уголка (CornerScene) рисует и редактор — с черновиком расстановки. Сценок нет (scenes: {} у координатора). Окно — по очереди с окном игры (useWindow координатора: iOS не покажет новое
 // модальное окно, пока прежнее уходит).
 //
 // Привязка окна — пара «ядро и показанный питомец» (доработка PL10.2.1): черновик имени, страница готовых имён, отказ и
@@ -49,7 +50,8 @@ const PRESENCES = Object.freeze([
   Object.freeze({ id: 'always', title: 'Всегда рядом', note: 'Питомец остаётся на экране.' }),
   Object.freeze({ id: 'on-call', title: 'Приходит по зову', note: 'Без питомца на экране. Позови кнопкой, когда захочешь.' }),
 ]);
-const SAVE_KEYS = ['cat', 'companion', 'look', 'treat', 'ext', 'presence'];
+// room (PL10.2.3) — отказ записи расстановки PetRoom (асинхронное хранилище: итог приходит после выхода из редактора).
+const SAVE_KEYS = ['cat', 'companion', 'look', 'treat', 'ext', 'presence', 'room'];
 const ORIENTATIONS = ['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right'];
 
 // Черновик имени: { core, pet, text } — виден и применяется только для того же ядра и показанного питомца (смена пары его
@@ -98,7 +100,8 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const entryRef = useRef(null);
   const closeRef = useRef(null);
   const playRef = useRef(null);
-  // Вид до открытия уголка: из «Поиграть» — фокус на «Поиграть», иначе на «Закрыть».
+  const roomRef = useRef(null);
+  // Вид до открытия уголка: из «Поиграть» — фокус на «Поиграть», из редактора — на «Обустроить уголок», иначе на «Закрыть».
   const from = useRef(null);
   const seen = useRef(null);
   const treatRef = useRef(null);
@@ -334,6 +337,14 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
     const result = core.open('play');
     if (!result.ok) say(`Поиграть: ${result.error.message}`);
   };
+  // «Обустроить уголок» (PL10.2.3) — вид ядра 'room': окно уголка уходит, окно редактора (PetRoom) показывает черновик.
+  const toRoom = () => {
+    if (!ours()) return;
+    setNote(null);
+    core.activity();
+    const result = core.open('room');
+    if (!result.ok) say(`Обустроить уголок: ${result.error.message}`);
+  };
   const tell = (text) => quiet('объявление не передано', () => AccessibilityInfo.announceForAccessibility?.(text));
   // «Скрыть»: окно закрывает ядро, фокус — на «Показать …» (вход на месте прежнего).
   const hide = () => {
@@ -422,12 +433,19 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
   const freshNames = [...fresh, ...freshAccessories].map(itemName).filter(Boolean);
   const newsText = `${told?.celebrate ? `Новая ступень «${STAGES[told.stage]?.title ?? ''}»! ` : ''}${freshNames.length ? `Новое в уголке: ${freshNames.join(', ')}.` : ''}`.trim();
 
-  const scene = sceneWidth > 0 ? h(Scene, { width: sceneWidth, def, kit, who, snapshot, stage, fresh, prefix, core, testID, name }) : null;
-  // «Поиграть» — только когда вид объявлен (подключена годная поверхность игры): неработающей кнопки нет.
+  const scene = sceneWidth > 0 ? h(CornerScene, { width: sceneWidth, def, kit, who, snapshot, stage, fresh, prefix, core, testID, name }) : null;
+  // «Поиграть» и «Обустроить уголок» — только когда вид объявлен (подключена годная поверхность): неработающей кнопки нет.
   const playable = snapshot.display.views.includes('play');
-  const playNode = playable
-    ? h(Choice, { key: 'play', ref: playRef, testID: `${testID}-play`, role: 'button', title: 'Поиграть', primary: true, disabled: !running, hint: 'Погладить, лапа, миска и мячик', onPress: toPlay })
-    : null;
+  const arrangeable = snapshot.display.views.includes('room');
+  const playNode =
+    playable || arrangeable
+      ? h(
+          View,
+          { key: 'play', style: styles.sceneActions },
+          playable ? h(Choice, { ref: playRef, testID: `${testID}-play`, role: 'button', title: 'Поиграть', primary: true, disabled: !running, hint: 'Погладить, лапа, миска и мячик', onPress: toPlay }) : null,
+          arrangeable ? h(Choice, { ref: roomRef, testID: `${testID}-arrange`, role: 'button', title: 'Обустроить уголок', disabled: !running, hint: 'Переставить подушку, миску и игрушки', onPress: toRoom }) : null,
+        )
+      : null;
   const sections = [
     snapshot.prefs.phrases && snapshot.scenePhrase ? h(Text, { key: 'say', testID: `${testID}-phrase`, style: styles.phrase }, snapshot.scenePhrase) : null,
     newsText ? h(Text, { key: 'news', testID: `${testID}-news`, style: styles.news }, newsText) : null,
@@ -519,7 +537,7 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
         statusBarTranslucent: edge,
         navigationBarTranslucent: edge,
         onRequestClose: close,
-        onShow: () => focusOn((from.current === 'play' ? playRef.current : null) ?? closeRef.current),
+        onShow: () => focusOn((from.current === 'play' ? playRef.current : from.current === 'room' ? roomRef.current : null) ?? closeRef.current),
         onDismiss: () => {
           slot.dismissed();
           dismissed();
@@ -567,11 +585,12 @@ export function PetCorner({ insets, entry = true, label, hint = 'Открыть 
 
 // ---------- сцена ----------
 
-function Scene({ width, def, kit, who, snapshot, stage, fresh, prefix, core, testID, name }) {
+// pos — расстановка для рисунка (по умолчанию сохраняемая room.pos; редактор PetRoom передаёт черновик); editor — миска
+// нарисована всегда (её место переставляют и до первого занятия дня, как в редакторе веба).
+export function CornerScene({ width, def, kit, who, snapshot, stage, fresh, prefix, core, testID, name, pos = snapshot.room.pos, editor = false }) {
   const model = useMemo(() => roomModel(def), [def]);
   const k = width / SCENE[0];
   const height = Math.round(width * (SCENE[1] / SCENE[0]));
-  const pos = snapshot.room.pos;
   const shared = sharedItems(def, stage);
   const toys = def.room.toys.filter((toy) => toy.stage <= stage).map((toy) => toy.id);
   const ownIds = [...new Set([...toys, ...def.items.list.filter((item) => item.stage <= stage && !shared.includes(item.id) && (kit.items ?? []).includes(item.id)).map((item) => item.id)])];
@@ -584,14 +603,14 @@ function Scene({ width, def, kit, who, snapshot, stage, fresh, prefix, core, tes
   const parts = { model, stage, pos, shared, fresh, prefix: `${prefix}-room` };
   return h(
     View,
-    { testID: `${testID}-scene`, style: { width, height }, accessible: true, accessibilityRole: 'image', accessibilityLabel: `${name} в уголке${things.length ? `: ${things.join(', ').toLowerCase()}` : ''}${treat !== 'waiting' ? ', миска' : ''}`, pointerEvents: 'none' },
+    { testID: `${testID}-scene`, style: { width, height }, accessible: true, accessibilityRole: 'image', accessibilityLabel: `${name} в уголке${things.length ? `: ${things.join(', ').toLowerCase()}` : ''}${editor || treat !== 'waiting' ? ', миска' : ''}`, pointerEvents: 'none' },
     h(Svg, { testID: `${testID}-back`, style: layer, width, height, viewBox: `0 0 ${SCENE[0]} ${SCENE[1]}`, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' }, roomBack(parts)),
     h(
       View,
       { testID: `${testID}-pet`, style: { position: 'absolute', left: box.x * k, top: box.y * k }, pointerEvents: 'none', accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' },
       h(PetFigure, { core, snapshot, kit, def, width: box.width * k, pose, prefix: `${prefix}-pet`, testID: `${testID}-pet`, room: { feed: snapshot.room.feedShift } }),
     ),
-    h(Svg, { testID: `${testID}-front`, style: layer, width, height, viewBox: `0 0 ${SCENE[0]} ${SCENE[1]}`, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' }, roomFront({ ...parts, bowl: { shown: treat !== 'waiting', full: pose === 'feed' }, own })),
+    h(Svg, { testID: `${testID}-front`, style: layer, width, height, viewBox: `0 0 ${SCENE[0]} ${SCENE[1]}`, accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' }, roomFront({ ...parts, bowl: { shown: editor || treat !== 'waiting', full: !editor && pose === 'feed' }, own })),
   );
 }
 
@@ -767,6 +786,7 @@ const styles = StyleSheet.create({
   bodyWide: { flexDirection: 'row' },
   sceneSide: { paddingHorizontal: 16, paddingTop: 8, alignItems: 'center' },
   sceneTop: { alignItems: 'center', paddingBottom: 8 },
+  sceneActions: { gap: 8 },
   scroll: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 8, gap: 16 },
   phrase: { fontSize: 16, lineHeight: 22, color: INK, textAlign: 'center', fontStyle: 'italic' },

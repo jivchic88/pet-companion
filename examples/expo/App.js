@@ -1,8 +1,9 @@
-// Мобильный потребитель (PL10.1, PL10.2.1, PL10.2.2): питомец на экране — PetView и штатные наборы pet-companion/native
+// Мобильный потребитель (PL10.1, PL10.2.1, PL10.2.2, PL10.2.3): питомец на экране — PetView и штатные наборы pet-companion/native
 // (рисунки react-native-svg, без WebView) внутри координатора PetProvider (один владелец объявления отображения ядра),
 // уголок PetCorner (окно по view снимка: вход, «Закрыть», Android «Назад»; комната, вещи ступени, имя, облик, аксессуары,
 // движение, реплики, кормление, счёт и ступени, «Поиграть», присутствие, «Скрыть») и «Поиграть» PetPlay (поглаживание,
-// лапа, миска и мячик пальцем и кнопками; вызов «по зову»); отступы безопасной области — useSafeAreaInsets
+// лапа, миска и мячик пальцем и кнопками; вызов «по зову»), «Обустроить уголок» PetRoom (перенос пальцем, кнопки, «Сохранить» /
+// «Отмена»); отступы безопасной области — useSafeAreaInsets
 // (react-native-safe-area-context, входит в Expo Go SDK 58). Прямые команды хоста PL10.2.2 — присутствие, «Скрыть» /
 // «Показать», открыть, позвать и закрыть игру — те же публичные команды ядра. Ниже — прежние кнопки PL10.1 (выбор кота или собаки, имя с клавиатуры, облик и
 // платок, движение, «Погладить», «Покормить», подтверждённое занятие хоста, отключение и повторное подключение) и
@@ -12,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
+import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetRoom, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
 import { busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
 
 const KITS = [catNative, dogNative];
@@ -169,6 +170,9 @@ function Screen() {
       toys: s?.play ? `миска ${s.play.toys.bowl.at?.map(Math.round).join(',') ?? '—'}${s.play.toys.bowl.home ? ' (дом)' : ''}, мячик ${s.play.toys.ball.at?.map(Math.round).join(',') ?? '—'}` : '—',
       // Пол — с тремя знаками: по нему проверка на устройстве переводит единицы рисунка в точки сцены (масштаб 22 / playTouch).
       floor: s?.display.playFloor ? `${s.display.playFloor.join(',')} / ${s.display.playTouch}` : '—',
+      // PL10.2.3: «Обустроить уголок» — черновик (выбор, места, перенос, что не сохранено, запись) и сохраняемая расстановка.
+      room: s?.room.draft ? `черновик ${s.room.draft.pick}: ${Object.entries(s.room.draft.pos).map(([id, p]) => `${id} ${p.map(Math.round).join(',')}`).join('; ')}${s.room.draft.drag ? `; перенос ${s.room.draft.drag.id} ${s.room.draft.drag.at.map(Math.round).join(',')}` : ''}; не сохранено [${s.room.draft.changed.join(',')}]${s.room.draft.saving ? '; запись' : ''}${s.room.draft.failed ? '; отказ' : ''}` : `сохранено: ${Object.entries(s?.room.pos ?? {}).map(([id, p]) => `${id} ${p.map(Math.round).join(',')}`).join('; ')}`,
+      roomSave: s ? `${s.save.room?.status ?? '—'}${s.save.room?.unsaved?.length ? ` несохранено [${s.save.room.unsaved.join(',')}]` : ''}` : '—',
     });
     let last = pick(core.getState());
     return core.subscribe(
@@ -188,6 +192,8 @@ function Screen() {
         if (now.outcome !== last.outcome) say(`игра: итог ${last.outcome} → ${now.outcome}${s.play?.text ? ` «${s.play.text}»` : ''}`);
         if (now.playPose !== last.playPose) say(`игра: поза ${last.playPose} → ${now.playPose}`);
         if (now.toys !== last.toys) say(`игра: ${now.toys}`);
+        if (now.room !== last.room) say(`комната: ${now.room} (${update.reason})`);
+        if (now.roomSave !== last.roomSave) say(`room: ${last.roomSave} → ${now.roomSave}`);
         last = now;
         settle(s);
         const value = confirmed(s, store.host.today());
@@ -446,6 +452,7 @@ function Screen() {
         <View style={styles.stage}>{core ? <PetView size={200} testID="pet" /> : <Text style={styles.off}>Питомец отключён</Text>}</View>
         {core ? <PetCorner insets={insets} testID="corner" /> : null}
         {core ? <PetPlay insets={insets} testID="play" /> : null}
+        {core ? <PetRoom insets={insets} testID="room" /> : null}
       </PetProvider>
       <Text style={styles.status} testID="status">
         {`${store ? `Хранилище: ${store.storage.status}` : 'Хранилище: загрузка…'} · ${core ? `ядро ${core.status}` : 'ядро отключено'}${note ? `\n${note}` : ''}`}
