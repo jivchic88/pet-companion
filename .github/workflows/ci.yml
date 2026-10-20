@@ -25,3 +25,12 @@ jobs:
       - run: npm run test:package
       # Внешние потребители: архив в чистых проектах с Vite и React 18/19 (нужна сеть npm).
       - run: npm run test:consumers
+      # PL12: архив из коммита (git archive → npm pack) и его запись — SHA-256, integrity, содержимое; на теге — ещё
+      # согласованность номера. Публикация (scripts/release.mjs publish) сверяет свой архив с этой записью по содержимому.
+      - name: Запись архива
+        run: node scripts/release.mjs record --out release ${{ github.ref_type == 'tag' && format('--expect-tag {0}', github.ref_name) || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-record
+          path: release/
+          if-no-files-found: error

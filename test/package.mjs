@@ -51,6 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
 import { buildManifest, manifestProblems } from '../scripts/manifest.mjs';
+import { digest, tarballInfo } from '../scripts/release.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -685,14 +686,17 @@ async function manifestSites(browser, project, manifest) {
 const tmp = await mkdtemp(path.join(tmpdir(), `${NAME}-package-`));
 let browser;
 try {
-  // Упаковка: состав, повтор — те же байты.
-  const first = await pack(path.join(tmp, 'pack1'));
+  // Упаковка: состав, повтор — те же байты. PL12: PET_TARBALL — проверяется ровно этот архив выпуска (scripts/release.mjs
+  // prepare), и свежая упаковка рабочего дерева должна дать то же содержимое.
+  const given = process.env.PET_TARBALL ? await tarballInfo(path.resolve(process.env.PET_TARBALL)) : null;
+  const first = given ?? (await pack(path.join(tmp, 'pack1')));
   const second = await pack(path.join(tmp, 'pack2'));
   const tarball = await readFile(first.path);
   const listed = first.files.map((item) => item.path).sort();
   check(`npm pack: ${first.filename} — ровно файлы пакета (${EXPECTED.length})`, JSON.stringify(listed) === JSON.stringify(EXPECTED), listed.join(', '));
   check('npm pack: ни проверок, ни фикстур, ни служебных файлов', listed.every((file) => !FORBIDDEN.test(file)), listed.filter((file) => FORBIDDEN.test(file)).join(', '));
-  check('npm pack: повторная упаковка — те же байты', first.integrity === second.integrity && sha256(tarball) === sha256(await readFile(second.path)), `${first.integrity} / ${second.integrity}`);
+  if (given) check(`архив выпуска ${first.filename} (PET_TARBALL) — то же содержимое, что упаковка рабочего дерева`, given.digest.filesSha256 === digest(await readFile(second.path)).filesSha256, `${given.digest.filesSha256} / ${digest(await readFile(second.path)).filesSha256}`);
+  else check('npm pack: повторная упаковка — те же байты', first.integrity === second.integrity && sha256(tarball) === sha256(await readFile(second.path)), `${first.integrity} / ${second.integrity}`);
   console.log(`  ${first.filename}: ${tarball.length} байт, integrity ${first.integrity}, sha256 ${sha256(tarball)}`);
 
   // Архив как есть: системный tar.

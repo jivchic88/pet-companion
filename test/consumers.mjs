@@ -27,6 +27,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
+import { digest, tarballInfo } from '../scripts/release.mjs';
 
 const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -283,12 +284,15 @@ const tmp = await realpath(await mkdtemp(path.join(tmpdir(), `${NAME}-consumers-
 let browser;
 const env = { node: process.version, npm: (await run('npm', ['-v'])).stdout.trim() };
 try {
-  // Архив: упаковка дважды — те же байты; состав — с manifest.json, входом React и хуком.
-  const first = await pack(root, path.join(tmp, 'pack1'));
+  // Архив: упаковка дважды — те же байты; состав — с manifest.json, входом React и хуком. PL12: PET_TARBALL — ставится ровно
+  // этот архив выпуска (scripts/release.mjs prepare), свежая упаковка рабочего дерева — то же содержимое.
+  const given = process.env.PET_TARBALL ? await tarballInfo(path.resolve(process.env.PET_TARBALL)) : null;
+  const first = given ?? (await pack(root, path.join(tmp, 'pack1')));
   const second = await pack(root, path.join(tmp, 'pack2'));
   const tarball = await readFile(first.path);
   const listed = first.files.map((item) => item.path);
-  check(`npm pack: ${first.filename} — повторная упаковка даёт те же байты; в архиве manifest.json, pet/react.mjs, pet/react.d.mts, pet/hooks/state.mjs`, first.integrity === second.integrity && sha256(tarball) === sha256(await readFile(second.path)) && ['manifest.json', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs'].every((file) => listed.includes(file)), listed.join(', '));
+  const same = given ? given.digest.filesSha256 === digest(await readFile(second.path)).filesSha256 : first.integrity === second.integrity && sha256(tarball) === sha256(await readFile(second.path));
+  check(`${given ? `архив выпуска ${first.filename} (PET_TARBALL) — то же содержимое, что упаковка рабочего дерева` : `npm pack: ${first.filename} — повторная упаковка даёт те же байты`}; в архиве manifest.json, pet/react.mjs, pet/react.d.mts, pet/hooks/state.mjs`, same && ['manifest.json', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs'].every((file) => listed.includes(file)), listed.join(', '));
   note(`${first.filename}: ${tarball.length} байт, integrity ${first.integrity}, sha256 ${sha256(tarball)}`);
 
   // Проекты: обычный веб (без React), React 19 и React 18 — установка этого .tgz и точных версий.
