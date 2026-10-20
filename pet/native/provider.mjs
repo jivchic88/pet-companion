@@ -5,7 +5,8 @@
 // (useNativeLifecycle) и start остаются у хоста.
 //
 // Объявление: { full: true, moving: false, pets — питомцы с набором, views — виды, чьи поверхности сейчас подключены
-// (PetCorner — 'corner', PetPlay — 'play'), scenes: {} — сценок нет: ни резервирования дня, ни показа; playFloor, playTouch —
+// (PetCorner — 'corner', PetPlay — 'play', PetRoom — 'room'), scenes — сценки, которые рисуют наборы (поле scenes набора, PL10.2.4;
+// без него — ни резервирования дня, ни показа); playFloor, playTouch —
 // пол игры, когда он измерен }. Поверхность подключается
 // register(view) → отписка; подключение объявляется сразу, отключение — микрозадачей (StrictMode и пересоздание той же
 // поверхности не дают промежуточного сброса), открытый вид без поверхности закрывается ядром (core.close) перед
@@ -30,7 +31,7 @@
 import { createContext, createElement as h, isValidElement, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Platform } from 'react-native';
 import { systemLog } from '../core/ports.mjs';
-import { nativeCatalog } from './kits.mjs';
+import { nativeCatalog, nativeScenes } from './kits.mjs';
 
 export const PetContext = createContext(null);
 export const usePetContext = () => useContext(PetContext);
@@ -137,16 +138,16 @@ function coordinator() {
   // открытый вид без поверхности — закрыт до объявления. Не владелец (ждёт в очереди) — ничего.
   b.sync = () => {
     if (!b.live) return;
-    const { core: c, ids: list } = b.latest;
+    const { core: c, ids: list, scenes = {} } = b.latest;
     seat(b, alive(c) && list.length ? c : null);
     if (!b.owns()) return;
     const views = VIEW_ORDER.filter((view) => (b.views.get(view) ?? 0) > 0);
     const floor = views.includes('play') ? floorOf(b.floors) : null;
-    const key = `${list.join('\n')}|${views.join(',')}|${floor ? `${floor.playFloor.join(',')}/${floor.playTouch}` : ''}`;
+    const key = `${list.join('\n')}|${views.join(',')}|${JSON.stringify(scenes)}|${floor ? `${floor.playFloor.join(',')}/${floor.playTouch}` : ''}`;
     if (b.declared === key) return;
     const open = quiet('снимок не прочитан', () => c.getState().view.open);
     if (open && VIEW_ORDER.includes(open) && !views.includes(open)) quiet('вид не закрыт', () => c.close());
-    const display = { full: true, moving: false, pets: list, views, scenes: {} };
+    const display = { full: true, moving: false, pets: list, views, scenes };
     if (floor) Object.assign(display, { playFloor: [...floor.playFloor], playTouch: floor.playTouch });
     const result = quiet('объявление отображения не принято', () => c.setDisplay(display));
     if (result?.ok) {
@@ -281,7 +282,7 @@ export function PetProvider({ core = null, pets, kits, announce = true, children
 
   // Последние ядро и каталог — до эффектов детей (их подключение объявляет уже текущее).
   useLayoutEffect(() => {
-    b.latest = { core: usable, ids: catalog.ids };
+    b.latest = { core: usable, ids: catalog.ids, scenes: nativeScenes(catalog) };
   });
 
   // Подключение координатора и смена ядра или каталога — объявление; размонтирование — уход от ядра микрозадачей (StrictMode

@@ -14,9 +14,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetRoom, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
-import { busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
+import { BEHAVIORS, busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
+import { bunnyNative } from './extension.mjs';
 
-const KITS = [catNative, dogNative];
+const KITS = [catNative, dogNative, bunnyNative];
 const MOTION_TITLES = [
   ['normal', 'Обычное'],
   ['calm', 'Спокойное'],
@@ -358,6 +359,8 @@ function Screen() {
   const opened = new Set(state?.progress?.accessories ?? []);
   const running = Boolean(core && state);
   // Кнопки — данные: та же функция у кнопки и у моста разработки.
+  // PL10.2.4: модель поведения — штатная «спокойная» или «живая» примера расширения (core.setBehavior).
+  const models = BEHAVIORS.map((one) => ({ id: `model-${one.id}`, title: one.title, selected: state?.behavior === one.id, disabled: !running, onPress: command(`Модель «${one.title}»`, (c) => c.setBehavior(one.id)) }));
   const kinds = PETS.map((one) => ({ id: `kind-${one.id}`, title: one.title, selected: state?.pet.shown === one.id, disabled: !running, onPress: command(`Питомец «${one.title}»`, (c) => c.setPet(one.id)) }));
   const coats = def.coats.map((coat) => ({ id: `coat-${coat.id}`, title: coat.title, selected: state?.look.coat === coat.id, disabled: !running, onPress: command(`Облик «${coat.title}»`, (c) => c.setAppearance({ coat: coat.id })) }));
   const accessories = def.accessories.map((item) => ({
@@ -396,7 +399,7 @@ function Screen() {
     { id: 'diag-busy', title: 'Занятый файл', disabled: !running, onPress: busy },
   ];
   const nameSave = { id: 'name-save', title: 'Сохранить имя', disabled: !running, onPress: saveName };
-  const all = [...kinds, nameSave, ...coats, ...accessories, ...motions, ...actions, ...direct, ...life, ...diag];
+  const all = [...kinds, ...models, nameSave, ...coats, ...accessories, ...motions, ...actions, ...direct, ...life, ...diag];
   const progress = store?.host?.progress?.();
   const rows = [
     ['Хранилище', store ? store.storage.status : '…'],
@@ -459,6 +462,7 @@ function Screen() {
       </Text>
       <Group title="Действия" items={actions} />
       <Group title="Питомец" items={kinds} />
+      <Group title="Модель поведения" items={models} />
       <Text style={styles.label} nativeID="name-label">
         Имя: {state ? state.name.display : '—'}
       </Text>

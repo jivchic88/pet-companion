@@ -14,12 +14,15 @@ import { calm } from 'pet-companion/behaviors';
 import { createPetCore, localDay } from 'pet-companion/core';
 import { createSqliteScenes, createSqliteStorage } from 'pet-companion/native-sqlite';
 import { cat, dog } from 'pet-companion/pets';
+import { bunny, lively } from './extension.mjs';
 
 export const FILE = 'pet-companion-example.db';
 export const NAMESPACE = 'expo-example';
 export const NAMES = ['Барсик', 'Пиксель', 'Дымок'];
 export const MOTIONS = ['normal', 'calm', 'none'];
-export const PETS = Object.freeze([cat, dog]);
+// PL10.2.4: третий питомец и вторая модель — пример расширения (extension.mjs), только публичные входы.
+export const PETS = Object.freeze([cat, dog, bunny]);
+export const BEHAVIORS = Object.freeze([calm, lively]);
 const DAY_MS = 86_400_000;
 
 // База примера (своя, отдельный файл): ожидание занятого файла и WAL для своего соединения — выбор приложения, не
@@ -39,6 +42,8 @@ export async function openStore(open = openDatabaseAsync) {
     expected: row ? JSON.parse(row.value) : null,
     storage: createSqliteStorage({ db, namespace: NAMESPACE }),
     scenes: createSqliteScenes({ db, namespace: `${NAMESPACE}-probe` }),
+    // PL10.2.4: день редкой сценки ядра — своё пространство резервирования (проба выше — отдельно).
+    sceneDay: createSqliteScenes({ db, namespace: NAMESPACE }),
     host: createHost(db, { days: JSON.parse(days?.days ?? '{}'), shift: clock?.shift ?? 0 }),
   };
 }
@@ -87,7 +92,7 @@ export function createHost(db, { days = {}, shift = 0 } = {}) {
 export async function newCore(store, progress = store.host?.progress) {
   const status = await store.storage.load();
   const clock = store.host?.clock;
-  return { status, core: createPetCore({ storage: store.storage, pets: PETS, behaviors: [calm], progress, ...(clock ? { clock } : {}) }) };
+  return { status, core: createPetCore({ storage: store.storage, pets: PETS, behaviors: BEHAVIORS, progress, ...(clock ? { clock } : {}), ...(store.sceneDay ? { scenes: store.sceneDay } : {}) }) };
 }
 
 // Подтверждённое (ключи cat, companion, look и treat без своих неразрешённых и несохранённых правок; счёт уже прочитан —

@@ -144,7 +144,9 @@ async function opened(L, V, { width = 390, height = 760 } = {}) {
   await V.fire('corner-sheet', 'onLayout', layout(width, height + 84));
   await V.fire('corner-body', 'onLayout', layout(width, height));
 }
-const DISPLAY = (views) => ({ full: true, moving: false, pets: ['cat', 'dog'], views, scenes: {} });
+// PL10.2.4: сценки, которые рисуют штатные наборы, объявляет координатор.
+const SCENES = { cat: ['stretch', 'curl'], dog: ['fetch'] };
+const DISPLAY = (views) => ({ full: true, moving: false, pets: ['cat', 'dog'], views, scenes: SCENES });
 const elements = (node, list = []) => {
   if (Array.isArray(node)) for (const item of node) elements(item, list);
   else if (React.isValidElement(node)) {
@@ -175,7 +177,9 @@ test('наборы: ресурсы уголка штатных — по свои
     [{ ...catNative, items: 'yarn' }, /items — плотный массив строк/],
     [{ ...catNative, items: ['yarn', 1] }, /items — плотный массив строк/],
     [{ ...catNative, Item: '<g/>' }, /Item — функция/],
-    [{ ...catNative, scenes: ['stretch'] }, /неизвестные поля scenes/],
+    [{ ...catNative, scenes: ['nope'] }, /у определения нет сценки «nope»/],
+    [{ ...catNative, scenes: 'stretch' }, /scenes — плотный массив ID сценок/],
+    [{ ...catNative, poses: catNative.poses.filter((pose) => pose !== 'curl'), scenes: ['curl'] }, /поза сценки «curl» \(curl\) не нарисована/],
     [{ ...catNative, toys: ['ball'] }, /неизвестные поля toys/],
   ])
     assert.match(Kits.nativeKitProblem(kit, defs, isEl), problem);
@@ -240,7 +244,7 @@ test('общий уголок: вещи ступени — по определе
   for (const node of elements([Room.roomBack(parts), Room.roomFront({ ...parts, bowl: { shown: false, full: false }, own: [] })])) if (Object.hasOwn(node.props, 'transform')) assert.equal(typeof node.props.transform, 'string');
 });
 
-test('один владелец объявления: PetProvider объявляет ядру ровно одно { pets, views: ["corner"], scenes: {} }; PetView в композиции не объявляет и views не сбрасывает; повторная отрисовка со встроенными массивами и StrictMode — без повторов; отдельный PetView — как PL10.1', async () => {
+test('один владелец объявления: PetProvider объявляет ядру ровно одно { pets, views: ["corner"], scenes — сценки наборов }; PetView в композиции не объявляет и views не сбрасывает; повторная отрисовка со встроенными массивами и StrictMode — без повторов; отдельный PetView — как PL10.1', async () => {
   for (const strict of [false, true]) {
     const L = await lab();
     const V = mount(`owner-${strict}`, tree(L), { strict });

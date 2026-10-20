@@ -116,7 +116,7 @@ const layout = (width, height) => ({ nativeEvent: { layout: { x: 0, y: 0, width,
 const PETS = [cat, dog];
 const KITS = [catNative, dogNative];
 const tree = (L, { corner = true, play = true, view = true, pets = PETS, kits = KITS, insets, key, playProps = {} } = {}) => h(PetProvider, { key, core: L.spy, pets, kits }, view ? h(PetView, { size: 200 }) : null, corner ? h(PetCorner, { insets }) : null, play ? h(PetPlay, { insets, ...playProps }) : null);
-const DISPLAY = (views, extra = {}) => ({ full: true, moving: false, pets: ['cat', 'dog'], views, scenes: {}, ...extra });
+const DISPLAY = (views, extra = {}) => ({ full: true, moving: false, pets: ['cat', 'dog'], views, scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] }, ...extra });
 
 async function started(L, V) {
   await V.act(() => L.core.start());
@@ -892,7 +892,7 @@ test('порт резервирования сценок подключён (к�
   await V.press('play-close');
   await V.act(() => L.plan.advance(60_000));
   assert.equal(L.scenes.calls.reserve, 0);
-  assert.deepEqual(L.core.getState().display.scenes, {});
+  assert.deepEqual(L.core.getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'] }, 'сценки наборов объявлены (PL10.2.4) — и всё равно игра дня не расходует');
   L.core.destroy();
 });
 
@@ -1570,4 +1570,46 @@ test('P3: отказ и подсказка прежнего питомца но�
   }
   L.core.destroy();
   M.core.destroy();
+});
+
+// ---------- PL10.2.4: редкие сценки на нативе ----------
+
+test('сценки (PL10.2.4): наборы объявляют свои сценки; сценка ядра на PetView — фазы (покой → поза сценки → покой), без движения — статично; касание отменяет; в фоне ядро сценку не начинает и день не расходует', async () => {
+  const scene = async ({ motion = 'normal', visible = true } = {}) => {
+    const L = await lab();
+    const V = mount(`scene-${motion}-${visible}`, tree(L, { corner: true, play: true }));
+    await V.render();
+    await started(L, V);
+    if (motion !== 'normal') await V.act(() => L.core.setPreferences({ motion }));
+    if (!visible) await V.act(() => L.core.setVisible(false));
+    await V.act(() => L.counts.set(1, 1));
+    L.rand.push(0, 0, 0);
+    await V.act(() => L.core.notify('saved', { key: 'a1', counted: true }));
+    await V.act(() => L.plan.advance(3000));
+    await until(V, () => Boolean(L.core.getState().pose.reaction?.scene));
+    return { L, V, pose: () => V.node('pet-art')?.children?.props?.pose };
+  };
+  // Обычное движение: сценка кота — реакция ядра; поза сценки — в середине длительности, до неё и после — поза поверхности.
+  const A = await scene();
+  const reaction = A.L.core.getState().pose.reaction;
+  assert.equal(reaction?.scene, true, JSON.stringify(reaction));
+  assert.ok(['stretch', 'curl'].includes(reaction.type));
+  const scenePose = reaction.type;
+  assert.notEqual(A.pose(), scenePose, 'вход: ещё поза покоя');
+  await A.V.act(() => new Promise((resolve) => setTimeout(resolve, Math.round((reaction.type === 'curl' ? 4600 : 3600) * 0.2) + 60)));
+  assert.equal(A.pose(), scenePose, 'середина: поза сценки набора');
+  assert.ok(A.L.scenes.calls.reserve >= 1 && A.L.scenes.calls.show >= 1, JSON.stringify(A.L.scenes.calls));
+  // Касание питомца — ядро отменяет сценку; рисунок сразу возвращается.
+  await A.V.act(() => A.L.core.interact({ type: 'pet' }));
+  assert.equal(A.L.core.getState().pose.reaction?.scene ?? false, false);
+  assert.notEqual(A.pose(), scenePose, 'отмена — поза сценки снята сразу');
+  // Без движения — поза сценки сразу и статично.
+  const B = await scene({ motion: 'none' });
+  const still = B.L.core.getState().pose.reaction;
+  assert.equal(still?.scene, true);
+  assert.equal(B.pose(), still.type, 'без движения — поза сценки сразу');
+  // Ядро не на виду (фон): сценки нет, резервирования дня нет.
+  const C = await scene({ visible: false });
+  assert.equal(C.L.core.getState().pose.reaction?.scene ?? false, false);
+  assert.equal(C.L.scenes.calls.reserve, 0, 'не на виду — день не расходуется');
 });

@@ -7,7 +7,7 @@
 //
 // Два режима, оба через тот же снимок:
 // — отдельно (как PL10.1, свойства core, pets, kits): PetView сам объявляет ядру нарисованное — setDisplay({ full: true,
-//   moving: false, pets — питомцы с набором, views: [], scenes: {} }) — и сам передаёт объявления announce скринридеру;
+//   moving: false, pets — питомцы с набором, views: [], scenes — сценки наборов (PL10.2.4) }) — и сам передаёт объявления announce скринридеру;
 // — композиция (внутри PetProvider, без core или с тем же core): ядро и каталог — координатора, объявление отображения и
 //   объявления скринридеру — только у координатора (один владелец на ядро): PetView их не повторяет и views/scenes,
 //   объявленные уголком, не сбрасывает. Свои pets и kits в композиции — только для рисунка, проверяются так же.
@@ -18,7 +18,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { systemLog } from '../core/ports.mjs';
 import { usePetState } from '../hooks/state.mjs';
 import { PetFigure } from './figure.mjs';
-import { kitFor } from './kits.mjs';
+import { kitFor, nativeScenes } from './kits.mjs';
 import { useAnnounce, useCatalog, usePetContext } from './provider.mjs';
 
 const SIZE = 180;
@@ -42,14 +42,15 @@ export function PetView(props) {
 
   // Что нарисовано — ядру (только отдельно: в композиции объявляет координатор; только своё ядро и только при годном каталоге).
   const ids = catalog.ids.join('\n');
+  const scenes = JSON.stringify(nativeScenes(catalog));
   useEffect(() => {
     if (composed || !usable || !ids) return;
     try {
-      usable.setDisplay({ full: true, moving: false, pets: ids.split('\n'), views: [], scenes: {} });
+      usable.setDisplay({ full: true, moving: false, pets: ids.split('\n'), views: [], scenes: JSON.parse(scenes) });
     } catch (error) {
       systemLog.warn('PetView: объявление отображения не принято', error);
     }
-  }, [composed, usable, ids]);
+  }, [composed, usable, ids, scenes]);
 
   // Объявления ядра — скринридеру, по одному на эффект (в композиции — координатор).
   useAnnounce(composed ? null : usable, announce, 'PetView');

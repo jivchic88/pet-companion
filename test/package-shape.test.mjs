@@ -300,7 +300,7 @@ test('пример расширения (§ 7.10): examples/extension — тол
 
 test('мобильный пример (PL09, PL10.1, PL10.2.1): examples/expo — только публичные входы пакета, expo-sqlite, react, react-native и react-native-safe-area-context; зависимости — точная матрица SDK 58 с react-native-svg 15.16.0 (рисунки наборов; сам пример его не импортирует) и react-native-safe-area-context 5.10.1 (отступы), pet-companion — архивом без записи в package.json; в пакет не входит', async () => {
   const dir = new URL('../examples/expo/', import.meta.url);
-  assert.deepEqual((await readdir(dir)).filter((name) => name !== 'node_modules' && name !== '.lib' && name !== '.expo').sort(), ['.gitignore', 'App.js', 'README.md', 'app.json', 'diagnostics.mjs', 'index.js', 'package-lock.json', 'package.json', 'scripts']);
+  assert.deepEqual((await readdir(dir)).filter((name) => name !== 'node_modules' && name !== '.lib' && name !== '.expo').sort(), ['.gitignore', 'App.js', 'README.md', 'app.json', 'diagnostics.mjs', 'extension.mjs', 'index.js', 'package-lock.json', 'package.json', 'scripts']);
   const example = JSON.parse(await read('examples/expo/package.json'));
   assert.deepEqual(example.dependencies, { expo: '58.0.12', 'expo-sqlite': '58.0.13', react: '19.3.0', 'react-native': '0.88.0', 'react-native-safe-area-context': '5.10.1', 'react-native-svg': '15.16.0' }, 'точные версии матрицы SDK 58 (PL10.2.1: отступы безопасной области — react-native-safe-area-context 5.10.1, ~5.10.1 в bundledNativeModules)');
   assert.equal(example.devDependencies, undefined);

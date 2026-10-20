@@ -64,6 +64,12 @@ export interface NativePetKit {
   readonly items?: readonly string[];
   readonly Item?: (props: NativeItemProps) => ReactElement;
   readonly play?: true;
+  /**
+   * PL10.2.4, необязательное: ID сценок определения, которые набор рисует (поза сценки — среди poses). Координатор и PetView
+   * объявляют их ядру (setDisplay.scenes); показ — PetFigure фазами поверх позы покоя. Без поля сценок нет — ни показа, ни
+   * резервирования дня.
+   */
+  readonly scenes?: readonly string[];
 }
 
 /** Штатный набор кота: все позы словаря (settle — замена content), три облика, три платка; уголок — рисунок в комнате и клубок; игра — по областям определения кота. */
@@ -122,7 +128,7 @@ export interface PetProviderProps {
 
 /**
  * Координатор поверхностей одного ядра (PL10.2.1, PL10.2.2): владелец `setDisplay` — `{ full: true, moving: false, pets
- * (питомцы с набором), views (подключённые поверхности: PetCorner — 'corner', PetPlay — 'play'), scenes: {}, playFloor и
+ * (питомцы с набором), views (подключённые поверхности: PetCorner — 'corner', PetPlay — 'play', PetRoom — 'room'), scenes — сценки наборов (PL10.2.4), playFloor и
  * playTouch — замер сцены игры, когда он есть }` — и объявлений скринридеру. Окно — одно на ядро: уголок и игра показывают
  * его по очереди. Внутри — PetView (без `core`, `pets`, `kits`), PetCorner и PetPlay. Объявляет последний подключённый к ядру координатор: замена
  * (другой React key, новый экран) передаёт объявление без сброса, его отключение возвращает объявление предыдущему, а

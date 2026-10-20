@@ -50,6 +50,10 @@ const POSES = Object.freeze({
   wait: { lidUp: 3, headR: 4, earL: -6, earR: 3, lookY: 1 },
   rest: { sitS: 0.8, sit: 0, lie: 1, headY: 64, headR: -4, scarfY: 56, scarfS: 0.7, lidUp: 28, sleep: 1, earL: -14, earR: 12 },
   yawn: { lidUp: 28, sleep: 1, headY: -3, headR: -3, earL: -9, earR: 8, mouth: 'yawn' },
+  // Сценки (PL10.2.4) — ключевые позы кадров веба: потягивается — лёжа, голова опущена на вытянутые лапы, зажмурился и
+  // зевает; сворачивается клубком — лёжа плотнее покоя, голова к боку, уши прижаты.
+  stretch: { sitS: 0.8, sit: 0, lie: 1, headX: -8, headY: 54, headR: 3, scarfY: 50, scarfS: 0.72, lidUp: 28, sleep: 1, earL: -10, earR: 10, mouth: 'yawn' },
+  curl: { sitS: 0.8, sit: 0, lie: 1, headX: 10, headY: 68, headR: -14, scarfY: 58, scarfS: 0.66, lidUp: 28, sleep: 1, earL: -18, earR: 14 },
   // Сдвиг к миске меньше веба (−30, +12 в сцене 400×250): в рамке рисунка 220×204 питомец не срезается краем.
   feed: { allX: -20, allY: 10, headX: -2, headY: 46, headR: -10, scarfY: 30, scarfS: 0.85, lidUp: 28, happy: 1, earL: -4, earR: 6, t1: -20, t3: 16, bowl: 'full' },
   fed: { lidUp: 28, happy: 1, headR: 6, headY: -1, earL: -8, earR: 7, purr: 1, t2: 10, t3: 18, mouth: 'smile', bowl: 'empty' },
@@ -326,10 +330,10 @@ function CatItem({ id } = {}) {
 
 // Набор: все позы словаря, кроме settle (устроился на новом месте — вход legacy-отображения, нативу не нужен: явная замена
 // — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room) и клубок; ресурсы игры PL10.2.2 — рисунок совпадает с
-// областями play определения кота (play); сценки (stretch, curl) — PL10.2.4.
+// областями play определения кота (play); сценки PL10.2.4 — stretch и curl (ключевые позы, фазы — PetFigure).
 export const catNative = Object.freeze({
   pet: 'cat',
-  poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn']),
+  poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn', 'stretch', 'curl']),
   substitutes: Object.freeze({ settle: 'content' }),
   coats: Object.freeze(Object.keys(COATS)),
   accessories: Object.freeze(['scarf', 'plaid', 'badge']),
@@ -338,4 +342,5 @@ export const catNative = Object.freeze({
   items: Object.freeze(['yarn']),
   Item: CatItem,
   play: true,
+  scenes: Object.freeze(['stretch', 'curl']),
 });

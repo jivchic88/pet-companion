@@ -153,7 +153,7 @@ test('проверка набора: отказ до подключения — 
   const cases = [
     [null, /объект/],
     [{ ...catNative, pet: 'example.fox' }, /нет определения/],
-    [{ ...catNative, scenes: ['stretch'] }, /неизвестные поля scenes/],
+    [{ ...catNative, scenes: ['nope'] }, /у определения нет сценки «nope»/],
     [{ ...catNative, art: () => '<svg/>' }, /неизвестные поля art/],
     [without('poses', 'joy'), /не нарисовано \(poses\): joy/],
     [without('poses', 'paw'), /не нарисовано \(poses\): paw/],
@@ -164,7 +164,7 @@ test('проверка набора: отказ до подключения — 
     [{ ...catNative, Figure: '<svg/>' }, /Figure — функция/],
     [{ ...catNative, Figure: () => { throw new Error('сломан'); } }, /исключение \(сломан\)/],
     [{ ...catNative, substitutes: { joy: 'calm' } }, /substitutes\.joy — заменять можно только необязательные/],
-    [{ ...catNative, substitutes: { settle: 'stretch' } }, /поза stretch не нарисована/],
+    [{ ...catNative, substitutes: { settle: 'nope' } }, /поза nope не нарисована/],
     [{ ...catNative, poses: 'calm' }, /poses — плотный массив/],
   ];
   for (const [kit, problem] of cases) assert.match(check(kit), problem);
@@ -181,7 +181,8 @@ test('проверка набора: отказ до подключения — 
   assert.equal(Kits.drawnPose(catNative, cat, 'joy', 'calm'), 'joy');
   assert.equal(Kits.drawnPose(catNative, cat, 'settle', 'calm'), 'content');
   assert.equal(Kits.drawnPose(bunnyKit, bunny, 'wait', 'calm'), 'attentive');
-  assert.equal(Kits.drawnPose(catNative, cat, 'stretch', 'rest'), 'rest', 'поза сценки без рисунка — базовая поза снимка');
+  assert.equal(Kits.drawnPose({ ...catNative, poses: catNative.poses.filter((pose) => pose !== 'stretch') }, cat, 'stretch', 'rest'), 'rest', 'поза сценки без рисунка — базовая поза снимка');
+  assert.equal(Kits.drawnPose(catNative, cat, 'stretch', 'rest'), 'stretch', 'PL10.2.4: штатный кот рисует позу сценки');
   // Каталог: дубликаты, пустые списки.
   assert.match(Kits.nativeCatalog(PETS, [catNative, catNative], React.isValidElement).problem, /дважды/);
   assert.match(Kits.nativeCatalog([], KITS, React.isValidElement).problem, /pets/);
@@ -209,9 +210,9 @@ test('объявление отображения и рисунок по сни�
   const L = await lab();
   const V = view('draw', { core: L.spy, pets: PETS, kits: KITS, size: 220 });
   await V.render();
-  assert.deepEqual(L.calls.setDisplay, [{ full: true, moving: false, pets: ['cat', 'dog'], views: [], scenes: {} }]);
+  assert.deepEqual(L.calls.setDisplay, [{ full: true, moving: false, pets: ['cat', 'dog'], views: [], scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } }]);
   const display = L.core.getState().display;
-  assert.deepEqual([display.pets, display.views, display.scenes, display.full], [['cat', 'dog'], [], {}, true]);
+  assert.deepEqual([display.pets, display.views, display.scenes, display.full], [['cat', 'dog'], [], { cat: ['stretch', 'curl'], dog: ['fetch'] }, true]);
   await started(L, V);
   let art = V.figure();
   assert.equal(art.element.type, catNative.Figure);

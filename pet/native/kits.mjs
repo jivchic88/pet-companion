@@ -35,7 +35,7 @@ function stringList(value) {
   return true;
 }
 const looksLikeElement = (value) => isObject(value) && 'type' in value && 'props' in value;
-const KIT_FIELDS = ['pet', 'poses', 'coats', 'accessories', 'substitutes', 'Figure', 'room', 'items', 'Item', 'play'];
+const KIT_FIELDS = ['pet', 'poses', 'coats', 'accessories', 'substitutes', 'Figure', 'room', 'items', 'Item', 'play', 'scenes'];
 
 // Вещи, которые рисует общий уголок натива (pet/native/room.mjs — место отдыха и вещи ступеней штатного уголка, как общая
 // сцена веба): набору их рисовать не нужно. Остальные вещи определения и его игрушки — Item набора.
@@ -69,7 +69,7 @@ export function nativeKitProblem(kit, defs, isElement = looksLikeElement) {
   const def = defs.get(kit.pet);
   const at = `набор «${kit.pet}»`;
   const extra = Object.keys(kit).filter((key) => !KIT_FIELDS.includes(key));
-  if (extra.length) return `${at}: неизвестные поля ${extra.join(', ')} (сценки — PL10.2.4; миску и мячик игры рисует сцена натива)`;
+  if (extra.length) return `${at}: неизвестные поля ${extra.join(', ')} (миску и мячик игры рисует сцена натива)`;
   for (const field of ['poses', 'coats', 'accessories']) if (!stringList(kit[field])) return `${at}: ${field} — плотный массив строк`;
   if (typeof kit.Figure !== 'function') return `${at}: Figure — функция рисунка`;
   // Ресурсы уголка и игры необязательны, но если заданы — верной формы (полноту проверяют уголок, nativeCornerProblem, и
@@ -78,6 +78,15 @@ export function nativeKitProblem(kit, defs, isElement = looksLikeElement) {
   if (kit.play !== undefined && kit.play !== true) return `${at}: play — true (рисунок совпадает с областями play определения) или не задано`;
   if (kit.items !== undefined && !stringList(kit.items)) return `${at}: items — плотный массив строк`;
   if (kit.Item !== undefined && typeof kit.Item !== 'function') return `${at}: Item — функция рисунка вещи`;
+  // PL10.2.4: сценки, которые набор рисует, — ID сценок определения; поза сценки — среди нарисованных поз набора.
+  if (kit.scenes !== undefined) {
+    if (!stringList(kit.scenes)) return `${at}: scenes — плотный массив ID сценок`;
+    for (const id of kit.scenes) {
+      const scene = def.scenes.find((item) => item.id === id);
+      if (!scene) return `${at}: scenes — у определения нет сценки «${id}»`;
+      if (!kit.poses.includes(scene.pose)) return `${at}: scenes — поза сценки «${id}» (${scene.pose}) не нарисована`;
+    }
+  }
   if (kit.substitutes !== undefined) {
     if (!isObject(kit.substitutes)) return `${at}: substitutes — объект { поза: нарисованная поза }`;
     const allowed = replaceable(def);
@@ -199,6 +208,12 @@ export function nativeCatalog(pets, kits, isElement = looksLikeElement) {
   }
   return { problem: '', defs, kits: chosen, ids: [...chosen.keys()] };
 }
+
+// Сценки, которые рисуют наборы каталога (объявление setDisplay.scenes): { ID питомца: [ID сценок] }; без поля — нет.
+export const nativeScenes = (catalog) => Object.fromEntries([...catalog.kits.values()].map((kit) => [kit.pet, [...(kit.scenes ?? [])]]));
+
+// Сценка набора в реакции снимка: определение сценки, если реакция — сценка, которую набор показанного рисует; иначе null.
+export const kitScene = (kit, def, reaction) => (reaction?.scene && kit.scenes?.includes(reaction.type) ? (def.scenes.find((item) => item.id === reaction.type) ?? null) : null);
 
 // Ресурсы уголка всего каталога: первая проблема набора против определения своего ID или ''.
 export function cornerProblem(catalog, isElement = looksLikeElement) {

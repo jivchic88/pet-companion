@@ -138,7 +138,7 @@ test('обычный запуск и размонтирование: одно я
   const art = S.node('pet-art');
   assert.equal(art.children.type, catNative.Figure, 'питомец — рисунок штатного набора, без WebView');
   assert.equal(S.node('pet-touch').accessibilityLabel, 'Марс, кот');
-  assert.deepEqual(since(from)[0].getState().display.scenes, {}, 'сценки не объявлены');
+  assert.deepEqual(since(from)[0].getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'], 'example.bunny': ['hop'] }, 'сценки наборов объявлены (PL10.2.4; кролик — пример расширения)');
   await S.unmount();
   assert.deepEqual([statuses(since(from)), rn.live(), box.connections], [['destroyed'], 0, 0]);
   await quiet(S);
@@ -669,12 +669,12 @@ test('сверка перезапуска (diagnostics): прежние запи
   core.destroy();
 });
 
-test('экран PL10.2.1–PL10.2.3: координатор PetProvider — одно объявление { views: ["corner", "play", "room"], scenes: {} }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
+test('экран PL10.2.1–PL10.2.3: координатор PetProvider — одно объявление { views: ["corner", "play", "room"], scenes — сценки наборов }, PetView в композиции его не сбрасывает; уголок открывается входом и закрывается Android «Назад»; отступы экрана и уголка — из useSafeAreaInsets, а не константы; отключение — уголка нет', async () => {
   globalThis.__petInsets = { top: 47, right: 0, bottom: 34, left: 0 };
   try {
     const { S, core } = await running('pl1021');
     const display = core.getState().display;
-    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play', 'room'], {}, ['cat', 'dog']]);
+    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play', 'room'], { cat: ['stretch', 'curl'], dog: ['fetch'], 'example.bunny': ['hop'] }, ['cat', 'dog', 'example.bunny']]);
     assert.equal(S.node('pet-art').children.type, catNative.Figure, 'PetView в композиции рисует');
     const page = S.node('screen').contentContainerStyle[1];
     assert.deepEqual([page.paddingTop, page.paddingBottom, page.paddingLeft, page.paddingRight], [47 + 12, 34 + 48, 16, 16]);
@@ -723,4 +723,23 @@ test('экран PL10.2.2: прямые команды хоста — откры
   } finally {
     rn.platform = 'ios';
   }
+});
+
+test('пример расширения на нативе (PL10.2.4): кролик и «живая» в примере — те же данные, что examples/extension; набор кролика проходит проверки уголка и игры, рисует сценку hop', async () => {
+  const E = await import('../examples/expo/extension.mjs');
+  const { bunny } = await import('../examples/extension/bunny.mjs');
+  const { lively } = await import('../examples/extension/lively.mjs');
+  assert.equal(JSON.stringify(E.bunny), JSON.stringify(bunny), 'определение кролика совпадает');
+  assert.equal(JSON.stringify(E.lively), JSON.stringify(lively), 'модель «живая» совпадает');
+  const Kits = await import('../pet/native/kits.mjs');
+  const { cat, dog } = await import('../pet/pets.mjs');
+  const catalog = Kits.nativeCatalog([cat, dog, E.bunny], [catNative, dogNative, E.bunnyNative], React.isValidElement);
+  assert.equal(catalog.problem, '');
+  assert.equal(Kits.cornerProblem(catalog, React.isValidElement), '');
+  assert.equal(Kits.nativePlayProblem(E.bunnyNative, E.bunny, React.isValidElement), '');
+  assert.deepEqual(Kits.nativeScenes(catalog)['example.bunny'], ['hop']);
+  assert.ok(React.isValidElement(E.bunnyNative.Figure({ pose: 'hop', coat: 'spot', accessory: 'bow', prefix: 't' })));
+  assert.ok(React.isValidElement(E.bunnyNative.Item({ id: 'carrot' })));
+  assert.deepEqual(D.PETS.map((one) => one.id), ['cat', 'dog', 'example.bunny']);
+  assert.deepEqual(D.BEHAVIORS.map((one) => one.id), ['calm', 'example.lively']);
 });

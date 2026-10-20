@@ -54,6 +54,9 @@ const POSES = Object.freeze({
   feed: { allX: -20, allY: 10, headY: 46, headR: -9, scarfY: 30, scarfS: 0.85, lidUp: 24, happy: 1, earL: 6, earR: -8, tail: -10, bowl: 'full' },
   fed: { lidUp: 24, happy: 1, headY: -3, headR: 6, earL: 12, earR: -20, browY: -2, tail: -12, mouth: 'open', bowl: 'empty' },
   content: { lidUp: 9, lidDown: -2, earL: 3, earR: -12, browY: -1, tail: -5 },
+  // Сценка (PL10.2.4) «приносит мячик» — ключевая поза кадров веба: мячик перед лапами под мордой, смотрит на него,
+  // радуется и виляет хвостом.
+  fetch: { lidUp: 18, happy: 1, headY: 5, headR: -4, lookY: 2.6, earL: 10, earR: -18, browY: -1.5, tail: -12, mouth: 'open', fetch: 1 },
 });
 // Предмет справа (reaction.toward): взгляд и голова в другую сторону.
 const RIGHT = { lookX: 2.6, headR: 8, earL: 12, earR: -6 };
@@ -325,6 +328,8 @@ function DogFigure({ pose = 'calm', coat = 'caramel', accessory = 'scarf', towar
     h(Ellipse, { cx: 102, cy: 189, rx: 76, ry: 7.5, fill: `url(#${p}-ground)` }),
     h(G, { transform: tf(move(x, y)) }, P.lie ? lyingBody(p, c) : null, P.sit ? sittingBody(p, c, P) : null, scarf(p, accessory, P), head(p, c, P), P.lie ? lyingFront(p, c) : null),
     P.bowl && !room ? bowl(P.bowl === 'full') : null,
+    // Мячик сценки — перед лапами (рисунок ballShape общего svg.mjs из его места 283, 233 — к 102, 176).
+    P.fetch ? h(G, { key: 'fetch-ball', transform: tf(move(102 - 283, 176 - 233)) }, ...ballShape().shadow, ...ballShape().body) : null,
   );
 }
 
@@ -354,10 +359,10 @@ function DogItem({ id } = {}) {
 // Набор: все позы словаря, включая «Дай лапу» (поднятая лапа), кроме settle (устроился на новом месте — вход
 // legacy-отображения, нативу не нужен: явная замена — content); ресурсы уголка PL10.2.1 — рисунок в комнате (room), канат
 // и мячик; ресурсы игры PL10.2.2 — рисунок совпадает с областями play определения собаки, поднятая лапа «Дай лапу» — там,
-// где play.paw.up (play); сценки (fetch) — PL10.2.4.
+// где play.paw.up (play); сценка PL10.2.4 — fetch (ключевая поза, фазы — PetFigure).
 export const dogNative = Object.freeze({
   pet: 'dog',
-  poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn']),
+  poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn', 'fetch']),
   substitutes: Object.freeze({ settle: 'content' }),
   coats: Object.freeze(Object.keys(COATS)),
   accessories: Object.freeze(['scarf', 'plaid', 'badge']),
@@ -366,4 +371,5 @@ export const dogNative = Object.freeze({
   items: Object.freeze(['rope', 'ball']),
   Item: DogItem,
   play: true,
+  scenes: Object.freeze(['fetch']),
 });

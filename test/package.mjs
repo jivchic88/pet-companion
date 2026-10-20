@@ -1279,6 +1279,10 @@ const playProps: PetPlayProps = { insets, entry: true, label: 'Позвать', 
 const play = PetPlay(playProps);
 const playBare = PetPlay({});
 const playable: NativePetKit = { ...room, play: true };
+// PL10.2.4: сценки набора — список ID.
+const scened: NativePetKit = { ...room, scenes: ['stretch'] };
+// @ts-expect-error scenes — список строк
+const notScened: NativePetKit = { ...room, scenes: 'stretch' };
 // @ts-expect-error play набора — только true
 const notPlay: NativePetKit = { ...own, play: false };
 // @ts-expect-error entry — boolean
@@ -1289,7 +1293,7 @@ const editor = PetRoom(editorProps);
 const editorBare = PetRoom({});
 // @ts-expect-error testID — строка
 PetRoom({ testID: 1 });
-export { editor, editorBare, loaded, ready, idle, name, sync, view, kind, own, web, notView, provider, composed, corner, bare, room, feedIn, notRoom, play, playBare, playable, notPlay };
+export { scened, notScened, editor, editorBare, loaded, ready, idle, name, sync, view, kind, own, web, notView, provider, composed, corner, bare, room, feedIn, notRoom, play, playBare, playable, notPlay };
 `,
   );
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
