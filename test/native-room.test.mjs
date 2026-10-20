@@ -284,3 +284,32 @@ test('вне PetProvider — ничего и предупреждение; см�
   assert.ok(L.names().includes('room.dragCancel') || L.core.getState().room.draft?.drag == null);
   assert.equal(L.core.getState().room.draft?.drag ?? null, null);
 });
+
+test('поздние события прежнего касания (по проверке Codex): move и terminate старше начала нового переноса — не ведут и не снимают его', async () => {
+  const L = await lab();
+  const V = mount('room-late', tree(L));
+  await V.render();
+  await turn();
+  const k = await openRoom(V, L);
+  const event = (x, y, t, end = false) => {
+    const e = touch(1, [x, y], { end });
+    e.nativeEvent.timestamp = t;
+    return e;
+  };
+  const at = pointOf(L, 'bowl', k);
+  await V.fire('room-stage', 'onResponderGrant', event(...at, 1000));
+  await V.fire('room-stage', 'onResponderMove', event(at[0] - 30, at[1], 1100));
+  await V.act(() => rn.emit('change', 'background'));
+  await V.act(() => rn.emit('change', 'active'));
+  const at2 = pointOf(L, 'bowl', k);
+  await V.fire('room-stage', 'onResponderGrant', event(...at2, 2000));
+  await V.fire('room-stage', 'onResponderMove', event(at2[0] + 40, at2[1], 2100));
+  const before = structuredClone(L.core.getState().room.draft);
+  const count = L.list.length;
+  await V.fire('room-stage', 'onResponderMove', event(at[0] - 90, at[1], 1150));
+  await V.fire('room-stage', 'onResponderTerminate', event(0, 0, 1180));
+  assert.equal(L.list.length, count, 'ни одной команды от поздних событий');
+  assert.deepEqual(L.core.getState().room.draft, before);
+  await V.fire('room-stage', 'onResponderRelease', event(at2[0] + 40, at2[1], 2200, true));
+  assert.equal(L.list.at(-1)[0], 'room.drop', 'свой release завершает новый перенос');
+});

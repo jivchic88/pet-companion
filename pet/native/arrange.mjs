@@ -77,6 +77,7 @@ export function PetRoom({ insets, testID = 'room' } = {}) {
   const [frame, setFrame] = useState(null);
   const [note, setNote] = useState(null);
   const grab = useRef(null);
+  const serial = useRef(0);
   const firstRef = useRef(null);
 
   useEffect(() => {
@@ -183,7 +184,17 @@ export function PetRoom({ insets, testID = 'room' } = {}) {
     const result = core.room.drag(id, from);
     if (!result.ok) return say(result.error.message);
     setNote(null);
-    grab.current = { core, id, from: [...from], start: point, touch: ne?.identifier ?? 0, k, on: false };
+    serial.current += 1;
+    grab.current = { core, serial: serial.current, id, from: [...from], start: point, touch: ne?.identifier ?? 0, stamp: Number.isFinite(ne?.timestamp) ? ne.timestamp : null, k, on: false };
+  };
+  // Событие идущего переноса: обработчик этой привязки (ядро отрисовки = ядро последней фиксации = ядро жеста) и событие не
+  // старше начала жеста. Поздние move / release / terminate прежнего касания (после отмены, фона, смены ядра — в том числе
+  // с тем же identifier) и обработчики прежней отрисовки другого ядра новый перенос не ведут и не завершают.
+  const live = (ne) => {
+    const g = grab.current;
+    if (!g || g.core !== core || bound.current !== core) return null;
+    if (Number.isFinite(ne?.timestamp) && g.stamp !== null && ne.timestamp < g.stamp) return null;
+    return g;
   };
   const responder = {
     onStartShouldSetResponder: (event) => startable(event?.nativeEvent),
@@ -191,8 +202,8 @@ export function PetRoom({ insets, testID = 'room' } = {}) {
     onResponderTerminationRequest: () => !grab.current,
     onResponderGrant: (event) => begin(event?.nativeEvent),
     onResponderMove: (event) => {
-      const g = grab.current;
-      if (!g || g.core !== core) return;
+      const g = live(event?.nativeEvent);
+      if (!g) return;
       const point = touchPoint(event?.nativeEvent, g.touch);
       if (!point) return;
       const dx = point[0] - g.start[0];
@@ -200,17 +211,19 @@ export function PetRoom({ insets, testID = 'room' } = {}) {
       if (!g.on && Math.hypot(dx, dy) < MOVE_PT) return;
       g.on = true;
       const result = core.room.drag(g.id, [g.from[0] + dx / g.k, g.from[1] + dy / g.k]);
-      if (!result.ok) drop();
+      if (!result.ok && grab.current === g) drop();
     },
     onResponderRelease: (event) => {
-      const g = grab.current;
+      const g = live(event?.nativeEvent);
       if (!g || !ended(event?.nativeEvent, g.touch)) return;
       grab.current = null;
-      if (g.core !== bound.current) return;
       if (g.on) quiet('перенос не завершён', () => g.core.room.drop());
       else quiet('перенос не отменён', () => g.core.room.dragCancel());
     },
-    onResponderTerminate: () => drop(),
+    // Ответчик отнят — снять только свой идущий перенос (не перенос другого ядра или более позднего касания).
+    onResponderTerminate: (event) => {
+      if (live(event?.nativeEvent)) drop();
+    },
   };
 
   if (!snapshot || !core) return null;
