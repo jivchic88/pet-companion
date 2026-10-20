@@ -2,7 +2,7 @@
 
 Версии — по README, «Версии и обновление». Номер версии — в `package.json` (он же `VERSION`; с 0.2.0 — одна константа `pet/core/version.mjs` для входов `pet-companion` и `pet-companion/core`); форматы данных (`v1` в ключах) — отдельно.
 
-## Не выпущено
+## 0.3.0 — 2026-10-20
 
 - **Минимальный режим «персонаж» (U01).** Новые входы `pet-companion/character` (`defineCharacter` — описание формата персонажа 1: позы, словарь реакций продукта, реплики с `{name}`, движения и интервалы; `createCharacter` — экземпляр без DOM и хранения: `react(id, { key?, text? })`, `setName`, `setContext`, `setPreferences`, `setVisible`, `setReducedMotion`, `activity`, снимок и подписка; `PetError`, `VERSION`), `pet-companion/character-web` (`mountCharacterIn` — персонаж в контейнере с открытым Shadow DOM, стили вида и набора, тишина при вводе, видимость, «уменьшить движение», `aria-live`, кнопка по `onActivate`) и `pet-companion/character-react` (`Character`, `useCharacterState`). Набор отображения персонажа — `{ character, poses, art({ id }), styles? }`. Правила реакций, реплик, времени и доставки — общие модули ядра (режиссёр, реплики, порты, раунд); комнаты, игры, кормления, ступеней, аксессуаров, присутствия, сценок и ключей хранения у режима нет и описание их не принимает. Полный режим, его входы, определения формата 1, ключи и форматы хранения не изменились (экспортированы внутренние помощники проверки `core/define.mjs`). Пример стороннего продукта с третьим персонажем — `examples/character/` (робот; вне пакета). README, «Персонаж: минимальный режим»; docs/ARCHITECTURE.md § 19. Версия — minor (0.3.0): новые входы и `exports`.
 
