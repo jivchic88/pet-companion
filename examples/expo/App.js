@@ -376,6 +376,8 @@ function Screen() {
     { id: 'pet-stroke', title: 'Погладить', disabled: !running, onPress: stroke },
     { id: 'pet-feed', title: TREAT[state?.treat] ?? 'Покормить', disabled: !running, hint: state?.treat === 'ready' ? undefined : 'Ядро проверит, можно ли сейчас', onPress: command('Покормить', (c) => c.feed()) },
     { id: 'host-save', title: 'Занятие сохранено', disabled: !store, onPress: () => saveAction() },
+    // Отложенное занятие — успеть открыть уголок: сценка в открытом уголке (PL10.2.4).
+    { id: 'host-save-later', title: 'Занятие сохранено через 4 с', disabled: !store, onPress: () => void setTimeout(() => saveAction(), 4000) },
     { id: 'host-fail', title: 'Занятие не сохранилось', disabled: !store, onPress: () => saveAction({ fail: true }) },
     { id: 'host-repeat', title: 'Повторить уведомление', disabled: !running, onPress: repeatAction },
   ];
