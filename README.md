@@ -786,18 +786,19 @@ pet.interact({ type: 'paw' }); // { ok: false, error: { code: 'unsupported' } }
 
 > **С версии 0.4.0.** Третий штатный питомец — Пух. Вход отдельный: сайт с котом и собакой кролика не загружает (перечень и стили входа `pet-companion` не изменились), сайт с кроликом подключает его явно.
 
-```html
-<link rel="stylesheet" href="/pet/pet.css" />
-<link rel="stylesheet" href="/pet/dog.css" />
-<link rel="stylesheet" href="/pet/bunny.css" />
-<script type="module">
-  import { mountPet } from '/pet/pet.mjs';
-  import { bunny, bunnyWeb } from '/pet/bunny.mjs';
-  import { calm } from '/pet/behaviors.mjs';
-  import { cat, dog } from '/pet/pets.mjs';
-  mountPet({ /* места и счёт сайта */ pets: [cat, dog, bunny], behaviors: [calm], kits: [bunnyWeb] });
-</script>
+```js
+import { mountPet } from 'pet-companion';
+import { calm } from 'pet-companion/behaviors';
+import { bunny, bunnyWeb } from 'pet-companion/bunny';
+import { cat, dog } from 'pet-companion/pets';
+import 'pet-companion/pet.css';
+import 'pet-companion/dog.css';
+import 'pet-companion/bunny.css';
+
+mountPet({ /* места и счёт сайта */ pets: [cat, dog, bunny], behaviors: [calm], kits: [bunnyWeb] });
 ```
+
+Сайт без сборщика: те же файлы по путям папки `pet/` (`pet/bunny.mjs`, `pet/bunny.css` — после `pet/dog.css`), как в «Быстром старте».
 
 - **npm и сборщик:** `import { bunny, bunnyWeb } from 'pet-companion/bunny'`, стили — `import 'pet-companion/bunny.css'` после `dog.css` (раздел «Стили»). Контейнер (`mountPetIn`) подключает стили набора сам — по его `styles`. Сервер без сборщика — файлы входа `./bunny` по `manifest.json` (его `styles` — `pet/bunny.css`, обязателен).
 - **Натив:** `import { bunnyNative } from 'pet-companion/native'`; `pets: [cat, dog, bunny]`, `kits: [catNative, dogNative, bunnyNative]` — ядру и отображению одни и те же определения (раздел «Нативное отображение»). Набор рисует все позы, уголок (морковка, сено), игру (лапка) и сценки `hop`, `wash`.

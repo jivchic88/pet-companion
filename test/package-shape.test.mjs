@@ -476,7 +476,7 @@ test('руководство: пример = example.html; импорты — и
   assert.match(example, /^<!doctype html>[\s\S]*<meta name="viewport"[\s\S]*href="\.\/pet\/pet\.css"[\s\S]*from '\.\/pet\/pet\.mjs'[\s\S]*storage: '[\w-]+'[\s\S]*notify\('saved'/);
   // PL08: вход React и пакет сайта в его примере (react), node: — в скрипте копирования по перечню.
   // PL09: нативные входы и пакеты приложения Expo в мобильном примере.
-  for (const [, spec] of readme.matchAll(/from '([^'.][^']*)'/g)) assert.ok([pkg.name, `${pkg.name}/core`, `${pkg.name}/pets`, `${pkg.name}/behaviors`, `${pkg.name}/web`, `${pkg.name}/react`, `${pkg.name}/character`, `${pkg.name}/character-web`, `${pkg.name}/character-react`, `${pkg.name}/native`, `${pkg.name}/native-sqlite`, 'react', 'react-native', 'expo-sqlite'].includes(spec) || spec.startsWith('node:'), `импорт ${spec}`);
+  for (const [, spec] of readme.matchAll(/from '([^'.][^']*)'/g)) assert.ok([pkg.name, `${pkg.name}/core`, `${pkg.name}/pets`, `${pkg.name}/behaviors`, `${pkg.name}/bunny`, `${pkg.name}/web`, `${pkg.name}/react`, `${pkg.name}/character`, `${pkg.name}/character-web`, `${pkg.name}/character-react`, `${pkg.name}/native`, `${pkg.name}/native-sqlite`, 'react', 'react-native', 'expo-sqlite'].includes(spec) || spec.startsWith('node:'), `импорт ${spec}`);
   // Короткие старты PL08 — те же файлы, что проверяют test:consumers и test:package: компонент React и копирование по перечню.
   const block = (lang, start) => [...readme.matchAll(new RegExp(`\`\`\`${lang}\\n([\\s\\S]*?)\\n\`\`\``, 'g'))].map((match) => `${match[1]}\n`).find((text) => text.startsWith(start));
   assert.equal(block('jsx', "import { useState } from 'react';"), await read('examples/react/src/Corner.jsx'), 'README: пример React = examples/react/src/Corner.jsx');
