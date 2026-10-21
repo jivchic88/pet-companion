@@ -14,7 +14,7 @@ export const bunnyWeb = Object.freeze({
   pet: 'bunny',
   poses: Object.freeze([...POSES, 'hop', 'wash']),
   scenes: Object.freeze(['hop', 'wash']),
-  coats: Object.freeze(['snow', 'grey', 'spot']),
+  coats: Object.freeze(['fawn', 'snow', 'spot']),
   accessories: Object.freeze(['ribbon', 'bow', 'clover']),
   items: Object.freeze(['carrot', 'hay']),
   art: ({ id, view, coat, className, box, accessory } = {}) => withAcc(bunnySvg({ id, view, coat, className, box }), accessory),

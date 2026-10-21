@@ -39,7 +39,7 @@ test('определение: штатный ID без точки, все обя
     bunny.scenes.map((scene) => [scene.id, scene.pose, scene.needs, scene.ms <= SCENE_MS_MAX && scene.still < scene.ms]),
     [['hop', 'hop', 'any', true], ['wash', 'wash', 'full', true]],
   );
-  assert.deepEqual(bunny.coats.map((coat) => coat.id), ['snow', 'grey', 'spot']);
+  assert.deepEqual(bunny.coats.map((coat) => [coat.id, coat.title]), [['fawn', 'Палевый'], ['snow', 'Белый'], ['spot', 'Пятнистый']]);
   assert.deepEqual(bunny.accessories.map((item) => [item.id, item.stage]), [['ribbon', 0], ['bow', 1], ['clover', 4]]);
   assert.deepEqual(bunny.room.toys.map((toy) => [toy.id, toy.stage, toy.home]), [['carrot', 0, [40, 232]], ['hay', 2, [280, 236]]]);
   const hay = bunny.items.list.find((item) => item.id === 'hay');
@@ -60,7 +60,7 @@ test('веб-набор: принят против своего определе
   assert.equal(kitProblem(dogWeb, all), '');
   assert.ok(kitNeeds(bunny).poses.includes('paw'), 'лапа — обязательная поза набора');
   assert.deepEqual(kitScenes(bunnyWeb, bunny), ['hop', 'wash']);
-  assert.deepEqual([bunnyWeb.pet, bunnyWeb.coats, bunnyWeb.accessories, bunnyWeb.items], ['bunny', ['snow', 'grey', 'spot'], ['ribbon', 'bow', 'clover'], ['carrot', 'hay']]);
+  assert.deepEqual([bunnyWeb.pet, bunnyWeb.coats, bunnyWeb.accessories, bunnyWeb.items], ['bunny', ['fawn', 'snow', 'spot'], ['ribbon', 'bow', 'clover'], ['carrot', 'hay']]);
   assert.ok(bunnyWeb.styles.length === 1 && bunnyWeb.styles[0].endsWith('/pet/bunny.css') && new URL(bunnyWeb.styles[0]).href === bunnyWeb.styles[0], bunnyWeb.styles[0]);
   // Без позы сценки набор не принимается, без лапы — тоже.
   const without = (list, ...ids) => list.filter((id) => !ids.includes(id));
@@ -74,11 +74,11 @@ const geometry = (svg) => ({ viewBox: /viewBox="([^"]+)"/.exec(svg)[1], place: /
 
 test('рисунок: svg класса cat-art с data-kind=bunny, те же части, рамка и опора у всех обликов, ленточки всех видов, без внешних ресурсов, id с префиксом; вещи и маленькое сено', () => {
   assert.deepEqual(Object.keys(BUNNY_COATS), bunny.coats.map((coat) => coat.id));
-  assert.equal(BUNNY_PALETTE.fur, BUNNY_COATS.snow.fur);
+  assert.equal(BUNNY_PALETTE.fur, BUNNY_COATS.fawn.fur);
   for (const view of ['full', 'portrait']) {
     const base = bunnySvg({ id: 'b', view });
-    assert.match(base, /^\s*<svg class="cat-art" data-kind="bunny" data-view="(full|portrait)" data-coat="snow" data-pose="calm" data-acc="ribbon" viewBox="/);
-    assert.equal(/viewBox="([^"]+)"/.exec(base)[1], view === 'full' ? '0 0 220 204' : '40 -4 120 120');
+    assert.match(base, /^\s*<svg class="cat-art" data-kind="bunny" data-view="(full|portrait)" data-coat="fawn" data-pose="calm" data-acc="ribbon" viewBox="/);
+    assert.equal(/viewBox="([^"]+)"/.exec(base)[1], view === 'full' ? '0 0 220 204' : '36 -2 128 128');
     for (const coat of Object.keys(BUNNY_COATS)) {
       const shown = bunnySvg({ id: 'b', view, coat });
       assert.match(shown, new RegExp(`data-coat="${coat}"`));
@@ -93,19 +93,19 @@ test('рисунок: svg класса cat-art с data-kind=bunny, те же ч�
   }
   // Целиком — тело, лёжа и сидя, ступни, лапки, хвост-помпон, зубки; портрет — только голова с ушами и ленточка.
   const full = bunnySvg({ id: 'f' });
-  for (const part of ['bunny-all', 'bunny-sit', 'bunny-lie', 'bunny-lie-front', 'bunny-tail', 'bunny-leg-l', 'bunny-leg-r', 'bunny-head', 'bunny-ear-l', 'bunny-ear-r', 'bunny-collar', 'bunny-nose', 'bunny-mouth-smile', 'bunny-mouth-yawn', 'bunny-wash']) assert.ok(full.includes(`class="${part}`) || full.includes(` ${part}"`) || full.includes(` ${part} `), part);
+  for (const part of ['bunny-all', 'bunny-sit', 'bunny-lie', 'bunny-lie-front', 'bunny-tail', 'bunny-leg-l', 'bunny-leg-r', 'bunny-head', 'bunny-ear-l', 'bunny-ear-r', 'bunny-brow-l', 'bunny-brow-r', 'bunny-collar', 'bunny-nose', 'bunny-mouth-smile', 'bunny-mouth-yawn', 'bunny-wash']) assert.ok(full.includes(`class="${part}`) || full.includes(` ${part}"`) || full.includes(` ${part} `), part);
   const portrait = bunnySvg({ id: 'p', view: 'portrait' });
   assert.ok(!portrait.includes('bunny-sit') && !portrait.includes('bunny-lie') && portrait.includes('bunny-head') && portrait.includes('bunny-collar'), 'портрет — голова и ленточка');
   assert.ok(full.includes('url(#f-ground)') && !portrait.includes('-ground)'), 'тень под лапами — только целиком');
   // Место в сцене и коробка — общие (без прыжков при смене облика); пятнистый — отметины без новых классов.
   for (const stage of [0, 3]) assert.equal(new Set(Object.keys(BUNNY_COATS).map((coat) => geometry(bunnySvg({ id: 's', box: sceneCatBox(stage), coat })).place)).size, 1, `ступень ${stage}`);
-  assert.equal(bunnySvg({ id: 'x', coat: 'нет-такого' }), bunnySvg({ id: 'x' }), 'неизвестный облик — белый');
+  assert.equal(bunnySvg({ id: 'x', coat: 'нет-такого' }), bunnySvg({ id: 'x' }), 'неизвестный облик — палевый');
   assert.match(sceneSvg({ id: 's', stage: 2, cat: bunnySvg({ id: 'b', box: sceneCatBox(2), coat: 'spot' }), extra: carrotArt() + hayArt({ fresh: true }) }), /data-coat="spot"[\s\S]*data-room="carrot"[\s\S]*class="cat-item is-fresh" data-item="hay" data-room="hay"/);
   assert.match(hayMiniSvg(), /^<svg class="cat-mini-art" viewBox="[^"]+" aria-hidden="true" focusable="false"><g class="cat-item" data-item="hay"/);
   assert.equal(bunnyWeb.item('carrot'), carrotArt());
   assert.equal(bunnyWeb.item('hay', { fresh: true }), hayArt({ fresh: true }));
   assert.deepEqual([bunnyWeb.item('yarn'), bunnyWeb.mini('carrot'), bunnyWeb.mini('hay')], ['', '', hayMiniSvg()]);
-  assert.equal(bunnyWeb.art({ id: 'a', view: 'portrait', coat: 'grey', accessory: 'bow' }), bunnySvg({ id: 'a', view: 'portrait', coat: 'grey' }).replace('data-acc="ribbon"', 'data-acc="bow"'));
+  assert.equal(bunnyWeb.art({ id: 'a', view: 'portrait', coat: 'snow', accessory: 'bow' }), bunnySvg({ id: 'a', view: 'portrait', coat: 'snow' }).replace('data-acc="ribbon"', 'data-acc="bow"'));
 });
 
 test('стили: каждая поза, движение и сценка — своим правилом только для data-kind=bunny; только transform, opacity, display и анимации; образцы ленточек', () => {

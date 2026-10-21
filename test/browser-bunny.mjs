@@ -169,15 +169,15 @@ async function desktop(browser, base, check, open, layout) {
       pickers: [...document.querySelectorAll('.cat-coat-face .cat-art')].every((art) => art.dataset.kind === 'bunny'),
       title: document.getElementById('cat-sheet-title')?.textContent ?? '',
     }));
-    check(`${label}: уголок кролика — облики snow/grey/spot, ленточки (бантик и клевер пока закрыты), имена, сцена с кроликом и морковкой без сена`, corner.coats.join() === 'snow,grey,spot' && JSON.stringify(corner.accs) === JSON.stringify([['ribbon', false], ['bow', true], ['clover', true]]) && corner.chips.includes('Ушастик') && corner.stage && corner.carrot && !corner.hay && corner.pickers && corner.title === 'Пух', JSON.stringify(corner));
+    check(`${label}: уголок кролика — облики fawn/snow/spot, ленточки (бантик и клевер пока закрыты), имена, сцена с кроликом и морковкой без сена`, corner.coats.join() === 'fawn,snow,spot' && JSON.stringify(corner.accs) === JSON.stringify([['ribbon', false], ['bow', true], ['clover', true]]) && corner.chips.includes('Ушастик') && corner.stage && corner.carrot && !corner.hay && corner.pickers && corner.title === 'Пух', JSON.stringify(corner));
     await layout(page, `${label}, уголок кролика`);
-    // Имя готовым словом, облик — серый: записи кролика в ext.pets.bunny и look.bunny.
+    // Имя готовым словом, облик — белый: записи кролика в ext.pets.bunny и look.bunny.
     await page.locator('[data-cat-name-pick="Ушастик"]').click();
     await page.clock.runFor(100);
-    await page.locator('.cat-coat-option:has(input[value="grey"])').click();
+    await page.locator('.cat-coat-option:has(input[value="snow"])').click();
     await page.clock.runFor(100);
     const named = { ...(await info(page)), stored: await stored(page) };
-    check(`${label}: имя и облик кролика — в его записях (ext.pets.bunny, look.bunny); рисунки — серый`, named.name === 'Ушастик' && named.coat === 'grey' && named.coats.join() === 'grey' && named.stored[key('ext')].pets?.bunny?.name === 'Ушастик' && named.stored[key('look')]?.bunny === 'grey', JSON.stringify({ name: named.name, coat: named.coat, coats: named.coats, ext: named.stored[key('ext')], look: named.stored[key('look')] }));
+    check(`${label}: имя и облик кролика — в его записях (ext.pets.bunny, look.bunny); рисунки — белый`, named.name === 'Ушастик' && named.coat === 'snow' && named.coats.join() === 'snow' && named.stored[key('ext')].pets?.bunny?.name === 'Ушастик' && named.stored[key('look')]?.bunny === 'snow', JSON.stringify({ name: named.name, coat: named.coat, coats: named.coats, ext: named.stored[key('ext')], look: named.stored[key('look')] }));
 
     // ---- «Поиграть»: области, лапка, поглаживание, мячик (отклик на имя доигран) ----
     await page.clock.runFor(5000);
@@ -258,7 +258,7 @@ async function desktop(browser, base, check, open, layout) {
     const dog = await info(page);
     await choose(page, 'bunny');
     const back = { ...(await info(page)), stored: await stored(page) };
-    check(`${label}: собака — рисунок собаки, затем снова кролик — имя, облик и бантик кролика целы; companion.kind = dog (вкладки 0.1.4 видят собаку)`, dog.kinds.join() === 'dog' && back.kinds.join() === 'bunny' && back.name === 'Ушастик' && back.coat === 'grey' && back.accessory === 'bow' && back.stored[key('companion')]?.kind === 'dog' && JSON.stringify(back.stored[key('ext')].pet) === JSON.stringify({ id: 'bunny', over: 'dog' }), JSON.stringify({ dog: dog.kinds, back: { name: back.name, coat: back.coat, accessory: back.accessory, companion: back.stored[key('companion')], ext: back.stored[key('ext')].pet } }));
+    check(`${label}: собака — рисунок собаки, затем снова кролик — имя, облик и бантик кролика целы; companion.kind = dog (вкладки 0.1.4 видят собаку)`, dog.kinds.join() === 'dog' && back.kinds.join() === 'bunny' && back.name === 'Ушастик' && back.coat === 'snow' && back.accessory === 'bow' && back.stored[key('companion')]?.kind === 'dog' && JSON.stringify(back.stored[key('ext')].pet) === JSON.stringify({ id: 'bunny', over: 'dog' }), JSON.stringify({ dog: dog.kinds, back: { name: back.name, coat: back.coat, accessory: back.accessory, companion: back.stored[key('companion')], ext: back.stored[key('ext')].pet } }));
     await shut(page);
     await layout(page, label);
     await clean(page, outside, check, label);

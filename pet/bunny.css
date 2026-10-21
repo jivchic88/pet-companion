@@ -24,7 +24,7 @@
 }
 
 /* Пластика: позы сменяются переходом, точки вращения — суставы рисунка. */
-.cat-art[data-kind='bunny'] :is(.bunny-head, .bunny-ear-l, .bunny-ear-r, .bunny-tail, .bunny-leg-l, .bunny-collar, .bunny-look, .bunny-pupil, .bunny-nose) {
+.cat-art[data-kind='bunny'] :is(.bunny-head, .bunny-ear-l, .bunny-ear-r, .bunny-brow-l, .bunny-brow-r, .bunny-tail, .bunny-leg-l, .bunny-collar, .bunny-look, .bunny-pupil, .bunny-nose) {
   transition: transform var(--bn-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
 }
 
@@ -59,17 +59,27 @@
 }
 
 .cat-art[data-kind='bunny'] .bunny-head {
-  transform-origin: 100px 116px;
+  transform-origin: 100px 118px;
   transform: translate(var(--bn-head-x, 0), var(--bn-head-y, 0)) rotate(var(--bn-head-r, 0deg));
 }
 
+.cat-art[data-kind='bunny'] .bunny-brow-l {
+  transform-origin: 79px 64px;
+  transform: translateY(var(--bn-brow-y, 0)) rotate(var(--bn-brow-l, 0deg));
+}
+
+.cat-art[data-kind='bunny'] .bunny-brow-r {
+  transform-origin: 121px 64px;
+  transform: translateY(var(--bn-brow-y, 0)) rotate(var(--bn-brow-r, 0deg));
+}
+
 .cat-art[data-kind='bunny'] .bunny-ear-l {
-  transform-origin: 84px 58px;
+  transform-origin: 86px 58px;
   transform: rotate(var(--bn-ear-l, 0deg));
 }
 
 .cat-art[data-kind='bunny'] .bunny-ear-r {
-  transform-origin: 136px 58px;
+  transform-origin: 134px 58px;
   transform: rotate(var(--bn-ear-r, 8deg));
 }
 
@@ -105,18 +115,18 @@
 }
 
 .cat-art[data-kind='bunny'] .bunny-tail {
-  transform-origin: 152px 162px;
+  transform-origin: 150px 164px;
   transform: rotate(var(--bn-tail, 0deg));
 }
 
 /* Левая передняя лапа: поднимается в позе «лапа» (поворот у плеча), трёт мордочку в сценке «умывается». */
 .cat-art[data-kind='bunny'] .bunny-leg-l {
-  transform-origin: 92px 158px;
+  transform-origin: 92px 162px;
   transform: rotate(var(--bn-leg, 0deg));
 }
 
 .cat-art[data-kind='bunny'] .bunny-collar {
-  transform-origin: 100px 110px;
+  transform-origin: 100px 112px;
   transform: translateY(var(--bn-collar-y, 0)) scaleY(var(--bn-collar-s, 1));
 }
 
@@ -138,8 +148,9 @@
   --bn-ear-r: 10deg;
 }
 
-/* Внимание (экраны практики, ввод): уши торчком и вперёд, глаза шире, лёгкий наклон головы. */
+/* Внимание (экраны практики, ввод): уши торчком и вперёд, глаза шире, брови вверх, лёгкий наклон головы. */
 .cat-art[data-kind='bunny'][data-pose='attentive'] {
+  --bn-brow-y: -2px;
   --bn-lid-up: -1px;
   --bn-pupil: 1.08;
   --bn-head-r: -4deg;
@@ -170,8 +181,11 @@
   --bn-tail: -8deg;
 }
 
-/* Поддержка после трудной практики: уши мягко в стороны, голова набок, тёплый взгляд. */
+/* Поддержка после трудной практики: уши мягко в стороны, голова набок, брови домиком, тёплый взгляд. */
 .cat-art[data-kind='bunny'][data-pose='support'] {
+  --bn-brow-l: -10deg;
+  --bn-brow-r: 10deg;
+  --bn-brow-y: -1px;
   --bn-lid-up: 3px;
   --bn-lid-down: -3px;
   --bn-head-r: -8deg;
@@ -192,8 +206,9 @@
   --bn-tail: -4deg;
 }
 
-/* Новая вещь: смотрит вниз в сторону вещи, уши вперёд, голова набок. */
+/* Новая вещь: смотрит вниз в сторону вещи, уши вперёд, брови вверх, голова набок. */
 .cat-art[data-kind='bunny'][data-pose='unlock'] {
+  --bn-brow-y: -2px;
   --bn-lid-up: 0px;
   --bn-look-x: -2.6px;
   --bn-look-y: 2.6px;
@@ -206,6 +221,8 @@
 
 /* Ожидание после ошибки сохранения — нейтрально и внимательно, без улыбки и слов. */
 .cat-art[data-kind='bunny'][data-pose='wait'] {
+  --bn-brow-l: -5deg;
+  --bn-brow-r: 5deg;
   --bn-lid-up: 3px;
   --bn-head-r: 3deg;
   --bn-ear-l: -6deg;
@@ -280,6 +297,7 @@
 }
 
 .cat-art[data-kind='bunny'][data-pose='ball'] {
+  --bn-brow-y: -2px;
   --bn-lid-up: -1px;
   --bn-look-x: -2.8px;
   --bn-look-y: 2.4px;
