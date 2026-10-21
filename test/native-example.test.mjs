@@ -51,7 +51,7 @@ registerHooks({
 });
 const { default: App } = await import(APP);
 const { Screen, screen } = await import(fake('expo-screen.mjs'));
-const { catNative, dogNative } = await import('../pet/native.mjs');
+const { catNative, dogNative, bunnyNative } = await import('../pet/native.mjs');
 const D = await import('../examples/expo/diagnostics.mjs');
 const { createStorage } = await import('../pet/core.mjs');
 
@@ -138,7 +138,7 @@ test('обычный запуск и размонтирование: одно я
   const art = S.node('pet-art');
   assert.equal(art.children.type, catNative.Figure, 'питомец — рисунок штатного набора, без WebView');
   assert.equal(S.node('pet-touch').accessibilityLabel, 'Марс, кот');
-  assert.deepEqual(since(from)[0].getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'], 'example.bunny': ['hop'] }, 'сценки наборов объявлены (PL10.2.4; кролик — пример расширения)');
+  assert.deepEqual(since(from)[0].getState().display.scenes, { cat: ['stretch', 'curl'], dog: ['fetch'], bunny: ['hop', 'wash'] }, 'сценки наборов объявлены (PL10.2.4; с 0.4.0 кролик — штатный)');
   await S.unmount();
   assert.deepEqual([statuses(since(from)), rn.live(), box.connections], [['destroyed'], 0, 0]);
   await quiet(S);
@@ -679,7 +679,7 @@ test('экран PL10.2.1–PL10.2.3: координатор PetProvider — о�
   try {
     const { S, core } = await running('pl1021');
     const display = core.getState().display;
-    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play', 'room'], { cat: ['stretch', 'curl'], dog: ['fetch'], 'example.bunny': ['hop'] }, ['cat', 'dog', 'example.bunny']]);
+    assert.deepEqual([display.views, display.scenes, display.pets], [['corner', 'play', 'room'], { cat: ['stretch', 'curl'], dog: ['fetch'], bunny: ['hop', 'wash'] }, ['cat', 'dog', 'bunny']]);
     assert.equal(S.node('pet-art').children.type, catNative.Figure, 'PetView в композиции рисует');
     const page = S.node('screen').contentContainerStyle[1];
     assert.deepEqual([page.paddingTop, page.paddingBottom, page.paddingLeft, page.paddingRight], [47 + 12, 34 + 48, 16, 16]);
@@ -730,21 +730,21 @@ test('экран PL10.2.2: прямые команды хоста — откры
   }
 });
 
-test('пример расширения на нативе (PL10.2.4): кролик и «живая» в примере — те же данные, что examples/extension; набор кролика проходит проверки уголка и игры, рисует сценку hop', async () => {
-  const E = { ...(await import('../examples/expo/extension.mjs')), ...(await import('../examples/expo/bunny-native.mjs')) };
-  const { bunny } = await import('../examples/extension/bunny.mjs');
+test('пример расширения на нативе (PL10.2.4; с 0.4.0): «живая» в примере — те же данные, что examples/extension; третий питомец — штатный кролик пакета, его набор проходит проверки уголка и игры, рисует сценки hop и wash', async () => {
+  const E = await import('../examples/expo/extension.mjs');
   const { lively } = await import('../examples/extension/lively.mjs');
-  assert.equal(JSON.stringify(E.bunny), JSON.stringify(bunny), 'определение кролика совпадает');
+  assert.deepEqual(Object.keys(E), ['lively'], 'в примере — только модель; кролик — пакет');
   assert.equal(JSON.stringify(E.lively), JSON.stringify(lively), 'модель «живая» совпадает');
   const Kits = await import('../pet/native/kits.mjs');
   const { cat, dog } = await import('../pet/pets.mjs');
-  const catalog = Kits.nativeCatalog([cat, dog, E.bunny], [catNative, dogNative, E.bunnyNative], React.isValidElement);
+  const { bunny } = await import('../pet/bunny.mjs');
+  const catalog = Kits.nativeCatalog([cat, dog, bunny], [catNative, dogNative, bunnyNative], React.isValidElement);
   assert.equal(catalog.problem, '');
   assert.equal(Kits.cornerProblem(catalog, React.isValidElement), '');
-  assert.equal(Kits.nativePlayProblem(E.bunnyNative, E.bunny, React.isValidElement), '');
-  assert.deepEqual(Kits.nativeScenes(catalog)['example.bunny'], ['hop']);
-  assert.ok(React.isValidElement(E.bunnyNative.Figure({ pose: 'hop', coat: 'spot', accessory: 'bow', prefix: 't' })));
-  assert.ok(React.isValidElement(E.bunnyNative.Item({ id: 'carrot' })));
-  assert.deepEqual(D.PETS.map((one) => one.id), ['cat', 'dog', 'example.bunny']);
+  assert.equal(Kits.nativePlayProblem(bunnyNative, bunny, React.isValidElement), '');
+  assert.deepEqual(Kits.nativeScenes(catalog).bunny, ['hop', 'wash']);
+  for (const pose of ['hop', 'wash']) assert.ok(React.isValidElement(bunnyNative.Figure({ pose, coat: 'spot', accessory: 'bow', prefix: 't' })), pose);
+  for (const id of ['carrot', 'hay']) assert.ok(React.isValidElement(bunnyNative.Item({ id })), id);
+  assert.deepEqual(D.PETS.map((one) => one.id), ['cat', 'dog', 'bunny']);
   assert.deepEqual(D.BEHAVIORS.map((one) => one.id), ['calm', 'example.lively']);
 });

@@ -11,6 +11,8 @@ import { cleanName } from '../pets.mjs';
 
 // Штатные питомцы форматов 0.1.4: companion.kind знает только их; сторонний питомец выбирается в ext:v1 поверх них.
 export const LEGACY_KINDS = Object.freeze(['cat', 'dog']);
+// Штатные питомцы пакета: прежние (ключи 0.1.4) и кролик (с 0.4.0, живёт в ключе ext, как сторонний) — ID без точки.
+export const BUILTIN_KINDS = Object.freeze([...LEGACY_KINDS, 'bunny']);
 export const legacyKind = (value) => (LEGACY_KINDS.includes(value) ? value : 'cat');
 // Ключ общих настроек (движение, реплики, «скрыт», увиденная ступень, день приветствия) — ключ кота 0.1.4.
 export const SETTINGS = 'cat';

@@ -1,0 +1,943 @@
+/* Кролик: позы и движения кролика Пуха. Графика — bunny-art.mjs, общая оболочка — pet.mjs и pet.css. Каждое правило —
+   только для svg с data-kind='bunny' (классы bunny-*, переменные --bn-*). Только transform и opacity. Подключение:
+   mountPet — страница подключает pet-companion/bunny.css после dog.css; контейнер — по styles набора bunnyWeb сам. */
+
+.cat-art[data-kind='bunny'] .bunny-mouth-smile,
+.cat-art[data-kind='bunny'] .bunny-mouth-yawn {
+  display: none;
+}
+
+.cat-art[data-kind='bunny']:is([data-pose='greet'], [data-pose='joy'], [data-pose='paw'], [data-pose='fed'], [data-pose='hop']) .bunny-mouth-smile,
+.cat-art[data-kind='bunny'][data-pose='yawn'] .bunny-mouth-yawn {
+  display: inline;
+}
+
+.cat-art[data-kind='bunny']:is([data-pose='greet'], [data-pose='joy'], [data-pose='paw'], [data-pose='fed'], [data-pose='hop'], [data-pose='yawn']) .bunny-mouth-calm {
+  display: none;
+}
+
+/* Ленточки: виден надетый аксессуар (общее правило pet.css прячет все .cat-acc). */
+.cat-art[data-kind='bunny'][data-acc='ribbon'] [data-acc-part='ribbon'],
+.cat-art[data-kind='bunny'][data-acc='bow'] [data-acc-part='bow'],
+.cat-art[data-kind='bunny'][data-acc='clover'] [data-acc-part='clover'] {
+  display: inline;
+}
+
+/* Пластика: позы сменяются переходом, точки вращения — суставы рисунка. */
+.cat-art[data-kind='bunny'] :is(.bunny-head, .bunny-ear-l, .bunny-ear-r, .bunny-tail, .bunny-leg-l, .bunny-collar, .bunny-look, .bunny-pupil, .bunny-nose) {
+  transition: transform var(--bn-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+
+.cat-art[data-kind='bunny'] :is(.bunny-lid-up, .bunny-lid-down) {
+  transition: transform var(--bn-lid, 0.26s) cubic-bezier(0.4, 0.1, 0.3, 1);
+}
+
+.cat-art[data-kind='bunny'] :is(.bunny-happy, .bunny-sleep, .bunny-lie, .bunny-lie-front, .bunny-sit, .bunny-wash) {
+  transition:
+    opacity var(--bn-fade, 0.42s) ease,
+    transform var(--bn-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+
+/* Отдых без «призрака»: лежащее тело проявляется раньше, сидящее гаснет потом; при пробуждении — наоборот. */
+.cat-art[data-kind='bunny'] :is(.bunny-lie, .bunny-lie-front) {
+  transition-delay: 0.32s, 0s;
+}
+
+.cat-art[data-kind='bunny'][data-pose='rest'] :is(.bunny-lie, .bunny-lie-front) {
+  transition-delay: 0s, 0s;
+}
+
+.cat-art[data-kind='bunny'][data-pose='rest'] .bunny-sit {
+  transition-delay: 0.32s, 0s;
+}
+
+/* Весь кролик смещается только в лакомстве (к миске и обратно) и в прыжке: --bn-all-x/--bn-all-y, переходом. */
+.cat-art[data-kind='bunny'] .bunny-all {
+  transform-origin: 104px 188px;
+  transform: translate(var(--bn-all-x, 0), var(--bn-all-y, 0));
+  transition: transform var(--bn-move, 0.5s) cubic-bezier(0.34, 0.72, 0.28, 1);
+}
+
+.cat-art[data-kind='bunny'] .bunny-head {
+  transform-origin: 100px 116px;
+  transform: translate(var(--bn-head-x, 0), var(--bn-head-y, 0)) rotate(var(--bn-head-r, 0deg));
+}
+
+.cat-art[data-kind='bunny'] .bunny-ear-l {
+  transform-origin: 84px 58px;
+  transform: rotate(var(--bn-ear-l, 0deg));
+}
+
+.cat-art[data-kind='bunny'] .bunny-ear-r {
+  transform-origin: 136px 58px;
+  transform: rotate(var(--bn-ear-r, 8deg));
+}
+
+.cat-art[data-kind='bunny'] .bunny-lid-up {
+  transform: translateY(var(--bn-lid-up, 3px));
+}
+
+.cat-art[data-kind='bunny'] .bunny-lid-down {
+  transform: translateY(var(--bn-lid-down, 0px));
+}
+
+.cat-art[data-kind='bunny'] .bunny-look {
+  transform: translate(var(--bn-look-x, 0), var(--bn-look-y, 0));
+}
+
+.cat-art[data-kind='bunny'] .bunny-pupil {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(var(--bn-pupil, 1));
+}
+
+.cat-art[data-kind='bunny'] .bunny-nose {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.cat-art[data-kind='bunny'] .bunny-happy {
+  opacity: var(--bn-happy, 0);
+}
+
+.cat-art[data-kind='bunny'] .bunny-sleep {
+  opacity: var(--bn-sleep, 0);
+}
+
+.cat-art[data-kind='bunny'] .bunny-tail {
+  transform-origin: 152px 162px;
+  transform: rotate(var(--bn-tail, 0deg));
+}
+
+/* Левая передняя лапа: поднимается в позе «лапа» (поворот у плеча), трёт мордочку в сценке «умывается». */
+.cat-art[data-kind='bunny'] .bunny-leg-l {
+  transform-origin: 92px 158px;
+  transform: rotate(var(--bn-leg, 0deg));
+}
+
+.cat-art[data-kind='bunny'] .bunny-collar {
+  transform-origin: 100px 110px;
+  transform: translateY(var(--bn-collar-y, 0)) scaleY(var(--bn-collar-s, 1));
+}
+
+.cat-art[data-kind='bunny'] .bunny-sit {
+  transform-origin: 104px 188px;
+  transform: scaleY(var(--bn-sit-s, 1));
+  opacity: var(--bn-sit-o, 1);
+}
+
+.cat-art[data-kind='bunny'] :is(.bunny-lie, .bunny-lie-front) {
+  opacity: var(--bn-lie-o, 0);
+}
+
+/* Спокойствие: сидит, веки чуть опущены, правое ухо чуть отогнуто. */
+.cat-art[data-kind='bunny'][data-pose='calm'] {
+  --bn-lid-up: 1px;
+  --bn-lid-down: -1px;
+  --bn-ear-l: -2deg;
+  --bn-ear-r: 10deg;
+}
+
+/* Внимание (экраны практики, ввод): уши торчком и вперёд, глаза шире, лёгкий наклон головы. */
+.cat-art[data-kind='bunny'][data-pose='attentive'] {
+  --bn-lid-up: -1px;
+  --bn-pupil: 1.08;
+  --bn-head-r: -4deg;
+  --bn-head-y: -2px;
+  --bn-ear-l: 4deg;
+  --bn-ear-r: -4deg;
+}
+
+/* Приветствие: поднимает голову, улыбается, уши врозь, хвостик дрожит. */
+.cat-art[data-kind='bunny'][data-pose='greet'] {
+  --bn-lid-up: 24px;
+  --bn-happy: 1;
+  --bn-head-y: -3px;
+  --bn-head-r: 4deg;
+  --bn-ear-l: -8deg;
+  --bn-ear-r: 14deg;
+  --bn-tail: -6deg;
+}
+
+/* Радость после сохранения: глаза-дуги, улыбка с зубками, уши врозь, подпрыгивает на месте. */
+.cat-art[data-kind='bunny'][data-pose='joy'] {
+  --bn-lid-up: 24px;
+  --bn-happy: 1;
+  --bn-head-y: -3px;
+  --bn-head-r: -4deg;
+  --bn-ear-l: -12deg;
+  --bn-ear-r: 18deg;
+  --bn-tail: -8deg;
+}
+
+/* Поддержка после трудной практики: уши мягко в стороны, голова набок, тёплый взгляд. */
+.cat-art[data-kind='bunny'][data-pose='support'] {
+  --bn-lid-up: 3px;
+  --bn-lid-down: -3px;
+  --bn-head-r: -8deg;
+  --bn-ear-l: -26deg;
+  --bn-ear-r: 30deg;
+  --bn-look-y: 1px;
+}
+
+/* Поглаживание: глаза закрыты, голова к руке, уши назад и вниз, довольный. */
+.cat-art[data-kind='bunny'][data-pose='pet'] {
+  --bn-lid-up: 24px;
+  --bn-happy: 1;
+  --bn-head-r: 9deg;
+  --bn-head-x: 1px;
+  --bn-head-y: 2px;
+  --bn-ear-l: -34deg;
+  --bn-ear-r: 36deg;
+  --bn-tail: -4deg;
+}
+
+/* Новая вещь: смотрит вниз в сторону вещи, уши вперёд, голова набок. */
+.cat-art[data-kind='bunny'][data-pose='unlock'] {
+  --bn-lid-up: 0px;
+  --bn-look-x: -2.6px;
+  --bn-look-y: 2.6px;
+  --bn-pupil: 1.1;
+  --bn-head-r: -9deg;
+  --bn-head-y: 2px;
+  --bn-ear-l: 6deg;
+  --bn-ear-r: -2deg;
+}
+
+/* Ожидание после ошибки сохранения — нейтрально и внимательно, без улыбки и слов. */
+.cat-art[data-kind='bunny'][data-pose='wait'] {
+  --bn-lid-up: 3px;
+  --bn-head-r: 3deg;
+  --bn-ear-l: -6deg;
+  --bn-ear-r: 12deg;
+  --bn-look-y: 1px;
+}
+
+/* Отдых: распластался — тело низко, задняя лапа вытянута, голова на лапах, уши лежат на спине, глаза закрыты. */
+.cat-art[data-kind='bunny'][data-pose='rest'] {
+  --bn-sit-s: 0.8;
+  --bn-sit-o: 0;
+  --bn-lie-o: 1;
+  --bn-head-y: 60px;
+  --bn-head-r: -3deg;
+  --bn-collar-y: 55px;
+  --bn-collar-s: 0.7;
+  --bn-lid-up: 24px;
+  --bn-sleep: 1;
+  --bn-ear-l: -62deg;
+  --bn-ear-r: 66deg;
+  --bn-move: 0.9s;
+  --bn-fade: 0.7s;
+}
+
+.cat-art[data-kind='bunny'][data-view='portrait'][data-pose='rest'] {
+  --bn-head-y: 0px;
+  --bn-collar-y: 0px;
+  --bn-collar-s: 1;
+  --bn-ear-l: -40deg;
+  --bn-ear-r: 44deg;
+}
+
+/* Редкая сценка в покое: зевок. */
+.cat-art[data-kind='bunny'][data-pose='yawn'] {
+  --bn-lid-up: 24px;
+  --bn-sleep: 1;
+  --bn-head-y: -3px;
+  --bn-head-r: -4deg;
+  --bn-ear-l: -16deg;
+  --bn-ear-r: 20deg;
+}
+
+/* Лапа (в «Поиграть»): тянется левой лапкой к руке, голова набок, улыбка. */
+.cat-art[data-kind='bunny'][data-pose='paw'] {
+  --bn-leg: -34deg;
+  --bn-lid-up: 1px;
+  --bn-head-r: -7deg;
+  --bn-ear-l: 2deg;
+  --bn-ear-r: 2deg;
+  --bn-tail: -5deg;
+}
+
+/* Сцена «Поиграть»: миску придвинули — принюхивается (голова к миске, data-toward — с какой стороны), отодвинули или
+   после лимита — смотрит, мячик — уши торчком, глаза круглые. */
+.cat-art[data-kind='bunny'][data-pose='sniff'] {
+  --bn-head-y: 6px;
+  --bn-head-r: -8deg;
+  --bn-look-x: -2.6px;
+  --bn-look-y: 2.6px;
+  --bn-lid-up: 2px;
+  --bn-ear-l: 6deg;
+  --bn-ear-r: -3deg;
+}
+
+.cat-art[data-kind='bunny'][data-pose='watch'] {
+  --bn-look-x: -2.6px;
+  --bn-look-y: 1.5px;
+  --bn-head-r: -4deg;
+  --bn-lid-up: 1px;
+  --bn-ear-l: 2deg;
+  --bn-ear-r: 4deg;
+}
+
+.cat-art[data-kind='bunny'][data-pose='ball'] {
+  --bn-lid-up: -1px;
+  --bn-look-x: -2.8px;
+  --bn-look-y: 2.4px;
+  --bn-pupil: 1.12;
+  --bn-head-r: -9deg;
+  --bn-ear-l: 8deg;
+  --bn-ear-r: -8deg;
+  --bn-tail: -6deg;
+}
+
+.cat-art[data-kind='bunny']:is([data-pose='sniff'], [data-pose='watch'], [data-pose='ball'])[data-toward='right'] {
+  --bn-look-x: 2.6px;
+  --bn-head-r: 8deg;
+  --bn-ear-l: -4deg;
+  --bn-ear-r: 14deg;
+}
+
+/* Лакомство: подбегает к миске, ест, уши вперёд; без анимации — та же поза. */
+.cat-art[data-kind='bunny'][data-pose='feed'] {
+  --bn-all-x: calc(var(--feed-x, 0px) - 30px);
+  --bn-all-y: calc(var(--feed-y, 0px) + 12px);
+  --bn-head-y: 44px;
+  --bn-head-r: -9deg;
+  --bn-collar-y: 30px;
+  --bn-collar-s: 0.85;
+  --bn-lid-up: 24px;
+  --bn-happy: 1;
+  --bn-ear-l: 10deg;
+  --bn-ear-r: -6deg;
+  --bn-tail: -8deg;
+  --bn-move: 0.42s;
+}
+
+/* Довольный после лакомства: улыбка, уши врозь, нос шевелится. */
+.cat-art[data-kind='bunny'][data-pose='fed'] {
+  --bn-lid-up: 24px;
+  --bn-happy: 1;
+  --bn-head-y: -3px;
+  --bn-head-r: 5deg;
+  --bn-ear-l: -10deg;
+  --bn-ear-r: 16deg;
+  --bn-tail: -8deg;
+}
+
+/* Покой после лакомства — до конца дня: веки чуть ниже, уши расслаблены. */
+.cat-art[data-kind='bunny'][data-pose='content'] {
+  --bn-lid-up: 9px;
+  --bn-lid-down: -2px;
+  --bn-ear-l: -10deg;
+  --bn-ear-r: 16deg;
+  --bn-tail: -3deg;
+}
+
+/* Устроился (новое место, раскрылся): уши вперёд, голова набок; потягивание — общие кадры pet-stretch (pet.css). */
+.cat-art[data-kind='bunny'][data-pose='settle'] {
+  --bn-lid-up: 6px;
+  --bn-head-r: -7deg;
+  --bn-head-y: -1px;
+  --bn-ear-l: 4deg;
+  --bn-ear-r: -2deg;
+  --bn-tail: -6deg;
+}
+
+.cat-art[data-kind='bunny'][data-pose='settle'][data-motion='normal'] .bunny-all {
+  animation: pet-stretch 0.9s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-view='portrait'][data-pose='feed'] {
+  --bn-all-x: 0px;
+  --bn-all-y: 0px;
+  --bn-head-y: 4px;
+  --bn-head-r: -4deg;
+  --bn-collar-y: 0px;
+  --bn-collar-s: 1;
+}
+
+/* ---------- одиночные движения и короткие жесты ---------- */
+
+@keyframes bunny-blink {
+  45%,
+  55% {
+    transform: translateY(22px);
+  }
+}
+
+@keyframes bunny-ear-twitch {
+  30% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) + 16deg));
+  }
+  60% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) - 6deg));
+  }
+}
+
+@keyframes bunny-ear-twitch-l {
+  30% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) - 14deg));
+  }
+  60% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) + 5deg));
+  }
+}
+
+@keyframes bunny-nose-wiggle {
+  25%,
+  75% {
+    transform: translateY(-0.8px) scaleY(0.82);
+  }
+  50% {
+    transform: translateY(0.3px) scaleY(1.06);
+  }
+}
+
+@keyframes bunny-look-around {
+  25%,
+  42% {
+    transform: translate(-2.6px, 0.4px);
+  }
+  62%,
+  80% {
+    transform: translate(2.6px, 0.4px);
+  }
+}
+
+@keyframes bunny-tail-shake {
+  25% {
+    transform: rotate(calc(var(--bn-tail, 0deg) - 12deg));
+  }
+  75% {
+    transform: rotate(calc(var(--bn-tail, 0deg) + 10deg));
+  }
+}
+
+/* Подпрыгивание на месте (радость, приветствие): лапы отрываются от пола, уши чуть отстают. */
+@keyframes bunny-bounce {
+  30% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) - 14px));
+  }
+  60% {
+    transform: translate(var(--bn-all-x, 0), var(--bn-all-y, 0));
+  }
+  78% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) - 6px));
+  }
+}
+
+@keyframes bunny-nod {
+  40% {
+    transform: translate(var(--bn-head-x, 0), calc(var(--bn-head-y, 0px) - 3px)) rotate(var(--bn-head-r, 0deg));
+  }
+}
+
+@keyframes bunny-paw-reach {
+  30% {
+    transform: rotate(calc(var(--bn-leg, 0deg) - 6deg));
+  }
+  65% {
+    transform: rotate(calc(var(--bn-leg, 0deg) + 3deg));
+  }
+}
+
+@keyframes bunny-slow-blink {
+  40%,
+  62% {
+    transform: translateY(20px);
+  }
+}
+
+/* Отдельное свойство scale, не transform: снятие дыхания не отменяет переход сдвига к миске (лакомство). */
+@keyframes bunny-breathe {
+  50% {
+    scale: 1 1.012;
+  }
+}
+
+.cat-art[data-kind='bunny'][data-micro='blink'] .bunny-lid-up {
+  animation: bunny-blink 0.24s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-micro='ear'] .bunny-ear-r {
+  animation: bunny-ear-twitch 0.62s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-micro='nose'] .bunny-nose {
+  animation: bunny-nose-wiggle 0.36s ease-in-out 2;
+}
+
+.cat-art[data-kind='bunny'][data-micro='look'] .bunny-look {
+  animation: bunny-look-around 1.6s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-micro='tail'] .bunny-tail {
+  animation: bunny-tail-shake 0.4s ease-in-out 2;
+}
+
+/* Нос шевелится почти в каждой реакции: обычное движение — быстрее и дольше, «Спокойное» — пара движений. */
+.cat-art[data-kind='bunny']:is([data-pose='greet'], [data-pose='joy'], [data-pose='fed'], [data-pose='unlock'], [data-pose='attentive'])[data-motion='normal'] .bunny-nose {
+  animation: bunny-nose-wiggle 0.36s ease-in-out 0.1s 4;
+}
+
+.cat-art[data-kind='bunny']:is([data-pose='greet'], [data-pose='joy'], [data-pose='fed'])[data-motion='calm'] .bunny-nose {
+  animation: bunny-nose-wiggle 0.7s ease-in-out 0.1s 2;
+}
+
+.cat-art[data-kind='bunny'][data-pose='joy'][data-motion='normal'] .bunny-all {
+  animation: bunny-bounce 0.7s ease-out 0.05s;
+}
+
+.cat-art[data-kind='bunny'][data-pose='greet'][data-motion='normal'] .bunny-head {
+  animation: bunny-nod 0.5s ease-out 0.1s;
+}
+
+.cat-art[data-kind='bunny']:is([data-pose='greet'], [data-pose='joy'], [data-pose='fed'])[data-motion='normal'] .bunny-tail {
+  animation: bunny-tail-shake 0.36s ease-in-out 0.1s 3;
+}
+
+.cat-art[data-kind='bunny']:is([data-pose='greet'], [data-pose='joy'])[data-motion='calm'] .bunny-tail {
+  animation: bunny-tail-shake 0.7s ease-in-out 0.1s 2;
+}
+
+/* Поглаживание: ухо дёргается и нос шевелится («Спокойное» — один раз), короче тихого отклика (calmPet, 0,7 с) —
+   поза сменится без рывка; data-again (pet.mjs) — движение заново. */
+.cat-art[data-kind='bunny'][data-pose='pet'][data-motion='normal'] .bunny-nose {
+  animation: bunny-nose-wiggle 0.32s ease-in-out 2;
+}
+
+.cat-art[data-kind='bunny'][data-pose='pet'][data-motion='calm'] .bunny-nose {
+  animation: bunny-nose-wiggle 0.64s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-pose='pet'][data-again] .bunny-nose {
+  animation-name: bunny-nose-wiggle-again;
+}
+
+/* Копия bunny-nose-wiggle: анимацию перезапускает только смена имени (тест сверяет кадры). */
+@keyframes bunny-nose-wiggle-again {
+  25%,
+  75% {
+    transform: translateY(-0.8px) scaleY(0.82);
+  }
+  50% {
+    transform: translateY(0.3px) scaleY(1.06);
+  }
+}
+
+.cat-art[data-kind='bunny'][data-pose='paw'][data-motion='normal'] .bunny-leg-l {
+  animation: bunny-paw-reach 0.6s ease-in-out 0.4s;
+}
+
+.cat-art[data-kind='bunny'][data-pose='support']:not([data-motion='none']) .bunny-lid-up {
+  animation: bunny-slow-blink 1.3s ease-in-out 0.25s;
+}
+
+/* Сцена «Поиграть»: принюхивается дважды, за мячиком — уши и нос. */
+@keyframes bunny-sniff {
+  50% {
+    transform: translate(var(--bn-head-x, 0), calc(var(--bn-head-y, 0px) + 2px)) rotate(var(--bn-head-r, 0deg));
+  }
+}
+
+.cat-art[data-kind='bunny'][data-pose='sniff']:not([data-motion='none']) .bunny-head {
+  animation: bunny-sniff 0.28s ease-in-out 0.45s 2;
+}
+
+.cat-art[data-kind='bunny'][data-pose='sniff']:not([data-motion='none']) .bunny-nose {
+  animation: bunny-nose-wiggle 0.3s ease-in-out 0.4s 3;
+}
+
+.cat-art[data-kind='bunny'][data-pose='ball'][data-motion='normal'] .bunny-ear-l {
+  animation: bunny-ear-twitch-l 0.5s ease-in-out 0.1s 2;
+}
+
+/* Дыхание — едва заметно и ступенчато; только в обычном режиме (data-breathe ставит pet.mjs). */
+.cat-art[data-kind='bunny'][data-motion='normal'][data-breathe] .bunny-all {
+  animation: bunny-breathe 4.4s steps(22) infinite;
+}
+
+/* Лакомство: дыхание не мешает подбежать к миске и вернуться. */
+.cat-art[data-kind='bunny']:is([data-pose='feed'], [data-pose='fed'])[data-breathe] .bunny-all {
+  animation: none;
+}
+
+@keyframes bunny-nibble {
+  50% {
+    transform: translate(var(--bn-head-x, 0), calc(var(--bn-head-y, 0px) + 3px)) rotate(calc(var(--bn-head-r, 0deg) - 2deg));
+  }
+}
+
+.cat-art[data-kind='bunny'][data-pose='feed']:not([data-motion='none']) .bunny-head {
+  animation: bunny-nibble 0.3s ease-in-out 0.55s 6;
+}
+
+.cat-art[data-kind='bunny'][data-pose='feed']:not([data-motion='none']) .bunny-nose {
+  animation: bunny-nose-wiggle 0.3s ease-in-out 0.5s 6;
+}
+
+.cat-art[data-kind='bunny'][data-pose='fed'][data-motion='normal'] .bunny-head {
+  animation: bunny-nod 0.5s ease-out 0.35s;
+}
+
+.cat-art[data-kind='bunny'][data-motion='calm'] {
+  --bn-move: 0.8s;
+  --bn-lid: 0.4s;
+}
+
+@media (hover: hover) {
+  :is(.cat-dock-btn, .cat-side-face):hover .cat-art[data-kind='bunny']:is([data-pose='calm'], [data-pose='attentive']) {
+    --bn-ear-l: 4deg;
+    --bn-ear-r: -4deg;
+    --bn-head-r: -5deg;
+    --bn-lid-up: -1px;
+  }
+}
+
+/* ---------- сценки (общее устройство сценок — pet.css: data-scene поверх позы покоя, --sc — амплитуда) ----------
+   «Прыгает» (hop): замирает, прижимается, два прыжка с прижатыми ушами и подогнутыми лапами, приземляется и отряхивается.
+   Рисунок не выходит за рамку (места его не обрезают): высота прыжка — 24 единицы. */
+@keyframes bunny-hop-all {
+  10% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) + 3px));
+  }
+  16%,
+  18% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) + 5px));
+  }
+  30%,
+  34% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) - 24px * var(--sc, 1)));
+  }
+  46% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) + 4px));
+  }
+  60%,
+  64% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) - 16px * var(--sc, 1)));
+  }
+  74% {
+    transform: translate(var(--bn-all-x, 0), calc(var(--bn-all-y, 0px) + 3px));
+  }
+  82%,
+  100% {
+    transform: translate(var(--bn-all-x, 0), var(--bn-all-y, 0));
+  }
+}
+
+@keyframes bunny-hop-sit {
+  16%,
+  18% {
+    transform: scaleY(0.9);
+  }
+  30%,
+  34% {
+    transform: scaleY(1.06);
+  }
+  46% {
+    transform: scaleY(0.92);
+  }
+  60%,
+  64% {
+    transform: scaleY(1.04);
+  }
+  74% {
+    transform: scaleY(0.94);
+  }
+  84% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes bunny-hop-ear-l {
+  16%,
+  18% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) + 4deg));
+  }
+  30%,
+  34% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) - 28deg * var(--sc, 1)));
+  }
+  46% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) + 8deg));
+  }
+  60%,
+  64% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) - 20deg * var(--sc, 1)));
+  }
+  76% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) + 6deg));
+  }
+  86%,
+  92% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) - 6deg));
+  }
+}
+
+@keyframes bunny-hop-ear-r {
+  16%,
+  18% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) - 4deg));
+  }
+  30%,
+  34% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) + 28deg * var(--sc, 1)));
+  }
+  46% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) - 8deg));
+  }
+  60%,
+  64% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) + 20deg * var(--sc, 1)));
+  }
+  76% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) - 6deg));
+  }
+  86%,
+  92% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) + 6deg));
+  }
+}
+
+@keyframes bunny-hop-head {
+  16%,
+  18% {
+    transform: translate(var(--bn-head-x, 0), calc(var(--bn-head-y, 0px) + 3px)) rotate(var(--bn-head-r, 0deg));
+  }
+  30%,
+  34% {
+    transform: translate(var(--bn-head-x, 0), calc(var(--bn-head-y, 0px) - 3px)) rotate(calc(var(--bn-head-r, 0deg) - 4deg));
+  }
+  60%,
+  64% {
+    transform: translate(var(--bn-head-x, 0), calc(var(--bn-head-y, 0px) - 2px)) rotate(calc(var(--bn-head-r, 0deg) + 3deg));
+  }
+  86%,
+  90%,
+  94% {
+    transform: translate(var(--bn-head-x, 0), var(--bn-head-y, 0)) rotate(calc(var(--bn-head-r, 0deg) - 3deg));
+  }
+  88%,
+  92% {
+    transform: translate(var(--bn-head-x, 0), var(--bn-head-y, 0)) rotate(calc(var(--bn-head-r, 0deg) + 3deg));
+  }
+}
+
+@keyframes bunny-hop-happy {
+  26%,
+  70% {
+    transform: translateY(var(--bn-lid-up, 3px));
+  }
+  30%,
+  66% {
+    transform: translateY(24px);
+  }
+}
+
+@keyframes bunny-hop-smile {
+  26%,
+  70% {
+    opacity: 0;
+  }
+  30%,
+  66% {
+    opacity: 1;
+  }
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-all {
+  animation: bunny-hop-all 3.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-sit {
+  animation: bunny-hop-sit 3.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-ear-l {
+  animation: bunny-hop-ear-l 3.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-ear-r {
+  animation: bunny-hop-ear-r 3.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-head {
+  animation: bunny-hop-head 3.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-lid-up {
+  animation: bunny-hop-happy 3.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'] .bunny-happy {
+  animation: bunny-hop-smile 3.2s ease-in-out;
+}
+
+/* Без анимации — замер в прыжке: уши назад, глаза-дуги, улыбка. */
+.cat-art[data-kind='bunny'][data-scene='hop'][data-motion='none'] {
+  --bn-all-y: -10px;
+  --bn-ear-l: -24deg;
+  --bn-ear-r: 30deg;
+  --bn-lid-up: 24px;
+  --bn-happy: 1;
+  --bn-head-y: -2px;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'][data-motion='none'] .bunny-mouth-smile {
+  display: inline;
+}
+
+.cat-art[data-kind='bunny'][data-scene='hop'][data-motion='none'] .bunny-mouth-calm {
+  display: none;
+}
+
+/* «Умывается» (wash): опускает голову, поднимает левую лапку и трёт мордочку, уши вперёд, глаза закрыты; в конце
+   отряхивается ушами. Капли у мордочки (bunny-wash) видны только пока трёт. */
+@keyframes bunny-wash-leg {
+  14% {
+    transform: rotate(calc(var(--bn-leg, 0deg) - 40deg * var(--sc, 1)));
+  }
+  22%,
+  36%,
+  50%,
+  64% {
+    transform: rotate(calc(var(--bn-leg, 0deg) - 56deg * var(--sc, 1)));
+  }
+  29%,
+  43%,
+  57%,
+  70% {
+    transform: rotate(calc(var(--bn-leg, 0deg) - 44deg * var(--sc, 1)));
+  }
+  78% {
+    transform: rotate(calc(var(--bn-leg, 0deg) - 20deg * var(--sc, 1)));
+  }
+  88%,
+  100% {
+    transform: rotate(var(--bn-leg, 0deg));
+  }
+}
+
+@keyframes bunny-wash-head {
+  14%,
+  72% {
+    transform: translate(calc(var(--bn-head-x, 0px) - 3px), calc(var(--bn-head-y, 0px) + 8px * var(--sc, 1))) rotate(calc(var(--bn-head-r, 0deg) + 10deg * var(--sc, 1)));
+  }
+  22%,
+  36%,
+  50%,
+  64% {
+    transform: translate(calc(var(--bn-head-x, 0px) - 4px), calc(var(--bn-head-y, 0px) + 10px * var(--sc, 1))) rotate(calc(var(--bn-head-r, 0deg) + 13deg * var(--sc, 1)));
+  }
+  29%,
+  43%,
+  57% {
+    transform: translate(calc(var(--bn-head-x, 0px) - 2px), calc(var(--bn-head-y, 0px) + 7px * var(--sc, 1))) rotate(calc(var(--bn-head-r, 0deg) + 8deg * var(--sc, 1)));
+  }
+  82%,
+  86%,
+  90% {
+    transform: translate(var(--bn-head-x, 0), var(--bn-head-y, 0)) rotate(calc(var(--bn-head-r, 0deg) - 3deg));
+  }
+  84%,
+  88% {
+    transform: translate(var(--bn-head-x, 0), var(--bn-head-y, 0)) rotate(calc(var(--bn-head-r, 0deg) + 3deg));
+  }
+}
+
+@keyframes bunny-wash-ear-l {
+  14%,
+  72% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) + 14deg * var(--sc, 1)));
+  }
+  82%,
+  90% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) - 10deg));
+  }
+  86% {
+    transform: rotate(calc(var(--bn-ear-l, 0deg) + 8deg));
+  }
+}
+
+@keyframes bunny-wash-ear-r {
+  14%,
+  72% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) - 14deg * var(--sc, 1)));
+  }
+  82%,
+  90% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) + 10deg));
+  }
+  86% {
+    transform: rotate(calc(var(--bn-ear-r, 8deg) - 8deg));
+  }
+}
+
+@keyframes bunny-wash-lids {
+  14%,
+  76% {
+    transform: translateY(24px);
+  }
+}
+
+@keyframes bunny-wash-drops {
+  20%,
+  68% {
+    opacity: 0.9;
+  }
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'] .bunny-leg-l {
+  animation: bunny-wash-leg 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'] .bunny-head {
+  animation: bunny-wash-head 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'] .bunny-ear-l {
+  animation: bunny-wash-ear-l 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'] .bunny-ear-r {
+  animation: bunny-wash-ear-r 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'] .bunny-lid-up {
+  animation: bunny-wash-lids 4.2s ease-in-out;
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'] .bunny-wash {
+  animation: bunny-wash-drops 4.2s ease-in-out;
+}
+
+/* Без анимации — трёт мордочку статично. */
+.cat-art[data-kind='bunny'][data-scene='wash'][data-motion='none'] {
+  --bn-leg: -52deg;
+  --bn-head-x: -3px;
+  --bn-head-y: 9px;
+  --bn-head-r: 12deg;
+  --bn-ear-l: 12deg;
+  --bn-ear-r: -6deg;
+  --bn-lid-up: 24px;
+}
+
+.cat-art[data-kind='bunny'][data-scene='wash'][data-motion='none'] .bunny-wash {
+  opacity: 0.9;
+}
+
+/* Образцы ленточек в уголке (кнопки выбора аксессуара). */
+.cat-swatch-ribbon {
+  background: #6aa7d8;
+  border-color: #3f6f99;
+}
+
+.cat-swatch-bow {
+  background: radial-gradient(circle, #e07a97 0 4px, transparent 5px), #f2a7bc;
+  border-color: #9e4a62;
+}
+
+.cat-swatch-clover {
+  background: radial-gradient(circle, #4f9a55 0 4px, transparent 5px), #9dcb9f;
+  border-color: #3f7444;
+}

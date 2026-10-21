@@ -28,6 +28,8 @@ export const PAGE_STYLES = Object.freeze({
     Object.freeze({ file: 'pet/pet.css', required: true }),
     Object.freeze({ file: 'pet/dog.css', required: true }),
   ]),
+  // Кролик (с 0.4.0): вход pet-companion/bunny — страница с mountPet подключает его стили после dog.css.
+  './bunny': Object.freeze([Object.freeze({ file: 'pet/bunny.css', required: true })]),
 });
 
 const isFile = (file) => stat(file).then((info) => info.isFile(), () => false);

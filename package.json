@@ -42,6 +42,10 @@
       "types": "./pet/behaviors.d.mts",
       "default": "./pet/behaviors.mjs"
     },
+    "./bunny": {
+      "types": "./pet/bunny.d.mts",
+      "default": "./pet/bunny.mjs"
+    },
     "./web": {
       "types": "./pet/web.d.mts",
       "default": "./pet/web.mjs"
@@ -77,6 +81,10 @@
     "./dog.css": {
       "types": "./pet/css.d.mts",
       "default": "./pet/dog.css"
+    },
+    "./bunny.css": {
+      "types": "./pet/css.d.mts",
+      "default": "./pet/bunny.css"
     },
     "./pet-base.css": {
       "types": "./pet/css.d.mts",

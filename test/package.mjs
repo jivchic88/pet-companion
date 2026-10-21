@@ -64,24 +64,24 @@ const START = new Date('2026-10-12T10:00:00');
 const CORE = ['core/catalog.mjs', 'core/day.mjs', 'core/define.mjs', 'core/director.mjs', 'core/editor.mjs', 'core/errors.mjs', 'core/facade.mjs', 'core/formats/legacy.mjs', 'core/index.mjs', 'core/pets.mjs', 'core/phrases.mjs', 'core/play.mjs', 'core/ports.mjs', 'core/presence.mjs', 'core/room.mjs', 'core/round.mjs', 'core/scenes.mjs', 'core/session.mjs', 'core/stages.mjs', 'core/storage.mjs', 'core/toys.mjs', 'core/version.mjs'];
 // Вход ядра pet-companion/core (PL05) — pet/core.mjs и его типы pet/core.d.mts. PL06: штатные определения (defs/), входы
 // pet-companion/pets и /behaviors с типами, наборы отображения веба (web/kits.mjs).
-const DEFS = ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs'];
+const DEFS = ['defs/bunny.mjs', 'defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs'];
 // PL07: вход веба pet/web.mjs с типами, общая оболочка, места legacy, контейнер и его стиль, указатель, общие мелочи.
-const WEB = ['web/catalog.mjs', 'web/kits.mjs', 'web/legacy/places.mjs', 'web/parts.mjs', 'web/pointer.mjs', 'web/scenes.mjs', 'web/shell.mjs', 'web/storage.mjs', 'web/view.css', 'web/view.mjs'];
+const WEB = ['web/bunny.mjs', 'web/catalog.mjs', 'web/kits.mjs', 'web/legacy/places.mjs', 'web/parts.mjs', 'web/pointer.mjs', 'web/scenes.mjs', 'web/shell.mjs', 'web/storage.mjs', 'web/view.css', 'web/view.mjs'];
 // PL08: вход React pet/react.mjs с типами и общий хук pet/hooks/state.mjs.
 const REACT = ['hooks/state.mjs', 'react.d.mts', 'react.mjs'];
 // U01: входы минимального режима с типами, описание и экземпляр персонажа, вид в контейнере и его стиль.
 const CHARACTER = ['character-react.d.mts', 'character-react.mjs', 'character-web.d.mts', 'character-web.mjs', 'character.d.mts', 'character.mjs', 'character/core.mjs', 'character/define.mjs', 'character/view.css', 'character/view.mjs'];
 // PL09: входы натива с типами, жизненный цикл и SQLite-адаптер; PL10.1: отображение, наборы и рисунки; PL10.2.1: рисунок
 // поверхности, координатор, общий уголок и уголок; PL10.2.2: распознавание жестов и «Поиграть».
-const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/arrange.mjs', 'native/cat.mjs', 'native/corner.mjs', 'native/dog.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/play.mjs', 'native/provider.mjs', 'native/room.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
-const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'cat-art.mjs', ...CHARACTER, 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', ...REACT, ...NATIVE, 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
+const NATIVE = ['native-sqlite.d.mts', 'native-sqlite.mjs', 'native.d.mts', 'native.mjs', 'native/arrange.mjs', 'native/bunny.mjs', 'native/cat.mjs', 'native/corner.mjs', 'native/dog.mjs', 'native/figure.mjs', 'native/gesture.mjs', 'native/kits.mjs', 'native/lifecycle.mjs', 'native/motion.mjs', 'native/play.mjs', 'native/provider.mjs', 'native/room.mjs', 'native/svg.mjs', 'native/view.mjs', 'storage/sqlite.mjs'];
+const RUNTIME = ['behaviors.d.mts', 'behaviors.mjs', 'bunny-art.mjs', 'bunny.css', 'bunny.d.mts', 'bunny.mjs', 'cat-art.mjs', ...CHARACTER, 'core.d.mts', 'core.mjs', ...CORE, 'css.d.mts', ...DEFS, 'dog-art.mjs', 'dog.css', ...REACT, ...NATIVE, 'pet-base.css', 'pet-move.mjs', 'pet-place.mjs', 'pet-play.mjs', 'pet-room.mjs', 'pet-rules.mjs', 'pet-toys.mjs', 'pet.css', 'pet.d.mts', 'pet.mjs', 'pets.d.mts', 'pets.mjs', 'web.d.mts', 'web.mjs', ...WEB];
 // Голые имена партнёров — только в своих файлах (PL08 — react, PL09 — react-native и expo-sqlite, PL10.1 — отображение и
 // рисунки натива: react и react-native-svg; PL10.2.1 — рисунок поверхности, координатор, общий уголок, уголок; PL10.2.2 —
 // «Поиграть»).
 const PEER_FILES = {
   react: (file) => file === 'react.mjs' || file === 'character-react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
   'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
-  'react-native-svg': (file) => ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/room.mjs', 'native/figure.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
+  'react-native-svg': (file) => ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/bunny.mjs', 'native/room.mjs', 'native/figure.mjs', 'native/corner.mjs', 'native/play.mjs'].includes(file),
   'expo-sqlite': (file) => file === 'native-sqlite.mjs',
 };
 // Локальные импорты слоёв pet/native/** (PL10.1, PL10.2.1, PL10.2.2): области, в которые файл может ссылаться.
@@ -92,6 +92,7 @@ const NATIVE_LOCAL = {
   'native/svg.mjs': [],
   'native/cat.mjs': ['native/svg.mjs'],
   'native/dog.mjs': ['native/svg.mjs'],
+  'native/bunny.mjs': ['native/svg.mjs'],
   'native/room.mjs': ['core/room.mjs', 'native/kits.mjs', 'native/svg.mjs'],
   'native/figure.mjs': ['native/kits.mjs', 'native/motion.mjs'],
   'native/provider.mjs': ['core/ports.mjs', 'native/kits.mjs'],
@@ -799,6 +800,7 @@ try {
     const pets = await import('${NAME}/pets');
     const behaviors = await import('${NAME}/behaviors');
     const web = await import('${NAME}/web');
+    const bunnyEntry = await import('${NAME}/bunny');
     const resolve = (spec) => { try { return import.meta.resolve(spec); } catch (error) { return error.code; } };
     const closed = await import('${NAME}/pet/pet-rules.mjs').then(() => 'open', (error) => error.code);
     const shut = ['missing.css', 'pet/pet.css', 'pet/css.d.mts', 'pet/core.mjs', 'pet/core.d.mts', 'pet/core/index.mjs', 'pet/core/facade.mjs', 'pet/core/version.mjs', 'pet/core/storage.mjs', 'pet/core/session.mjs', 'pet/core/scenes.mjs', 'pet/core/presence.mjs', 'pet/core/room.mjs', 'pet/core/play.mjs', 'pet/core/editor.mjs', 'pet/core/toys.mjs', 'pet/core/figure.mjs', 'pet/core/define.mjs', 'pet/core/catalog.mjs', 'pet/pets.mjs', 'pet/behaviors.mjs', 'pet/defs/cat.mjs', 'pet/defs/calm.mjs', 'pet/web/kits.mjs', 'pet/web/storage.mjs', 'pet/web/scenes.mjs', 'pet/web.mjs', 'pet/web.d.mts', 'pet/web/view.mjs', 'pet/web/shell.mjs', 'pet/web/pointer.mjs', 'pet/web/legacy/places.mjs', 'pet/web/view.css', 'web/view.mjs', 'view.css', 'core/index.mjs', 'defs', 'defs/cat', 'kits', 'pet/react.mjs', 'pet/react.d.mts', 'pet/hooks/state.mjs', 'hooks', 'hooks/state.mjs', 'pet/native.mjs', 'pet/native.d.mts', 'pet/native-sqlite.mjs', 'pet/native/lifecycle.mjs', 'pet/storage/sqlite.mjs', 'native/lifecycle.mjs', 'storage/sqlite.mjs', 'storage', 'pet/native/view.mjs', 'pet/native/cat.mjs', 'native/view.mjs', 'native/kits.mjs', 'pet/native/corner.mjs', 'pet/native/provider.mjs', 'native/room.mjs', 'pet/native/play.mjs', 'pet/native/gesture.mjs', 'native/play.mjs', 'native/gesture.mjs', 'pet/character/core.mjs', 'pet/character/view.mjs', 'character/core.mjs'].map((name) => resolve('${NAME}/' + name));
@@ -806,13 +808,14 @@ try {
     const react = await import('${NAME}/react').then(() => 'imported', (error) => ({ code: error.code, message: error.message }));
     const failure = (error) => ({ code: error.code, message: error.message });
     const native = { at: resolve('${NAME}/native').replace(/^.*node_modules\\//, ''), sqliteAt: resolve('${NAME}/native-sqlite').replace(/^.*node_modules\\//, ''), lifecycle: await import('${NAME}/native').then(() => 'imported', failure), sqlite: await import('${NAME}/native-sqlite').then(() => 'imported', failure) };
-    console.log(JSON.stringify({ character, webKeys: Object.keys(web).sort(), webAt: resolve('${NAME}/web').replace(/^.*node_modules\\//, ''), keys: Object.keys(pet).sort(), coreKeys: Object.keys(core).sort(), petsKeys: Object.keys(pets).sort(), behaviorsKeys: Object.keys(behaviors).sort(), petsAt: resolve('${NAME}/pets').replace(/^.*node_modules\\//, ''), behaviorsAt: resolve('${NAME}/behaviors').replace(/^.*node_modules\\//, ''), frozen: Object.isFrozen(pets.cat) && Object.isFrozen(pets.cat.room) && Object.isFrozen(behaviors.calm.reactions.joy), ids: [pets.cat.id, pets.dog.id, behaviors.calm.id], coreAt: resolve('${NAME}/core').replace(/^.*node_modules\\//, ''), sameDay: core.localDay === pet.localDay, sameVersion: core.VERSION === pet.VERSION, version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json'), manifestAt: resolve('${NAME}/manifest.json').replace(/^.*node_modules\\//, ''), reactAt: resolve('${NAME}/react').replace(/^.*node_modules\\//, ''), react, native }));`;
+    console.log(JSON.stringify({ bunny: { keys: Object.keys(bunnyEntry).sort(), id: bunnyEntry.bunny.id, kit: bunnyEntry.bunnyWeb.pet, styles: bunnyEntry.bunnyWeb.styles.map((href) => href.replace(/^.*node_modules\\//, '')), frozen: Object.isFrozen(bunnyEntry.bunny) && Object.isFrozen(bunnyEntry.bunnyWeb), at: resolve('${NAME}/bunny').replace(/^.*node_modules\\//, '') }, character, webKeys: Object.keys(web).sort(), webAt: resolve('${NAME}/web').replace(/^.*node_modules\\//, ''), keys: Object.keys(pet).sort(), coreKeys: Object.keys(core).sort(), petsKeys: Object.keys(pets).sort(), behaviorsKeys: Object.keys(behaviors).sort(), petsAt: resolve('${NAME}/pets').replace(/^.*node_modules\\//, ''), behaviorsAt: resolve('${NAME}/behaviors').replace(/^.*node_modules\\//, ''), frozen: Object.isFrozen(pets.cat) && Object.isFrozen(pets.cat.room) && Object.isFrozen(behaviors.calm.reactions.joy), ids: [pets.cat.id, pets.dog.id, behaviors.calm.id], coreAt: resolve('${NAME}/core').replace(/^.*node_modules\\//, ''), sameDay: core.localDay === pet.localDay, sameVersion: core.VERSION === pet.VERSION, version: pet.VERSION, day: pet.localDay(new Date(2026, 9, 12, 23, 59)), css: ['pet.css', 'dog.css', 'bunny.css', 'pet-base.css'].map((name) => resolve('${NAME}/' + name).replace(/^.*node_modules\\//, '')), closed, shut, own: resolve('${NAME}/package.json').endsWith('package.json'), manifestAt: resolve('${NAME}/manifest.json').replace(/^.*node_modules\\//, ''), reactAt: resolve('${NAME}/react').replace(/^.*node_modules\\//, ''), react, native }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', probe], { cwd: project });
   const node = JSON.parse(stdout);
   check('Node: вход — mountPet, localDay, VERSION; версия пакета', JSON.stringify(node.keys) === '["VERSION","localDay","mountPet"]' && node.version === VERSION && node.day === '2026-10-12', stdout);
   check('Node: вход ядра pet-companion/core — ровно createPetCore, createStorage, defineBehavior, definePet (PL06), PetError, localDay, VERSION из pet/core.mjs; та же граница дня и версия', JSON.stringify(node.coreKeys) === '["PetError","VERSION","createPetCore","createStorage","defineBehavior","definePet","localDay"]' && node.coreAt === `${NAME}/pet/core.mjs` && node.sameDay && node.sameVersion, stdout);
   check('Node: входы pet-companion/pets (cat, dog, corner, cornerItems) и pet-companion/behaviors (calm) — pet/pets.mjs и pet/behaviors.mjs; определения глубоко заморожены', JSON.stringify(node.petsKeys) === '["cat","corner","cornerItems","dog"]' && JSON.stringify(node.behaviorsKeys) === '["calm"]' && node.petsAt === `${NAME}/pet/pets.mjs` && node.behaviorsAt === `${NAME}/pet/behaviors.mjs` && node.frozen && node.ids.join() === 'cat,dog,calm', stdout);
-  check('Node: стили по exports — pet.css, dog.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
+  check('Node: стили по exports — pet.css, dog.css, bunny.css, pet-base.css; внутренние модули закрыты', JSON.stringify(node.css) === JSON.stringify(['pet.css', 'dog.css', 'bunny.css', 'pet-base.css'].map((name) => `${NAME}/pet/${name}`)) && node.closed === 'ERR_PACKAGE_PATH_NOT_EXPORTED' && node.own, stdout);
+  check('Node: вход pet-companion/bunny (0.4.0) — ровно bunny и bunnyWeb из pet/bunny.mjs; определение и набор заморожены; стили набора — pet/bunny.css установленного пакета', JSON.stringify(node.bunny?.keys) === '["bunny","bunnyWeb"]' && node.bunny.id === 'bunny' && node.bunny.kit === 'bunny' && JSON.stringify(node.bunny.styles) === JSON.stringify([`${NAME}/pet/bunny.css`]) && node.bunny.frozen && node.bunny.at === `${NAME}/pet/bunny.mjs`, stdout);
   check('Node: несуществующий стиль, стиль и декларация по внутреннему пути, файл входа ядра и файлы ядра по внутренним путям (фасад, версия, экземпляр, сессия, хранение, сценки, присутствие, комната, игра, редактор, удалённый figure, define, catalog), файлы входов штатных и определений (pets.mjs, behaviors.mjs, defs/*), файлы входа веба и внутренние веба (web.mjs, web.d.mts, view, shell, pointer, места legacy, стиль вида view.css), веб-адаптеры и наборы, файлы React по внутренним путям (pet/react.mjs, типы, хук), файлы натива по внутренним путям (pet/native.mjs, типы, pet/native-sqlite.mjs, жизненный цикл, SQLite-адаптер; PL10.1 — отображение и наборы; PL10.2.1 — уголок, координатор, общий уголок; PL10.2.2 — игра и распознавание жестов), несуществующие входы (defs, kits, hooks, storage) — ERR_PACKAGE_PATH_NOT_EXPORTED', node.shut.length === 66 && node.shut.every((code) => code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'), stdout);
   check('Node без мобильных партнёров (PL09): pet-companion/native и /native-sqlite разрешаются в pet/native.mjs и pet/native-sqlite.mjs, импорт честно отказывает — нет react (необязательный партнёр /native, за ним react-native) и expo-sqlite; прежние входы выше работают', node.native?.at === `${NAME}/pet/native.mjs` && node.native.sqliteAt === `${NAME}/pet/native-sqlite.mjs` && node.native.lifecycle?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.native.lifecycle.message) && node.native.sqlite?.code === 'ERR_MODULE_NOT_FOUND' && /'expo-sqlite'/.test(node.native.sqlite.message), stdout);
   check('Node без React (PL08): pet-companion/manifest.json — публичный путь к manifest.json; pet-companion/react разрешается в pet/react.mjs, а импорт честно отказывает — нет пакета react (необязательный партнёр); остальные входы выше работают', node.manifestAt === `${NAME}/manifest.json` && node.reactAt === `${NAME}/pet/react.mjs` && node.react?.code === 'ERR_MODULE_NOT_FOUND' && /'react'/.test(node.react.message), stdout);
@@ -1407,6 +1410,33 @@ PetRoom({ testID: 1 });
 export { scened, notScened, editor, editorBare, loaded, ready, idle, name, sync, view, kind, own, web, notView, provider, composed, corner, bare, room, feedIn, notRoom, play, playBare, playable, notPlay };
 `,
   );
+  // Кролик (0.4.0): вход pet-companion/bunny — определение и веб-набор с типами ядра и веба, стиль bunny.css подключается;
+  // набор и определение заморожены (запись — ошибка компилятора, 2 @ts-expect-error); нативный набор — из /native (как catNative).
+  await writeFile(
+    path.join(project, 'bunny.mts'),
+    `import { mountPet, type Pet, type PetWebKit } from '${NAME}';
+import { calm } from '${NAME}/behaviors';
+import { bunny, bunnyWeb } from '${NAME}/bunny';
+import type { PetDefinition } from '${NAME}/core';
+import { cat, dog } from '${NAME}/pets';
+import { mountPetIn, type PetView } from '${NAME}/web';
+import '${NAME}/pet.css';
+import '${NAME}/dog.css';
+import '${NAME}/bunny.css';
+const def: PetDefinition = bunny;
+const kit: PetWebKit = bunnyWeb;
+const id: 'bunny' = bunny.id as 'bunny';
+const head = document.createElement('header');
+const pet: Pet = mountPet({ storage: 'site', places: { logo: (el) => head.append(el), top: (el) => head.prepend(el) }, progress: () => ({ marks: 1, today: 0, limit: 3 }), pets: [cat, dog, bunny], behaviors: [calm], kits: [bunnyWeb] });
+const view: PetView = mountPetIn(head, { pets: [cat, dog, bunny], behaviors: [calm], kits: [bunnyWeb], progress: () => ({ marks: 1, today: 0, limit: 3 }) });
+const styles: readonly (string | URL)[] = kit.styles ?? [];
+// @ts-expect-error набор заморожен
+bunnyWeb.pet = 'rabbit';
+// @ts-expect-error определение заморожено
+bunny.title = 'Заяц';
+export { def, kit, id, pet, view, styles };
+`,
+  );
   const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
   for (const [module, resolution] of [
     ['nodenext', 'nodenext'],
@@ -1425,6 +1455,8 @@ export { scened, notScened, editor, editorBare, loaded, ready, idle, name, sync,
     check(`TypeScript (${resolution}): ядро и входы штатных определений без lib dom`, plain === '', plain);
     const ext = await types('ext.mts', 'es2022');
     check(`TypeScript (${resolution}, без lib dom): определения PL06 — своё из штатного, своя модель, регистрация, ID расширения в командах и снимке, PetError.path; неверные определения, регистрация без моделей и ID — ошибки (10 @ts-expect-error)`, ext === '', ext);
+    const bunnyTs = await types('bunny.mts');
+    check(`TypeScript (${resolution}): pet-companion/bunny — определение и веб-набор типов ядра и веба, стиль bunny.css, mountPet и mountPetIn с кроликом; запись в замороженные — ошибки (2 @ts-expect-error)`, bunnyTs === '', bunnyTs);
     const web = await types('web.mts');
     check(`TypeScript (${resolution}): pet-companion/web — mountPetIn, настройки и вид, веб-адаптеры с публичным createPetCore, наборы и стили набора; неверные настройки, вид, контейнер и поля — ошибки (8 @ts-expect-error)`, web === '', web);
     const native = await types('native.mts', 'es2022');

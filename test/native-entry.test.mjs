@@ -46,9 +46,9 @@ for (const name of TRAPS) delete globalThis[name];
 
 test.after(() => L.close());
 
-test('импорт входов: ровно экспорты (PL10.1: ещё PetView, catNative, dogNative; PL10.2.1: PetProvider, PetCorner; PL10.2.2: PetPlay), без браузерных глобалов, без открытия базы, запросов, подписок системы и клавиатуры, анимаций и объявлений', () => {
+test('импорт входов: ровно экспорты (PL10.1: ещё PetView, catNative, dogNative, с 0.4.0 — bunnyNative; PL10.2.1: PetProvider, PetCorner; PL10.2.2: PetPlay), без браузерных глобалов, без открытия базы, запросов, подписок системы и клавиатуры, анимаций и объявлений', () => {
   assert.deepEqual(Object.keys(Sqlite).sort(), ['createSqliteScenes', 'createSqliteStorage']);
-  assert.deepEqual(Object.keys(Native).sort(), ['PetCorner', 'PetPlay', 'PetProvider', 'PetRoom', 'PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
+  assert.deepEqual(Object.keys(Native).sort(), ['PetCorner', 'PetPlay', 'PetProvider', 'PetRoom', 'PetView', 'bunnyNative', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
   assert.deepEqual(Object.values(rn.keys).map((set) => set.size), [0, 0, 0, 0], 'импорт не слушает клавиатуру');
   assert.ok([Native.catNative, Native.dogNative].every((kit) => Object.isFrozen(kit) && typeof kit.Figure === 'function'), 'наборы — замороженные объекты с рисунком');
   assert.equal(Native.usePetState, Hook.usePetState, 'тот же общий хук, что у pet-companion/react');

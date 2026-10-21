@@ -13,18 +13,20 @@ import test from 'node:test';
 import { calm } from '../pet/defs/calm.mjs';
 import { cat } from '../pet/defs/cat.mjs';
 import { dog } from '../pet/defs/dog.mjs';
+import { bunny as stockBunny } from '../pet/defs/bunny.mjs';
 import { bunny } from '../examples/extension/bunny.mjs';
 import { lively } from '../examples/extension/lively.mjs';
 import { defineBehavior, definePet } from '../pet/core.mjs';
 import { DAY, flush, host, life, reserver, sceneStore } from './core-kit.mjs';
 
-const ALL = { pets: [cat, dog, bunny], behaviors: [calm, lively] };
+const ALL = { pets: [cat, dog, bunny, stockBunny], behaviors: [calm, lively] };
 const VIEWS = ['corner', 'play', 'room'];
-const SCENES = { cat: ['stretch', 'curl'], dog: ['fetch'], 'example.bunny': ['hop'] };
-const DISPLAY = { pets: ['cat', 'dog', 'example.bunny'], views: VIEWS, scenes: SCENES };
+const SCENES = { cat: ['stretch', 'curl'], dog: ['fetch'], 'example.bunny': ['hop'], bunny: ['hop', 'wash'] };
+const DISPLAY = { pets: ['cat', 'dog', 'example.bunny', 'bunny'], views: VIEWS, scenes: SCENES };
 const FLOOR = [-40, -10, 300, 230];
 const COMMON = { v: 1, seenStage: 1, greetDay: DAY };
-const PETS = { cat: {}, dog: { companion: { v: 1, kind: 'dog' } }, 'example.bunny': { ext: { v: 1, pet: { id: 'example.bunny', over: 'cat' } } } };
+// Штатный кролик (0.4.0) живёт в ключе ext, как сторонний питомец.
+const PETS = { cat: {}, dog: { companion: { v: 1, kind: 'dog' } }, 'example.bunny': { ext: { v: 1, pet: { id: 'example.bunny', over: 'cat' } } }, bunny: { ext: { v: 1, pet: { id: 'bunny', over: 'cat' } } } };
 const MODELS = { calm: {}, 'example.lively': { behavior: 'example.lively' } };
 
 // Ядро с парой питомец + модель (сохранено заранее), всеми определениями и объявлением отображения.
@@ -39,11 +41,11 @@ function pair(pet, model, { display = DISPLAY, scenes = null, counts = host(4, 1
 const playing = (L) => L.state().pose.reaction?.type ?? null;
 const told = (L) => L.effects('announce').map((effect) => effect.text);
 
-for (const pet of ['cat', 'dog', 'example.bunny']) {
+for (const pet of ['cat', 'dog', 'example.bunny', 'bunny']) {
   for (const model of ['calm', 'example.lively']) {
     test(`пара ${pet} + ${model}: позы с заменами, лапа по возможности, зевок по модели и позе, длительность модели`, () => {
       const L = pair(pet, model);
-      const def = { cat, dog, 'example.bunny': bunny }[pet];
+      const def = { cat, dog, 'example.bunny': bunny, bunny: stockBunny }[pet];
       const behavior = { calm, 'example.lively': lively }[model];
       // Ожидание — поза wait или замена питомца (у кролика — attentive).
       L.core.notify('failed');
@@ -427,7 +429,7 @@ test('набора нет: отображение не рисует питомц
 test('снимок PL06: pet и behavior — данные выбора и показа, pets — все зарегистрированные; глубоко заморожен, без функций и ссылок на определения', () => {
   const L = pair('example.bunny', 'example.lively');
   const s = L.state();
-  assert.deepEqual(Object.keys(s.pets), ['cat', 'dog', 'example.bunny']);
+  assert.deepEqual(Object.keys(s.pets), ['cat', 'dog', 'example.bunny', 'bunny']);
   assert.deepEqual(s.pets['example.bunny'], { name: { value: '', chosen: false, display: 'Пух' }, coat: 'snow', accessory: 'ribbon', worn: 'ribbon' });
   const walk = (value) => {
     if (value && typeof value === 'object') {

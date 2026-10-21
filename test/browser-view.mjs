@@ -1308,9 +1308,10 @@ async function kits(browser, base, check, open) {
     check(`${label}: после отказов — ни записей хранилища, ни баз IndexedDB отказавших (только kits-ok у контроля), соседний вид не изменился`, after.a === before.a && after.keys.split(',').every((key) => !key.startsWith('kits-bad')) && !after.dbs.includes('kits-bad'), JSON.stringify({ before, after }));
     check(`${label}: контроль — полный свой набор кота с обликом purple подключается, облик purple`, result[5].control && result[5].ok && result[5].coat === 'purple', JSON.stringify(result[5]));
     await call(page, 'a', 'destroy');
-    // Контроль без собаки: слабая ссылка модели calm на собаку (byPet.dog) — ожидаемое предупреждение журнала.
-    const weak = page.qaErrors.filter((text) => /byPet\["dog"\]: питомца «dog» нет/.test(text));
-    check(`${label}: других ошибок нет (кроме ожидаемого предупреждения слабой ссылки контроля без собаки)`, weak.length === 1 && page.qaErrors.length === refusals.length + weak.length, JSON.stringify(page.qaErrors));
+    // Контроль без собаки: ссылка модели calm на штатную собаку (byPet.dog) с 0.4.0 предупреждения не даёт (штатные
+    // питомцы, которых сайт не подключил, — не слабая ссылка автора).
+    const weak = page.qaErrors.filter((text) => /byPet\["(dog|bunny)"\]: питомца/.test(text));
+    check(`${label}: других ошибок нет; ссылка calm на неподключённых штатных питомцев (собака, кролик) без предупреждения`, weak.length === 0 && page.qaErrors.length === refusals.length, JSON.stringify(page.qaErrors));
   } catch (error) {
     check(`${label}: сценарий выполнен`, false, error.stack);
   } finally {

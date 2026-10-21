@@ -14,7 +14,7 @@
 // запасной показ fallback для вкладок прежних версий.
 
 import { PetError } from './errors.mjs';
-import { LEGACY_KINDS } from './formats/legacy.mjs';
+import { BUILTIN_KINDS, LEGACY_KINDS } from './formats/legacy.mjs';
 import { cleanName, NAME_MAX } from './pets.mjs';
 import { STAGES } from './stages.mjs';
 
@@ -60,14 +60,14 @@ const PRIORITY = [3, 7];
 const DECORATIVE_PRIORITY = 7;
 const LAST_STAGE = STAGES.length - 1;
 
-// ID: штатные без точки (питомцы — совместимость 0.1.4, модель — calm); сторонние — с точкой.
+// ID: штатные без точки (питомцы — cat и dog 0.1.4 и bunny с 0.4.0, модель — calm); сторонние — с точкой.
 const DOTTED = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 // Сторонний ID с точкой (без штатных): общий для питомцев, моделей и персонажей (character/define.mjs).
 export const isDottedId = (value) => typeof value === 'string' && value.length <= 80 && DOTTED.test(value);
 export const BUILTIN_BEHAVIORS = Object.freeze(['calm']);
 const LOCAL = /^[a-z0-9-]{1,40}$/;
 const GROUP = /^[a-z][a-zA-Z0-9]{0,39}$/;
-export const isPetId = (value) => typeof value === 'string' && value.length <= 80 && (LEGACY_KINDS.includes(value) || DOTTED.test(value));
+export const isPetId = (value) => typeof value === 'string' && value.length <= 80 && (BUILTIN_KINDS.includes(value) || DOTTED.test(value));
 export const isBehaviorId = (value) => typeof value === 'string' && value.length <= 80 && (BUILTIN_BEHAVIORS.includes(value) || DOTTED.test(value));
 export const isLocalId = (value) => typeof value === 'string' && LOCAL.test(value);
 // Полная ссылка на сценку питомца: 'petId/sceneId'.
@@ -217,7 +217,7 @@ export function resolvePose(def, pose) {
 
 function checkPet(d, p) {
   shape(d, p, PET_FIELDS, ['poseFallback']);
-  if (!isPetId(d.id)) throw invalid(join(p, 'id'), `ID питомца: штатный (${LEGACY_KINDS.join(', ')}) или сторонний с точкой (example.bunny)`);
+  if (!isPetId(d.id)) throw invalid(join(p, 'id'), `ID питомца: штатный (${BUILTIN_KINDS.join(', ')}) или сторонний с точкой (example.bunny)`);
   text(d.title, join(p, 'title'), 40);
   shape(d.forms, join(p, 'forms'), ['gen', 'acc']);
   text(d.forms.gen, join(join(p, 'forms'), 'gen'), 40);
@@ -566,7 +566,8 @@ function listOf(name, value, kind) {
 // Регистрация на экземпляр (§ 7.3): списки питомцев и моделей, без глобального реестра. Обязательных перекрёстных ссылок
 // нет: любая корректная модель совместима с любым корректным питомцем (классы § 7.1.1). Слабые ссылки модели —
 // byPet[petId] и skip 'petId/sceneId' — на питомца или сценку, которых в этом экземпляре нет, не ошибка: по одному
-// предупреждению на ссылку (refs).
+// предупреждению на ссылку (refs). Ссылка на штатного питомца пакета (BUILTIN_KINDS), которого сайт не подключил, —
+// без предупреждения: штатная модель calm несёт банки реплик всех штатных питомцев, а сайт волен подключить любых.
 export function register(pets, behaviors) {
   const petList = listOf('pets', pets, 'pet');
   const behaviorList = listOf('behaviors', behaviors, 'behavior');
@@ -574,11 +575,13 @@ export function register(pets, behaviors) {
   const refs = [];
   behaviorList.forEach((behavior, i) => {
     for (const pet of Object.keys(behavior.phrases.byPet ?? {})) {
-      if (!scenes.has(pet)) refs.push(`behaviors[${i}].phrases.byPet[${JSON.stringify(pet)}]: питомца «${pet}» нет в этом экземпляре — замены реплик не используются`);
+      if (!scenes.has(pet) && !BUILTIN_KINDS.includes(pet)) refs.push(`behaviors[${i}].phrases.byPet[${JSON.stringify(pet)}]: питомца «${pet}» нет в этом экземпляре — замены реплик не используются`);
     }
     for (const ref of behavior.scenes.skip ?? []) {
       const { pet, scene } = sceneRef(ref);
-      if (!scenes.has(pet)) refs.push(`behaviors[${i}].scenes.skip: «${ref}» — питомца «${pet}» нет в этом экземпляре`);
+      if (!scenes.has(pet)) {
+        if (!BUILTIN_KINDS.includes(pet)) refs.push(`behaviors[${i}].scenes.skip: «${ref}» — питомца «${pet}» нет в этом экземпляре`);
+      }
       else if (!scenes.get(pet).has(scene)) refs.push(`behaviors[${i}].scenes.skip: «${ref}» — у питомца «${pet}» нет сценки «${scene}»`);
     }
   });

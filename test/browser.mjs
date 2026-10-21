@@ -21,7 +21,8 @@
 // подключение и прежний фасад) — test/browser-commands.mjs; пример расширения (PL06: кролик и живая модель через публичные
 // входы, файлы пакета по адресу установленного архива) — test/browser-extension.mjs; наборы отображения (PL06, по
 // независимой проверке: отказ неполного своего и неподходящего штатного набора до любых действий, контроли) —
-// test/browser-kits.mjs; контейнерный режим (PL07: mountPetIn в Shadow DOM, два контейнера и legacy, общий namespace,
+// test/browser-kits.mjs; кролик (0.4.0: явное подключение pets/kits/bunny.css, уголок, «Поиграть» с лапкой, редактор, ступень,
+// кормление, смена питомца, телефон) — test/browser-bunny.mjs; контейнерный режим (PL07: mountPetIn в Shadow DOM, два контейнера и legacy, общий namespace,
 // отключение посреди действий, размеры по контейнеру, клавиатура, палец, масштаб, стили сайта и тема, id и ссылки,
 // пример расширения в контейнере, наборы, отказы, CSP-стенд с HTTP-заголовком) — test/browser-view.mjs (свой сервер:
 // стенд test/container.html и примеры examples/extension, examples/csp). Часы — page.clock (таймеры модуля и ядра — по runFor). Запуск: npm run test:browser (нужен
@@ -33,6 +34,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { VERSION } from '../pet/pet.mjs';
 import { storageKeys } from '../pet/pet-rules.mjs';
+import { bunnyQa } from './browser-bunny.mjs';
 import { commandsQa } from './browser-commands.mjs';
 import { coreQa, freshQa } from './browser-core.mjs';
 import { characterQa } from './browser-character.mjs';
@@ -1139,6 +1141,7 @@ export async function petModuleQa({ browser, check, layout }) {
     await playQa(browser, server.base, check, open, layout);
     await commandsQa(browser, server.base, check, open, layout);
     await kitsQa(browser, server.base, check, open);
+    await bunnyQa(browser, server.base, check, open, layout);
     await extensionQa(browser, check, open, layout);
     await viewQa(browser, check, open, layout);
     await characterQa(browser, check, open, layout);

@@ -24,7 +24,7 @@ const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const stored = JSON.parse(await readFile(path.join(root, 'manifest.json'), 'utf8'));
-const JS_ENTRIES = ['.', './core', './pets', './behaviors', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite'];
+const JS_ENTRIES = ['.', './core', './pets', './behaviors', './bunny', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite'];
 
 // Копия пакета (package.json, manifest.json, pet/) во временной папке; правка files: { путь: текст | (текст) => текст }.
 async function copy(edits = {}) {
@@ -64,6 +64,10 @@ test('входы: стили страницы — только у mountPet (по
   assert.deepEqual(entries['.'].styles, PAGE_STYLES['.'].map((style) => ({ ...style })));
   assert.deepEqual(entries['.'].styles.map((style) => [style.file, style.required]), [['pet/pet-base.css', false], ['pet/pet.css', true], ['pet/dog.css', true]]);
   for (const entry of ['./core', './pets', './behaviors', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite']) assert.deepEqual(entries[entry].styles, [], entry);
+  // Кролик (0.4.0): свой вход со своим стилем страницы; перечень входа '.' без кролика (бюджет сайтов с котом и собакой).
+  assert.deepEqual(entries['./bunny'].styles.map((style) => [style.file, style.required]), [['pet/bunny.css', true]]);
+  assert.ok(['pet/bunny.mjs', 'pet/bunny-art.mjs', 'pet/bunny.css', 'pet/defs/bunny.mjs', 'pet/web/bunny.mjs'].every((file) => entries['./bunny'].files.includes(file)), entries['./bunny'].files.join(', '));
+  assert.ok(!entries['.'].files.some((file) => /bunny/.test(file)) && !entries['./bunny'].files.some((file) => /^pet\/(web\/(shell|view|kits)|pet\.mjs|core\/(index|session|storage))/.test(file)), 'кролик вне входа «.», вход кролика без оболочки и ядра');
   for (const entry of ['./web', './react']) for (const file of ['pet/pet-base.css', 'pet/pet.css', 'pet/dog.css', 'pet/web/view.css']) assert.ok(entries[entry].files.includes(file), `${entry}: ${file}`);
   assert.deepEqual(entries['./react'].peers, { react: pkg.peerDependencies.react });
   // PL09: натив — только свой слой, общий хук и ядро; SQLite — только адаптер и ядро.
@@ -71,8 +75,8 @@ test('входы: стили страницы — только у mountPet (по
   assert.deepEqual(entries['./native-sqlite'].peers, { 'expo-sqlite': pkg.peerDependencies['expo-sqlite'] });
   assert.ok(entries['./native'].files.every((file) => file === 'pet/native.mjs' || /^pet\/(native|hooks|core)\//.test(file)), `/native: ${entries['./native'].files.join(', ')}`);
   assert.ok(entries['./native-sqlite'].files.every((file) => file === 'pet/native-sqlite.mjs' || /^pet\/(storage|core)\//.test(file)), `/native-sqlite: ${entries['./native-sqlite'].files.join(', ')}`);
-  for (const entry of ['.', './core', './pets', './behaviors', './web', './react']) assert.ok(!entries[entry].files.some((file) => /^pet\/(native|storage)(\/|\.|-)/.test(file)), `${entry} не достигает натива`);
-  for (const entry of ['.', './core', './pets', './behaviors', './web']) {
+  for (const entry of ['.', './core', './pets', './behaviors', './bunny', './web', './react']) assert.ok(!entries[entry].files.some((file) => /^pet\/(native|storage)(\/|\.|-)/.test(file)), `${entry} не достигает натива`);
+  for (const entry of ['.', './core', './pets', './behaviors', './bunny', './web']) {
     assert.deepEqual(entries[entry].peers, {}, entry);
     assert.ok(!entries[entry].files.some((file) => file === 'pet/react.mjs' || file.startsWith('pet/hooks/')), `${entry} без React`);
   }

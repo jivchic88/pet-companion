@@ -94,7 +94,7 @@ test('публичные входы: mountPet, localDay, VERSION; ядро (PL05
 // Голые имена партнёров — только в своих файлах (PL08 — react; PL09 — react-native, expo-sqlite; PL10.1 — отображение
 // pet/native/view.mjs и рисунки наборов pet/native/svg.mjs, cat.mjs, dog.mjs — react и react-native-svg; PL10.2.1 —
 // рисунок поверхности figure.mjs, координатор provider.mjs, общий уголок room.mjs и уголок corner.mjs).
-const NATIVE_ART = ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/room.mjs'];
+const NATIVE_ART = ['native/svg.mjs', 'native/cat.mjs', 'native/dog.mjs', 'native/bunny.mjs', 'native/room.mjs'];
 const PEER_FILES = {
   react: (file) => file === 'react.mjs' || file === 'character-react.mjs' || file === 'native.mjs' || file.startsWith('hooks/') || ['native/view.mjs', 'native/svg.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
   'react-native': (file) => ['native.mjs', 'native/view.mjs', 'native/figure.mjs', 'native/provider.mjs', 'native/corner.mjs', 'native/play.mjs', 'native/arrange.mjs'].includes(file),
@@ -109,6 +109,7 @@ const NATIVE_LAYERS = {
   'native/svg.mjs': { bare: ['react', 'react-native-svg'], local: [] },
   'native/cat.mjs': { bare: ['react-native-svg'], local: ['native/svg.mjs'] },
   'native/dog.mjs': { bare: ['react-native-svg'], local: ['native/svg.mjs'] },
+  'native/bunny.mjs': { bare: ['react-native-svg'], local: ['native/svg.mjs'] },
   'native/room.mjs': { bare: ['react-native-svg'], local: ['core/room.mjs', 'native/kits.mjs', 'native/svg.mjs'] },
   'native/figure.mjs': { bare: ['react', 'react-native', 'react-native-svg'], local: ['native/kits.mjs', 'native/motion.mjs'] },
   'native/provider.mjs': { bare: ['react', 'react-native'], local: ['core/ports.mjs', 'native/kits.mjs'] },
@@ -163,10 +164,10 @@ test('граф ядра: вход pet/core.mjs и pet/core/** импортиру
   // Ядро без обращений к браузеру (исполнение проверяет test/core-globals.test.mjs с глобалами-ловушками). Сеть — вызов
   // fetch(…) или обращение .fetch / ["fetch"]; само слово fetch — имя сценки собаки «приносит мячик» (данные 0.1.4).
   for (const file of ['core.mjs', ...files]) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto)\b|\bfetch\s*\(|\.fetch\b|\[\s*['"]fetch['"]\s*\]/, file);
-  // PL06: ID штатных питомцев (cat, dog) — только в модуле совместимости форматов 0.1.4 (formats/legacy.mjs): ни строк
-  // 'cat' / 'dog', ни полей .cat / .dog и ключей cat: / dog: в остальном ядре — ветвлений по виду нет, данные — определения.
+  // PL06: ID штатных питомцев (cat, dog; с 0.4.0 — bunny) — только в модуле совместимости форматов 0.1.4 (formats/legacy.mjs):
+  // ни строк 'cat' / 'dog' / 'bunny', ни полей .cat / .dog и ключей cat: / dog: в остальном ядре — ветвлений по виду нет, данные — определения.
   for (const file of ['core.mjs', ...files.filter((name) => name !== 'core/formats/legacy.mjs')]) {
-    assert.doesNotMatch(strip(await read(`pet/${file}`)), /['"`](cat|dog)['"`]|\.(cat|dog)\b|\b(cat|dog)\s*:/, `${file}: ID штатного питомца вне formats/legacy.mjs`);
+    assert.doesNotMatch(strip(await read(`pet/${file}`)), /['"`](cat|dog|bunny)['"`]|(?<!example)\.(cat|dog|bunny)\b|\b(cat|dog|bunny)\s*:/, `${file}: ID штатного питомца вне formats/legacy.mjs`);
   }
   // PL04.1: время, случайность и задачи — только порты экземпляра; системные Date, Math.random и таймеры — в реализациях
   // портов по умолчанию (core/ports.mjs и местный день core/day.mjs), не в правилах и сессии.
@@ -213,7 +214,7 @@ test('граф React (PL08): хук pet/hooks/** — только react (ядр�
   for (const { spec, resolved, external } of await imports('react.mjs')) assert.ok((external && spec === 'react') || resolved?.startsWith('web/') || resolved?.startsWith('core/') || resolved?.startsWith('hooks/'), `react.mjs: ${spec}`);
   assert.match(await read('pet/react.mjs'), /^'use client';\n/, "вход React — граница клиентских компонентов ('use client')");
   // От каждого другого входа: ни pet/react.mjs, ни pet/hooks/**, ни голого react.
-  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'web.mjs', 'character.mjs', 'character-web.mjs']) {
+  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'bunny.mjs', 'web.mjs', 'character.mjs', 'character-web.mjs']) {
     const seen = new Set();
     const walk = async (file) => {
       if (seen.has(file)) return;
@@ -264,20 +265,22 @@ test('граф натива (PL09, PL10.1, PL10.2.1, PL10.2.2): pet/storage/** �
   const sqlite = await reach('native-sqlite.mjs');
   assert.ok(!sqlite.seen.has('hooks/state.mjs') && ![...sqlite.seen].some((file) => /^native(\/|\.mjs$)/.test(file)) && !sqlite.bare.has('react') && !sqlite.bare.has('react-native-svg'), 'SQLite не тянет React и отображение');
   assert.deepEqual([...(await reach('native.mjs')).bare].sort(), ['react', 'react-native', 'react-native-svg']);
-  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'web.mjs', 'react.mjs', 'character.mjs', 'character-web.mjs', 'character-react.mjs']) {
+  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'bunny.mjs', 'web.mjs', 'react.mjs', 'character.mjs', 'character-web.mjs', 'character-react.mjs']) {
     const { seen, bare } = await reach(entry);
     assert.ok(![...seen].some((file) => /^(native|storage)(\/|\.|-)/.test(file)), `${entry} достигает натива`);
     assert.ok(!bare.has('react-native') && !bare.has('expo-sqlite') && !bare.has('react-native-svg'), `${entry}: ${[...bare].join(', ')}`);
   }
-  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetCorner', 'PetPlay', 'PetProvider', 'PetRoom', 'PetView', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
+  assert.deepEqual(exported(await read('pet/native.mjs')), ['PetCorner', 'PetPlay', 'PetProvider', 'PetRoom', 'PetView', 'bunnyNative', 'catNative', 'dogNative', 'useNativeLifecycle', 'usePetState']);
   assert.deepEqual(exported(await read('pet/native-sqlite.mjs')), ['createSqliteScenes', 'createSqliteStorage']);
 });
 
 test('граф определений (PL06): pet/defs/** — только проверка ядра (core/define.mjs и её зависимости) и defs/**; входы pets.mjs и behaviors.mjs — только defs/**; ядро определения не импортирует', async () => {
   const defs = (await runtime('.mjs')).filter((file) => file.startsWith('defs/'));
-  assert.deepEqual(defs, ['defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs']);
+  assert.deepEqual(defs, ['defs/bunny.mjs', 'defs/calm.mjs', 'defs/cat.mjs', 'defs/dog.mjs', 'defs/room.mjs']);
   for (const file of defs) for (const { spec, resolved } of await imports(file)) assert.ok(resolved === 'core/define.mjs' || resolved?.startsWith('defs/'), `${file}: ${spec}`);
   for (const file of ['pets.mjs', 'behaviors.mjs']) for (const { spec, resolved } of await imports(file)) assert.ok(resolved?.startsWith('defs/'), `${file}: ${spec}`);
+  // Кролик (0.4.0): вход bunny.mjs — определение defs/bunny.mjs и веб-набор web/bunny.mjs (рисунок bunny-art.mjs), без ядра и оболочки.
+  for (const { spec, resolved } of await imports('bunny.mjs')) assert.ok(resolved === 'defs/bunny.mjs' || resolved === 'web/bunny.mjs', `bunny.mjs: ${spec}`);
   for (const file of (await runtime('.mjs')).filter((name) => name.startsWith('core/') || name === 'core.mjs')) for (const { resolved } of await imports(file)) assert.ok(!resolved?.startsWith('defs/'), `${file} импортирует определения`);
   // Определения — данные без кода: ни функций, ни обращений к браузеру и сети.
   for (const file of defs) assert.doesNotMatch(strip(await read(`pet/${file}`)), /\b(window|document|navigator|localStorage|indexedDB|matchMedia|crypto|Date|Math)\b|=>\s*\{|function\b/, file);
@@ -288,7 +291,7 @@ test('граф определений (PL06): pet/defs/** — только пр�
 // сценок, присутствия, каталога, фасада, ни определений кота и собаки, ни оболочки, рисунков и стилей полного режима — так
 // персонажу комната не нужна и не грузится. Прежние входы персонажа не достигают.
 const CHARACTER_CORE = ['core/day.mjs', 'core/define.mjs', 'core/director.mjs', 'core/errors.mjs', 'core/formats/legacy.mjs', 'core/pets.mjs', 'core/phrases.mjs', 'core/ports.mjs', 'core/round.mjs', 'core/stages.mjs', 'core/version.mjs'];
-const CHARACTER_FORBIDDEN = /^(core\/(index|session|storage|room|play|editor|toys|scenes|presence|catalog|facade)\.mjs|defs\/|web\/(shell|view|kits|storage|scenes|catalog|pointer|legacy)|pet\.mjs|web\.mjs|react\.mjs|core\.mjs|pets\.mjs|behaviors\.mjs|cat-art|dog-art|pet-(move|place|play|room|rules|toys)|native|storage\/)/;
+const CHARACTER_FORBIDDEN = /^(core\/(index|session|storage|room|play|editor|toys|scenes|presence|catalog|facade)\.mjs|defs\/|web\/(shell|view|kits|storage|scenes|catalog|pointer|legacy)|pet\.mjs|web\.mjs|react\.mjs|core\.mjs|pets\.mjs|behaviors\.mjs|bunny|cat-art|dog-art|pet-(move|place|play|room|rules|toys)|native|storage\/)/;
 test('граф персонажа (U01): pet/character.mjs — ровно character/define.mjs, character/core.mjs и общие части ядра; /character-web — ещё вид и мелочи веба; /character-react — ещё хук и react; ничего из полного режима; прежние входы персонажа не достигают; формат персонажа — своя таблица полей без комнаты', async () => {
   const reach = async (entry) => {
     const seen = new Set();
@@ -324,7 +327,7 @@ test('граф персонажа (U01): pet/character.mjs — ровно charac
   // Тексты продукта (реплики, объявления, подписи) — только textContent и экранированные атрибуты: небезопасного HTML нет.
   assert.doesNotMatch(strip(await read('pet/character/view.mjs')), /\.(innerHTML|outerHTML)\s*=\s*(text|effect|state|snapshot|phrase)\b|insertAdjacentHTML/, 'character/view.mjs: тексты — textContent');
   // Прежние входы персонажа не достигают.
-  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'web.mjs', 'react.mjs', 'native.mjs', 'native-sqlite.mjs']) assert.ok(!(await reach(entry)).seen.some((file) => file.startsWith('character')), `${entry} достигает персонажа`);
+  for (const entry of ['pet.mjs', 'core.mjs', 'pets.mjs', 'behaviors.mjs', 'bunny.mjs', 'web.mjs', 'react.mjs', 'native.mjs', 'native-sqlite.mjs']) assert.ok(!(await reach(entry)).seen.some((file) => file.startsWith('character')), `${entry} достигает персонажа`);
   // Формат персонажа: ни комнаты, ни игры, ни кормления, ни обликов, аксессуаров, вещей и ступеней — ни в полях, ни в проверке.
   assert.doesNotMatch(strip(await read('pet/character/define.mjs')), /\b(room|play|feed|treat|coats|accessories|items|stage|fallback|corner)\b/, 'character/define.mjs: полей полного режима нет');
   assert.doesNotMatch(strip(await read('pet/character/core.mjs')), /\b(room|feed|treat|stage|interact|stroke|toy|presence|scene)\b/, 'character/core.mjs: возможностей полного режима нет');
@@ -377,7 +380,7 @@ test('пример расширения (§ 7.10): examples/extension — тол
 
 test('мобильный пример (PL09, PL10.1, PL10.2.1): examples/expo — только публичные входы пакета, expo-sqlite, react, react-native и react-native-safe-area-context; зависимости — точная матрица SDK 58 с react-native-svg 15.16.0 (рисунки наборов; сам пример его не импортирует) и react-native-safe-area-context 5.10.1 (отступы), pet-companion — архивом без записи в package.json; в пакет не входит', async () => {
   const dir = new URL('../examples/expo/', import.meta.url);
-  assert.deepEqual((await readdir(dir)).filter((name) => name !== 'node_modules' && name !== '.lib' && name !== '.expo').sort(), ['.gitignore', 'App.js', 'README.md', 'app.json', 'bunny-native.mjs', 'diagnostics.mjs', 'extension.mjs', 'index.js', 'package-lock.json', 'package.json', 'scripts']);
+  assert.deepEqual((await readdir(dir)).filter((name) => name !== 'node_modules' && name !== '.lib' && name !== '.expo').sort(), ['.gitignore', 'App.js', 'README.md', 'app.json', 'diagnostics.mjs', 'extension.mjs', 'index.js', 'package-lock.json', 'package.json', 'scripts']);
   const example = JSON.parse(await read('examples/expo/package.json'));
   assert.deepEqual(example.dependencies, { expo: '58.0.12', 'expo-sqlite': '58.0.13', react: '19.3.0', 'react-native': '0.88.0', 'react-native-safe-area-context': '5.10.1', 'react-native-svg': '15.16.0' }, 'точные версии матрицы SDK 58 (PL10.2.1: отступы безопасной области — react-native-safe-area-context 5.10.1, ~5.10.1 в bundledNativeModules)');
   assert.equal(example.devDependencies, undefined);
@@ -391,7 +394,7 @@ test('мобильный пример (PL09, PL10.1, PL10.2.1): examples/expo �
   assert.deepEqual(area.map(([key, entry]) => [key, entry.version, Object.keys(entry.dependencies ?? {}).length]), [['node_modules/react-native-safe-area-context', '5.10.1', 0]], 'одна копия react-native-safe-area-context 5.10.1, без своих зависимостей');
   assert.ok(!Object.values(lock.packages).some((entry) => entry.hasInstallScript), 'без скриптов установки');
   assert.equal(Object.keys(lock.packages).filter((key) => /(^|\/)node_modules\/react$/.test(key)).length, 1, 'одна копия react');
-  const PUBLIC = ['pet-companion/core', 'pet-companion/pets', 'pet-companion/behaviors', 'pet-companion/native', 'pet-companion/native-sqlite', 'expo', 'expo-sqlite', 'react', 'react-native', 'react-native-safe-area-context'];
+  const PUBLIC = ['pet-companion/core', 'pet-companion/pets', 'pet-companion/behaviors', 'pet-companion/bunny', 'pet-companion/native', 'pet-companion/native-sqlite', 'expo', 'expo-sqlite', 'react', 'react-native', 'react-native-safe-area-context'];
   for (const file of ['App.js', 'index.js', 'diagnostics.mjs']) {
     for (const [, from, bare] of (await read(`examples/expo/${file}`)).matchAll(IMPORT)) {
       const spec = from ?? bare;
@@ -444,7 +447,7 @@ test('package.json: без зависимостей и скриптов уста
   // PL05: вход ядра ./core; PL06: входы определений ./pets и ./behaviors; PL07: вход веба ./web; PL08: вход React ./react и
   // перечень ./manifest.json; PL09: ./native и ./native-sqlite; внутренние pet/core/**, pet/defs/**, pet/web/**, pet/hooks/**,
   // pet/native/**, pet/storage/** закрыты.
-  assert.deepEqual(Object.keys(pkg.exports), ['.', './core', './pets', './behaviors', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite', './pet.css', './dog.css', './pet-base.css', './manifest.json', './package.json']);
+  assert.deepEqual(Object.keys(pkg.exports), ['.', './core', './pets', './behaviors', './bunny', './web', './react', './character', './character-web', './character-react', './native', './native-sqlite', './pet.css', './dog.css', './bunny.css', './pet-base.css', './manifest.json', './package.json']);
   // U01: входы минимального режима.
   for (const name of ['character', 'character-web', 'character-react']) assert.deepEqual(pkg.exports[`./${name}`], { types: `./pet/${name}.d.mts`, default: `./pet/${name}.mjs` });
   assert.deepEqual(pkg.exports['./native'], { types: './pet/native.d.mts', default: './pet/native.mjs' });
@@ -459,7 +462,7 @@ test('package.json: без зависимостей и скриптов уста
   assert.equal(pkg.main, './pet/pet.mjs');
   assert.equal(pkg.types, './pet/pet.d.mts');
   // Стиль: TypeScript берёт декларацию (условие types — первым), сборщик и Node — сам файл .css.
-  for (const name of ['pet.css', 'dog.css', 'pet-base.css']) assert.deepEqual(pkg.exports[`./${name}`], { types: './pet/css.d.mts', default: `./pet/${name}` });
+  for (const name of ['pet.css', 'dog.css', 'bunny.css', 'pet-base.css']) assert.deepEqual(pkg.exports[`./${name}`], { types: './pet/css.d.mts', default: `./pet/${name}` });
   for (const [entry, target] of Object.entries(pkg.exports)) if (typeof target === 'object') assert.deepEqual(Object.keys(target), ['types', 'default'], entry);
   assert.deepEqual(pkg.files, ['pet/', 'manifest.json', 'example.html', 'CHANGELOG.md']);
   assert.deepEqual(pkg.sideEffects, ['*.css']);
@@ -478,7 +481,7 @@ test('руководство: пример = example.html; импорты — и
   const block = (lang, start) => [...readme.matchAll(new RegExp(`\`\`\`${lang}\\n([\\s\\S]*?)\\n\`\`\``, 'g'))].map((match) => `${match[1]}\n`).find((text) => text.startsWith(start));
   assert.equal(block('jsx', "import { useState } from 'react';"), await read('examples/react/src/Corner.jsx'), 'README: пример React = examples/react/src/Corner.jsx');
   assert.equal(block('js', '// Файлы питомца для сайта без сборщика'), await read('examples/manifest/copy.mjs'), 'README: копирование по перечню = examples/manifest/copy.mjs');
-  for (const [, spec] of readme.matchAll(/import '([^'.][^']*)'/g)) assert.ok([`${pkg.name}/pet.css`, `${pkg.name}/dog.css`, `${pkg.name}/pet-base.css`].includes(spec), spec);
+  for (const [, spec] of readme.matchAll(/import '([^'.][^']*)'/g)) assert.ok([`${pkg.name}/pet.css`, `${pkg.name}/dog.css`, `${pkg.name}/bunny.css`, `${pkg.name}/pet-base.css`].includes(spec), spec);
   assert.ok(readme.includes(`npm install ${pkg.name}`), 'установка по имени пакета');
   for (const doc of ['README.md', 'CHANGELOG.md']) {
     for (const [, href] of (await read(doc)).matchAll(/\]\(([^)\s]+)\)/g)) assert.ok(/^(https:|#)/.test(href) || ['README.md', 'CHANGELOG.md', 'LICENSE', 'example.html'].includes(href), `${doc}: ${href}`);

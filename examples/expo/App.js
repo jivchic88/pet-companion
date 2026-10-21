@@ -13,9 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { catNative, dogNative, PetCorner, PetPlay, PetProvider, PetRoom, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
+import { bunnyNative, catNative, dogNative, PetCorner, PetPlay, PetProvider, PetRoom, PetView, useNativeLifecycle, usePetState } from 'pet-companion/native';
 import { BEHAVIORS, busyProbe, compare, confirmed, NAMES, newCore, openStore, PETS, remember, reserveProbe, restartCheck } from './diagnostics.mjs';
-import { bunnyNative } from './bunny-native.mjs';
 
 const KITS = [catNative, dogNative, bunnyNative];
 const MOTION_TITLES = [

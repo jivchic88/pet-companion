@@ -13,14 +13,16 @@ import { openDatabaseAsync } from 'expo-sqlite';
 import { calm } from 'pet-companion/behaviors';
 import { createPetCore, localDay } from 'pet-companion/core';
 import { createSqliteScenes, createSqliteStorage } from 'pet-companion/native-sqlite';
+import { bunny } from 'pet-companion/bunny';
 import { cat, dog } from 'pet-companion/pets';
-import { bunny, lively } from './extension.mjs';
+import { lively } from './extension.mjs';
 
 export const FILE = 'pet-companion-example.db';
 export const NAMESPACE = 'expo-example';
 export const NAMES = ['Барсик', 'Пиксель', 'Дымок'];
 export const MOTIONS = ['normal', 'calm', 'none'];
-// PL10.2.4: третий питомец и вторая модель — пример расширения (extension.mjs), только публичные входы.
+// PL10.2.4: вторая модель — пример расширения (extension.mjs), только публичные входы; третий питомец с 0.4.0 — штатный
+// кролик пакета (pet-companion/bunny).
 export const PETS = Object.freeze([cat, dog, bunny]);
 export const BEHAVIORS = Object.freeze([calm, lively]);
 const DAY_MS = 86_400_000;

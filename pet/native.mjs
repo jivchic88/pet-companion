@@ -19,6 +19,7 @@ export { PetPlay } from './native/play.mjs';
 export { PetRoom } from './native/arrange.mjs';
 export { catNative } from './native/cat.mjs';
 export { dogNative } from './native/dog.mjs';
+export { bunnyNative } from './native/bunny.mjs';
 
 // useNativeLifecycle(core | null) → boolean: AppState и системное «уменьшить движение» → ядро, пока компонент подключён и
 // ядро то же; true — начальная настройка движения известна текущей привязке (можно звать core.start()). Смена core,

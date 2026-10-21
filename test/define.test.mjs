@@ -121,7 +121,7 @@ test('формат: неизвестный целый — unsupported-format; н
 
 test('питомец: ID — штатный или с точкой; поля, формы, имена, облики, аксессуары, вещи и подарки — по границам', () => {
   const pet = (patch, path, code = 'definition-invalid') => fails(() => definePet(patch(clone(bunny))), code, path);
-  for (const id of ['bunny', 'Example.Bunny', 'example.', '.bunny', 'example..bunny', 'example bunny', '', 5]) pet((d) => ({ ...d, id }), 'id');
+  for (const id of ['rabbit', 'Example.Bunny', 'example.', '.bunny', 'example..bunny', 'example bunny', '', 5]) pet((d) => ({ ...d, id }), 'id');
   assert.equal(definePet({ ...clone(bunny), id: 'my-site.pets.bunny-2' }).id, 'my-site.pets.bunny-2', 'несколько точек');
   pet((d) => ({ ...d, title: '' }), 'title');
   pet((d) => ({ ...d, title: 'x'.repeat(41) }), 'title');
@@ -258,7 +258,7 @@ test('модель: обязательные и реакции лапы; кла�
     return { ...d, phrases: { ...d.phrases, default: groups } };
   };
   model(noScene, 'phrases.default');
-  model((d) => ({ ...d, phrases: { ...d.phrases, byPet: { bunny: {} } } }), 'phrases.byPet.bunny');
+  model((d) => ({ ...d, phrases: { ...d.phrases, byPet: { rabbit: {} } } }), 'phrases.byPet.rabbit');
   model((d) => ({ ...d, phrases: { ...d.phrases, byPet: { 'example.bunny': { cheer: ['x'] } } } }), 'phrases.byPet["example.bunny"].cheer');
 });
 
@@ -275,7 +275,7 @@ test('модель: интервалы покоя не чаще 0.1.4, зево�
   model((d) => ({ ...d, scenes: { ...d.scenes, order: 'shuffle' } }), 'scenes.order');
   model((d) => ({ ...d, scenes: { ...d.scenes, skip: ['Bunny jump'] } }), 'scenes.skip[0]');
   model((d) => ({ ...d, scenes: { ...d.scenes, skip: ['cat/curl', 'cat/curl'] } }), 'scenes.skip[1]');
-  model((d) => ({ ...d, scenes: { ...d.scenes, skip: ['bunny/hop'] } }), 'scenes.skip[0]');
+  model((d) => ({ ...d, scenes: { ...d.scenes, skip: ['rabbit/hop'] } }), 'scenes.skip[0]');
   assert.equal(defineBehavior({ ...clone(lively), scenes: { chance: 0, order: 'random' } }).scenes.chance, 0, 'шанс 0 и без skip — допустимо');
 });
 
@@ -309,14 +309,15 @@ test('регистрация: непустые списки; повтор ID —
   assert.equal(log.length, before, 'отказ создания хранилище не трогает');
 });
 
-test('слабые ссылки модели: byPet и skip на питомца или сценку, которых в экземпляре нет, — по одному предупреждению при создании; любая пара совместима', () => {
+test('слабые ссылки модели: byPet и skip на питомца или сценку, которых в экземпляре нет, — по одному предупреждению при создании; на штатного питомца (cat, dog, bunny), которого сайт не подключил, — без предупреждения; любая пара совместима', () => {
   const { storage } = store();
   const log = [];
-  const core = createPetCore({ storage, pets: [bunny], behaviors: [calm, lively], log: { warn: (message) => log.push(message) } });
+  // calm несёт банки cat, dog и bunny, lively — skip cat/curl: штатные ссылки без кота и собаки в экземпляре — тихо.
+  const foxy = defineBehavior({ ...clone(lively), id: 'example.foxy', phrases: { ...lively.phrases, byPet: { 'example.fox': { pet: ['Хвост трубой.'] } } }, scenes: { ...lively.scenes, skip: ['example.fox/run', 'cat/curl'] } });
+  const core = createPetCore({ storage, pets: [bunny], behaviors: [calm, lively, foxy], log: { warn: (message) => log.push(message) } });
   assert.deepEqual(log, [
-    'behaviors[0].phrases.byPet["cat"]: питомца «cat» нет в этом экземпляре — замены реплик не используются',
-    'behaviors[0].phrases.byPet["dog"]: питомца «dog» нет в этом экземпляре — замены реплик не используются',
-    'behaviors[1].scenes.skip: «cat/curl» — питомца «cat» нет в этом экземпляре',
+    'behaviors[2].phrases.byPet["example.fox"]: питомца «example.fox» нет в этом экземпляре — замены реплик не используются',
+    'behaviors[2].scenes.skip: «example.fox/run» — питомца «example.fox» нет в этом экземпляре',
   ]);
   assert.deepEqual([core.getState().pet.shown, core.getState().behavior.shown], ['example.bunny', 'calm']);
   core.destroy();

@@ -76,6 +76,8 @@ export interface NativePetKit {
 export declare const catNative: NativePetKit;
 /** Штатный набор собаки: все позы словаря с поднятой лапой (settle — замена content), три облика, три платка; уголок — рисунок в комнате, канат и мячик; игра — по областям определения собаки (поднятая лапа — `play.paw.up`). */
 export declare const dogNative: NativePetKit;
+/** Штатный набор кролика (с 0.4.0): все позы словаря и лапка, сценки `hop` и `wash`, морковка и сено в уголке, игра. Подключается явно — `pets: [cat, dog, bunny]`, `kits: [catNative, dogNative, bunnyNative]`. */
+export declare const bunnyNative: NativePetKit;
 
 /** Стиль контейнера (`style` View React Native): объект стиля, зарегистрированный стиль, ложное значение или их список. */
 export type PetViewStyle = object | number | false | null | undefined | readonly PetViewStyle[];

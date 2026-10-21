@@ -131,6 +131,30 @@
         "pet/defs/calm.mjs"
       ]
     },
+    "./bunny": {
+      "module": "pet/bunny.mjs",
+      "styles": [
+        {
+          "file": "pet/bunny.css",
+          "required": true
+        }
+      ],
+      "peers": {},
+      "files": [
+        "pet/bunny-art.mjs",
+        "pet/bunny.css",
+        "pet/bunny.mjs",
+        "pet/core/day.mjs",
+        "pet/core/define.mjs",
+        "pet/core/errors.mjs",
+        "pet/core/formats/legacy.mjs",
+        "pet/core/pets.mjs",
+        "pet/core/stages.mjs",
+        "pet/defs/bunny.mjs",
+        "pet/defs/room.mjs",
+        "pet/web/bunny.mjs"
+      ]
+    },
     "./web": {
       "module": "pet/web.mjs",
       "styles": [],
@@ -334,6 +358,7 @@
         "pet/hooks/state.mjs",
         "pet/native.mjs",
         "pet/native/arrange.mjs",
+        "pet/native/bunny.mjs",
         "pet/native/cat.mjs",
         "pet/native/corner.mjs",
         "pet/native/dog.mjs",

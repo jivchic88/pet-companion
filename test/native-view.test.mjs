@@ -21,6 +21,7 @@ registerHooks({ resolve: (specifier, context, next) => (Object.hasOwn(FAKES, spe
 const Native = await import('../pet/native.mjs');
 const { createPetCore, createStorage, definePet } = await import('../pet/core.mjs');
 const { cat, dog } = await import('../pet/pets.mjs');
+const { bunny } = await import('../pet/bunny.mjs');
 const { calm } = await import('../pet/behaviors.mjs');
 const Kits = await import('../pet/native/kits.mjs');
 const { Screen, screen } = await import('./fakes/expo-screen.mjs');
@@ -28,9 +29,9 @@ const require = createRequire(import.meta.url);
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 
-const { PetView, catNative, dogNative } = Native;
-const PETS = [cat, dog];
-const KITS = [catNative, dogNative];
+const { PetView, catNative, dogNative, bunnyNative } = Native;
+const PETS = [cat, dog, bunny];
+const KITS = [catNative, dogNative, bunnyNative];
 
 // Ядро проверки: асинхронное хранилище в памяти, ручные часы и планировщик, счёт хоста; spy — тот же PetCore для PetView с
 // учётом обращений (подписки и отписки, объявления отображения, касания).
@@ -106,7 +107,7 @@ test('штатные наборы: проходят проверку проти�
     assert.equal(Kits.nativeKitProblem(kit, defs, React.isValidElement), '', kit.pet);
     const needs = Kits.nativeKitNeeds(defs.get(kit.pet));
     assert.ok(needs.poses.every((pose) => kit.poses.includes(pose)), `${kit.pet}: обязательные позы и лапа`);
-    assert.ok(needs.poses.includes('paw'), 'у кота и собаки лапа есть — поза paw обязательна');
+    assert.ok(needs.poses.includes('paw'), 'у кота, собаки и кролика лапа есть — поза paw обязательна');
     assert.deepEqual(kit.substitutes, { settle: 'content' }, 'необязательная декоративная поза settle — явная замена');
     const element = kit.Figure({ pose: 'calm', coat: kit.coats[0], accessory: 'scarf', toward: '', prefix: 'q' });
     assert.ok(React.isValidElement(element) && typeof element !== 'string');
@@ -117,12 +118,22 @@ test('штатные наборы: проходят проверку проти�
     const coats = kit.coats.map((coat) => markupOf(kit, { pose: 'calm', coat }));
     assert.equal(new Set(coats).size, kit.coats.length, `${kit.pet}: облики различимы`);
     assert.equal(markupOf(kit, { pose: 'calm', coat: 'нет-такого' }), coats[0], 'неизвестный облик — облик по умолчанию, как веб');
-    const scarf = markupOf(kit, { pose: 'calm' });
-    const plaid = markupOf(kit, { pose: 'calm', accessory: 'plaid' });
-    const badge = markupOf(kit, { pose: 'calm', accessory: 'badge' });
-    assert.ok(plaid.includes('url(#q-' + kit.pet + '-plaid)') && !scarf.includes('url(#q-' + kit.pet + '-plaid)'), `${kit.pet}: клетчатый платок — узор`);
-    assert.ok(badge.includes('#4f8a6e') && !scarf.includes('#4f8a6e'), `${kit.pet}: бейдж`);
-    assert.ok(!markupOf(kit, { pose: 'calm', accessory: '' }).includes(`url(#q-${kit.pet}-scarf)`), `${kit.pet}: без аксессуара — без платка`);
+    if (kit.accessories.includes('plaid')) {
+      const scarf = markupOf(kit, { pose: 'calm' });
+      const plaid = markupOf(kit, { pose: 'calm', accessory: 'plaid' });
+      const badge = markupOf(kit, { pose: 'calm', accessory: 'badge' });
+      assert.ok(plaid.includes('url(#q-' + kit.pet + '-plaid)') && !scarf.includes('url(#q-' + kit.pet + '-plaid)'), `${kit.pet}: клетчатый платок — узор`);
+      assert.ok(badge.includes('#4f8a6e') && !scarf.includes('#4f8a6e'), `${kit.pet}: бейдж`);
+      assert.ok(!markupOf(kit, { pose: 'calm', accessory: '' }).includes(`url(#q-${kit.pet}-scarf)`), `${kit.pet}: без аксессуара — без платка`);
+    } else {
+      // Кролик (0.4.0): ленточки — голубая, розовый бантик, зелёная с клевером; без аксессуара — без ленточки.
+      const ribbon = markupOf(kit, { pose: 'calm', accessory: 'ribbon' });
+      const bow = markupOf(kit, { pose: 'calm', accessory: 'bow' });
+      const clover = markupOf(kit, { pose: 'calm', accessory: 'clover' });
+      assert.ok(ribbon.includes(`url(#q-${kit.pet}-ribbon)`) && bow.includes(`url(#q-${kit.pet}-bow)`) && !ribbon.includes(`url(#q-${kit.pet}-bow)`), `${kit.pet}: ленточка и бантик`);
+      assert.ok(clover.includes('#4f9a55') && !ribbon.includes('#4f9a55'), `${kit.pet}: клевер`);
+      assert.ok(!markupOf(kit, { pose: 'calm', accessory: '' }).includes(`url(#q-${kit.pet}-ribbon)`), `${kit.pet}: без аксессуара — без ленточки`);
+    }
   }
   // Суставы — всегда явная строка преобразования (тождество — translate(0, 0)): react-native-svg на Fabric при снятии
   // свойства transform прежнюю матрицу не сбрасывает (найдено в iOS Simulator: платок оставался опущенным после «ест»).
@@ -210,9 +221,9 @@ test('объявление отображения и рисунок по сни�
   const L = await lab();
   const V = view('draw', { core: L.spy, pets: PETS, kits: KITS, size: 220 });
   await V.render();
-  assert.deepEqual(L.calls.setDisplay, [{ full: true, moving: false, pets: ['cat', 'dog'], views: [], scenes: { cat: ['stretch', 'curl'], dog: ['fetch'] } }]);
+  assert.deepEqual(L.calls.setDisplay, [{ full: true, moving: false, pets: ['cat', 'dog', 'bunny'], views: [], scenes: { cat: ['stretch', 'curl'], dog: ['fetch'], bunny: ['hop', 'wash'] } }]);
   const display = L.core.getState().display;
-  assert.deepEqual([display.pets, display.views, display.scenes, display.full], [['cat', 'dog'], [], { cat: ['stretch', 'curl'], dog: ['fetch'] }, true]);
+  assert.deepEqual([display.pets, display.views, display.scenes, display.full], [['cat', 'dog', 'bunny'], [], { cat: ['stretch', 'curl'], dog: ['fetch'], bunny: ['hop', 'wash'] }, true]);
   await started(L, V);
   let art = V.figure();
   assert.equal(art.element.type, catNative.Figure);
@@ -361,7 +372,7 @@ test('два экземпляра на разных ядрах не мешают
   await VB.render();
   await started(A, VA);
   await started(B, VB);
-  assert.deepEqual([A.core.getState().display.pets, B.core.getState().display.pets], [['cat', 'dog'], ['dog']]);
+  assert.deepEqual([A.core.getState().display.pets, B.core.getState().display.pets], [['cat', 'dog', 'bunny'], ['dog']]);
   assert.deepEqual([B.core.getState().pet.shown, VB.figure().element.type], ['dog', dogNative.Figure], 'у B нарисована только собака — ядро показывает её');
   await VA.act(() => VA.node('pet-touch').onPress());
   assert.deepEqual([A.calls.interact.length, B.calls.interact.length, B.core.getState().pose.reaction], [1, 0, null]);
