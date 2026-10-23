@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pet-companion — a cat or dog for your website (live demo)</title>
+    <meta name="description" content="pet-companion: a calm cat or dog companion for web pages and React Native. ES modules + CSS, no dependencies, no build step. Live demo of the npm package." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%90%BE%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./pet/pet-base.css" />
+    <link rel="stylesheet" href="./pet/pet.css" />
+    <link rel="stylesheet" href="./pet/dog.css" />
+    <style>
+      :root { color-scheme: light; --ink: #1f2a26; --muted: #5d6a65; --line: #d9d4c7; --paper: #f6f1e7; --card: #fffdf8; --accent: #2f6b55; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+      #head { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
+      #head .title { font-weight: 700; font-size: 18px; margin-right: auto; }
+      #head a { color: var(--accent); text-decoration: none; font-size: 14px; }
+      main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+      h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+      .lead { color: var(--muted); margin: 0 0 20px; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      button.demo { font: inherit; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+      button.demo.alt { background: transparent; color: var(--accent); }
+      .score { margin-left: auto; color: var(--muted); }
+      pre { background: #1f2a26; color: #e8efe9; padding: 14px; border-radius: 10px; overflow: auto; font-size: 13px; line-height: 1.45; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      p code, li code { background: #ece7da; padding: 1px 5px; border-radius: 5px; font-size: 14px; }
+      ul { padding-left: 20px; }
+      .links a { margin-right: 14px; color: var(--accent); }
+      .note { font-size: 14px; color: var(--muted); }
+      footer { margin-top: 32px; font-size: 14px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <header id="head"><span class="title">pet-companion · demo</span><a href="https://github.com/jivchic88/pet-companion">GitHub</a><a href="https://www.npmjs.com/package/pet-companion">npm</a></header>
+    <main>
+      <h1>A calm cat or dog next to your page</h1>
+      <p class="lead">An npm package for websites and React Native apps: the pet reacts to activities your site confirms — lessons, tasks, habits. Plain ES modules and CSS, inline SVG, no dependencies, no network, no build step.</p>
+
+      <section class="card">
+        <p><strong>Try it.</strong> The pet is already here: on a desktop look at the header and the bottom-right corner, on a phone — the header. Tap the pet to open its corner. Then confirm an activity:</p>
+        <div class="row">
+          <button id="done" class="demo" type="button">Lesson done (+1 mark)</button>
+          <button id="fail" class="demo alt" type="button">Save failed</button>
+          <button id="reset" class="demo alt" type="button">Reset demo</button>
+          <span class="score" id="score">marks: 0, today: 0</span>
+        </div>
+        <p class="note">Stages open at 3, 9, 18 and 30 marks; the first activity of the day unlocks the treat. Everything is stored in your browser only (namespace <code>demo</code>). The pet's own interface is in Russian — other languages are not supported yet.</p>
+      </section>
+
+      <section class="card">
+        <h2>Install</h2>
+        <pre><code>npm install pet-companion</code></pre>
+        <p>Or copy the <code>pet/</code> folder from the package (or the release archive) to your site and import it without any bundler:</p>
+        <pre><code>&lt;link rel="stylesheet" href="./pet/pet-base.css" /&gt;
+&lt;link rel="stylesheet" href="./pet/pet.css" /&gt;
+&lt;link rel="stylesheet" href="./pet/dog.css" /&gt;
+&lt;script type="module"&gt;
+  import { mountPet } from './pet/pet.mjs';
+
+  let marks = 0, today = 0; // your site keeps the score
+  const head = document.getElementById('head');
+  const pet = mountPet({
+    storage: 'mysite',
+    places: {
+      logo: (el) =&gt; head.append(el),            // desktop: header (required)
+      top: (el) =&gt; head.prepend(el),            // phone: header (required)
+      float: (el) =&gt; document.body.append(el),  // desktop: bottom-right (optional)
+    },
+    progress: () =&gt; ({ marks, today, limit: 3 }),
+  });
+
+  // after your site saved and counted an activity:
+  marks += 1; today += 1;
+  pet.notify('saved', { key: 'lesson-1', counted: true, first: today === 1 });
+&lt;/script&gt;</code></pre>
+        <p>With a bundler: <code>import { mountPet } from 'pet-companion'</code> plus the three CSS imports. React: <code>pet-companion/react</code>. Only a character with reactions, no room or feeding: <code>pet-companion/character-web</code>. React Native (preliminary): <code>pet-companion/native</code>.</p>
+      </section>
+
+      <section class="card links">
+        <h2>Docs</h2>
+        <p>
+          <a href="https://github.com/jivchic88/pet-companion/blob/main/README.en.md">English quick guide</a>
+          <a href="https://github.com/jivchic88/pet-companion/blob/main/README.md">Full reference (Russian)</a>
+          <a href="https://github.com/jivchic88/pet-companion/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://github.com/jivchic88/pet-companion/releases">Releases</a>
+          <a href="./example.html">Minimal example page</a>
+        </p>
+      </section>
+
+      <footer>This page runs the published package <code>pet-companion@<span id="ver">…</span></code> as is — the same files you get from npm. MIT license.</footer>
+    </main>
+    <script type="module">
+      import { mountPet, VERSION } from './pet/pet.mjs';
+
+      const key = 'pet-companion-demo:score';
+      let { marks = 0, today = 0, day = '' } = JSON.parse(localStorage.getItem(key) || '{}');
+      const localDay = () => new Date().toLocaleDateString('sv-SE');
+      if (day !== localDay()) today = 0;
+      const save = () => localStorage.setItem(key, JSON.stringify({ marks, today, day: localDay() }));
+      const show = () => (document.getElementById('score').textContent = `marks: ${marks}, today: ${today}`);
+      show();
+      document.getElementById('ver').textContent = VERSION;
+
+      const head = document.getElementById('head');
+      const pet = mountPet({
+        storage: 'demo',
+        places: {
+          logo: (el) => head.append(el),
+          top: (el) => head.prepend(el),
+          float: (el) => document.body.append(el),
+        },
+        progress: () => ({ marks, today, limit: 3 }),
+      });
+      if (!pet.mounted) console.info('Pet not mounted — the reason is logged above');
+
+      document.getElementById('done').addEventListener('click', () => {
+        marks += 1;
+        today += 1;
+        save();
+        show();
+        pet.notify('saved', { key: `lesson-${marks}-${Date.now()}`, counted: true, first: today === 1 });
+      });
+      document.getElementById('fail').addEventListener('click', () => pet.notify('failed'));
+      document.getElementById('reset').addEventListener('click', () => {
+        pet.destroy();
+        localStorage.removeItem(key);
+        for (const k of Object.keys(localStorage)) if (k.startsWith('demo:')) localStorage.removeItem(k);
+        indexedDB.deleteDatabase('demo:scene');
+        location.reload();
+      });
+    </script>
+  </body>
+</html>

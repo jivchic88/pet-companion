@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Мой сайт</title>
+    <link rel="stylesheet" href="./pet/pet-base.css" />
+    <link rel="stylesheet" href="./pet/pet.css" />
+    <link rel="stylesheet" href="./pet/dog.css" />
+  </head>
+  <body>
+    <header id="head" style="position: relative"><span id="title">Мой сайт</span></header>
+    <main><button id="done" type="button">Урок пройден</button></main>
+    <script type="module">
+      import { mountPet } from './pet/pet.mjs';
+
+      let marks = 0; // знаки за занятия — считает сайт
+      let today = 0; // из них сегодня
+      const head = document.getElementById('head');
+      const pet = mountPet({
+        storage: 'mysite',
+        places: {
+          logo: (el) => head.append(el), // компьютер: в шапке; здесь же «Показать …» после «Скрыть»
+          top: (el) => head.prepend(el), // телефон: в шапке; без places.restore здесь же «Показать …»
+          float: (el) => document.body.append(el), // компьютер: в правом нижнем углу окна
+        },
+        progress: () => ({ marks, today, limit: 3 }),
+      });
+      if (!pet.mounted) console.info('Питомец не подключён — причина выше в консоли');
+
+      // Занятие сохранено и засчитано (здесь — по кнопке): сначала счёт сайта, затем событие.
+      document.getElementById('done').addEventListener('click', () => {
+        marks += 1;
+        today += 1;
+        pet.notify('saved', { key: `lesson-${marks}`, counted: true, first: today === 1 });
+      });
+    </script>
+  </body>
+</html>
