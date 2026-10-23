@@ -4,7 +4,7 @@
 
 > **In English, briefly.** A calm cat or dog companion that lives next to a web page and reacts to the site’s confirmed
 > learning activity. Plain browser ES modules + CSS, inline SVG art, no runtime dependencies, no network, no build step.
-> The interface texts and this guide are in Russian; other languages are not supported yet. License — [LICENSE](LICENSE).
+> The interface texts and this guide are in Russian; other languages are not supported yet. **English quick guide — <https://github.com/jivchic88/pet-companion/blob/main/docs/README.en.md>**; live demo — <https://jivchic88.github.io/pet-companion/>. License — [LICENSE](LICENSE).
 
 Кот или собака рядом со страницей: спокойный спутник, который радуется подтверждённым занятиям сайта. Уголок (ступени по знакам, лакомство дня, имя, облик, аксессуар, место и вид, присутствие, движение), сцена «Поиграть» (поглаживание, лапа, миска, мячик), «Обустроить уголок» (расстановка комнаты), редкие сценки после занятия, «Всегда рядом» / «Приходит по зову». Клавиатура, Esc, возврат фокуса, объявления для скринридера, «уменьшить движение». Без сети, аналитики и сборки: ES-модули и CSS.
 

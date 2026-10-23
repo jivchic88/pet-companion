@@ -1,7 +1,7 @@
 {
   "name": "pet-companion",
   "version": "0.3.0",
-  "description": "Кот или собака рядом со страницей: спокойный спутник, который радуется подтверждённым занятиям сайта. ES-модули и CSS без зависимостей и сборки.",
+  "description": "A calm cat or dog companion for web pages and React Native: reacts to activities your site confirms. ES modules + CSS, no dependencies, no build step. / Кот или собака рядом со страницей: спокойный спутник, который радуется подтверждённым занятиям сайта.",
   "keywords": [
     "pet",
     "companion",
@@ -10,7 +10,14 @@
     "svg",
     "esm",
     "browser",
-    "gamification"
+    "gamification",
+    "mascot",
+    "react",
+    "react-native",
+    "expo",
+    "widget",
+    "animation",
+    "typescript"
   ],
   "license": "MIT",
   "author": "jivchic88",
@@ -18,7 +25,7 @@
     "type": "git",
     "url": "git+https://github.com/jivchic88/pet-companion.git"
   },
-  "homepage": "https://github.com/jivchic88/pet-companion#readme",
+  "homepage": "https://jivchic88.github.io/pet-companion/",
   "bugs": {
     "url": "https://github.com/jivchic88/pet-companion/issues"
   },
