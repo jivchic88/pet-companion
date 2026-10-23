@@ -7,15 +7,15 @@
 import { bunnySvg, carrotArt, hayArt, hayMiniSvg } from '../bunny-art.mjs';
 import { POSES } from '../core/define.mjs';
 
-// Надетый аксессуар на портрете выбора: рисунок по умолчанию — голубая ленточка ribbon.
-const withAcc = (markup, accessory) => (accessory ? markup.replace('data-acc="ribbon"', `data-acc="${accessory}"`) : markup);
+// Надетый аксессуар на портрете выбора: рисунок по умолчанию — терракотовый платок scarf.
+const withAcc = (markup, accessory) => (accessory ? markup.replace('data-acc="scarf"', `data-acc="${accessory}"`) : markup);
 
 export const bunnyWeb = Object.freeze({
   pet: 'bunny',
   poses: Object.freeze([...POSES, 'hop', 'wash']),
   scenes: Object.freeze(['hop', 'wash']),
   coats: Object.freeze(['fawn', 'snow', 'spot']),
-  accessories: Object.freeze(['ribbon', 'bow', 'clover']),
+  accessories: Object.freeze(['scarf', 'bow', 'clover']),
   items: Object.freeze(['carrot', 'hay']),
   art: ({ id, view, coat, className, box, accessory } = {}) => withAcc(bunnySvg({ id, view, coat, className, box }), accessory),
   item: (id, { fresh = false } = {}) => (id === 'carrot' ? carrotArt() : id === 'hay' ? hayArt({ fresh }) : ''),

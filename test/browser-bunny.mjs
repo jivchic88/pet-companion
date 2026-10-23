@@ -1,11 +1,11 @@
 // Кролик в Chrome (0.4.0): настоящий mountPet на проверочном стенде с явным подключением кролика — pets: [cat, dog, bunny],
 // kits: [bunnyWeb], стили pet-companion/bunny.css на странице (вход /pet/bunny.mjs, как видит сайт). Сценарий — кнопками
 // самого питомца: выбор «Кролик» в уголке (рисунок набора в шапке и в сцене, выбор — только ext:v1 поверх кота, companion
-// не записан; облики, ленточки и имена — из определения; образцы ленточек раскрашены bunny.css, правое ухо отогнуто —
+// не записан; облики, аксессуары и имена — из определения; образцы аксессуаров раскрашены bunny.css, правое ухо отогнуто —
 // стили набора действуют), «Поиграть» (области голова, тело и лапка; «Коснуться лапы» без «Дай лапу»; поглаживание мышью и
 // пальцем — «шевелит носом», касание лапки — «тянется лапкой», мячик — поза ball рисунком кролика), «Обустроить уголок»
 // (морковка — сразу, сено — только со ступени «Наш ритуал»), объявленные сценки hop и wash, кормление (поза feed со сдвигом
-// к миске), отдых (лежащее тело), смена на собаку и обратно — имя и ленточка кролика целы. Компьютер 1280×900 (мышь,
+// к миске), отдых (лежащее тело), смена на собаку и обратно — имя и аксессуар кролика целы. Компьютер 1280×900 (мышь,
 // клавиатура), телефон 390×844 (касания, CDP). Без ошибок страницы, предупреждений журнала и горизонтальной прокрутки.
 // Часы — page.clock. Запуск — в составе npm run test:browser.
 
@@ -57,12 +57,13 @@ const finishOpen = (page) => page.evaluate(() => Promise.all((document.querySele
 const hint = (page) => page.evaluate(() => document.querySelector('[data-cat-play-hint]')?.textContent ?? '');
 const playPose = (page) => page.evaluate(() => document.querySelector('.cat-play .cat-art')?.dataset.pose ?? '');
 const rect = (page, selector) => page.evaluate((s) => document.querySelector(s)?.getBoundingClientRect().toJSON() ?? null, selector);
-// Вычисленные стили частей рисунка в шапке: отогнутое правое ухо и образец ленточки — доказательство, что bunny.css действует.
+// Вычисленные стили частей рисунка в шапке: отогнутое правое ухо и образец бантика (его цвет есть только в bunny.css; платок
+// кролика — того же цвета, что базовый образец кота) — доказательство, что bunny.css действует.
 const styled = (page) =>
   page.evaluate(() => {
     const art = [...document.querySelectorAll('.cat-art[data-kind="bunny"]')].find((el) => !el.closest('#cat-sheet') && el.getBoundingClientRect().width > 0);
     const ear = art?.querySelector('.bunny-ear-r');
-    const swatch = document.querySelector('#cat-sheet .cat-swatch-ribbon');
+    const swatch = document.querySelector('#cat-sheet .cat-swatch-bow');
     return {
       ear: ear ? getComputedStyle(ear).transform : '',
       pose: art?.dataset.pose ?? '',
@@ -150,7 +151,7 @@ async function desktop(browser, base, check, open, layout) {
     check(`${label}: подключение с кроликом явно (pets, kits, bunny.css) — три питомца, показан кот; сценки кролика объявлены отображению`, start.pet.shown === 'cat' && start.pets.join() === 'cat,dog,bunny' && start.kinds.join() === 'cat' && JSON.stringify(start.scenes.bunny) === JSON.stringify(['hop', 'wash']), JSON.stringify(start));
     await page.clock.runFor(8000);
 
-    // ---- Уголок: выбор кролика; облики, ленточки, имена и рисунки — из определения и набора ----
+    // ---- Уголок: выбор кролика; облики, аксессуары, имена и рисунки — из определения и набора ----
     await page.locator('#cat-dock .cat-dock-btn').click();
     await finishOpen(page);
     const options = await page.evaluate(() => [...document.querySelectorAll('input[name="cat-kind"]')].map((input) => input.value));
@@ -158,7 +159,7 @@ async function desktop(browser, base, check, open, layout) {
     await choose(page, 'bunny');
     const chosen = { ...(await info(page)), stored: await stored(page), ...(await styled(page)) };
     check(`${label}: «Кролик» — рисунок набора кролика в шапке; выбор — только ext:v1 { pet: { id: 'bunny', over: 'cat' } }, companion не записан`, chosen.pet.shown === 'bunny' && chosen.kinds.join() === 'bunny' && JSON.stringify(chosen.stored[key('ext')]?.pet) === JSON.stringify({ id: 'bunny', over: 'cat' }) && !(key('companion') in chosen.stored), JSON.stringify({ pet: chosen.pet, kinds: chosen.kinds, stored: chosen.stored }));
-    check(`${label}: bunny.css действует — правое ухо отогнуто (transform), образец голубой ленточки раскрашен`, chosen.sheets === 1 && chosen.ear !== 'none' && chosen.ear !== '' && chosen.swatch === 'rgb(106, 167, 216)', JSON.stringify({ ear: chosen.ear, swatch: chosen.swatch, sheets: chosen.sheets }));
+    check(`${label}: bunny.css действует — правое ухо отогнуто (transform), образец бантика раскрашен`, chosen.sheets === 1 && chosen.ear !== 'none' && chosen.ear !== '' && chosen.swatch === 'rgb(242, 167, 188)', JSON.stringify({ ear: chosen.ear, swatch: chosen.swatch, sheets: chosen.sheets }));
     const corner = await page.evaluate(() => ({
       coats: [...document.querySelectorAll('input[name="cat-coat"]')].map((input) => input.value),
       accs: [...document.querySelectorAll('input[name="cat-acc"]')].map((input) => [input.value, input.disabled]),
@@ -169,7 +170,7 @@ async function desktop(browser, base, check, open, layout) {
       pickers: [...document.querySelectorAll('.cat-coat-face .cat-art')].every((art) => art.dataset.kind === 'bunny'),
       title: document.getElementById('cat-sheet-title')?.textContent ?? '',
     }));
-    check(`${label}: уголок кролика — облики fawn/snow/spot, ленточки (бантик и клевер пока закрыты), имена, сцена с кроликом и морковкой без сена`, corner.coats.join() === 'fawn,snow,spot' && JSON.stringify(corner.accs) === JSON.stringify([['ribbon', false], ['bow', true], ['clover', true]]) && corner.chips.includes('Ушастик') && corner.stage && corner.carrot && !corner.hay && corner.pickers && corner.title === 'Пух', JSON.stringify(corner));
+    check(`${label}: уголок кролика — облики fawn/snow/spot, аксессуары (бантик и клевер пока закрыты), имена, сцена с кроликом и морковкой без сена`, corner.coats.join() === 'fawn,snow,spot' && JSON.stringify(corner.accs) === JSON.stringify([['scarf', false], ['bow', true], ['clover', true]]) && corner.chips.includes('Ушастик') && corner.stage && corner.carrot && !corner.hay && corner.pickers && corner.title === 'Пух', JSON.stringify(corner));
     await layout(page, `${label}, уголок кролика`);
     // Имя готовым словом, облик — белый: записи кролика в ext.pets.bunny и look.bunny.
     await page.locator('[data-cat-name-pick="Ушастик"]').click();

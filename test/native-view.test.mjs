@@ -126,13 +126,14 @@ test('штатные наборы: проходят проверку проти�
       assert.ok(badge.includes('#4f8a6e') && !scarf.includes('#4f8a6e'), `${kit.pet}: бейдж`);
       assert.ok(!markupOf(kit, { pose: 'calm', accessory: '' }).includes(`url(#q-${kit.pet}-scarf)`), `${kit.pet}: без аксессуара — без платка`);
     } else {
-      // Кролик (0.4.0): ленточки — голубая, розовый бантик, зелёная с клевером; без аксессуара — без ленточки.
-      const ribbon = markupOf(kit, { pose: 'calm', accessory: 'ribbon' });
+      // Кролик (0.4.0): терракотовый платок, розовый бантик, ленточка с клевером; без аксессуара — ни платка, ни ленточки.
+      const scarf = markupOf(kit, { pose: 'calm', accessory: 'scarf' });
       const bow = markupOf(kit, { pose: 'calm', accessory: 'bow' });
       const clover = markupOf(kit, { pose: 'calm', accessory: 'clover' });
-      assert.ok(ribbon.includes(`url(#q-${kit.pet}-ribbon)`) && bow.includes(`url(#q-${kit.pet}-bow)`) && !ribbon.includes(`url(#q-${kit.pet}-bow)`), `${kit.pet}: ленточка и бантик`);
-      assert.ok(clover.includes('#4f9a55') && !ribbon.includes('#4f9a55'), `${kit.pet}: клевер`);
-      assert.ok(!markupOf(kit, { pose: 'calm', accessory: '' }).includes(`url(#q-${kit.pet}-ribbon)`), `${kit.pet}: без аксессуара — без ленточки`);
+      assert.ok(scarf.includes(`url(#q-${kit.pet}-scarf)`) && bow.includes(`url(#q-${kit.pet}-bow)`) && !scarf.includes(`url(#q-${kit.pet}-bow)`) && !bow.includes(`url(#q-${kit.pet}-scarf)`), `${kit.pet}: платок и бантик`);
+      assert.ok(clover.includes('#4f9a55') && !scarf.includes('#4f9a55'), `${kit.pet}: клевер`);
+      const bare = markupOf(kit, { pose: 'calm', accessory: '' });
+      assert.ok(!['scarf', 'bow', 'clover'].some((id) => bare.includes(`url(#q-${kit.pet}-${id})`)) && !bare.includes('#4f9a55'), `${kit.pet}: без аксессуара — ни платка, ни ленточки`);
     }
   }
   // Суставы — всегда явная строка преобразования (тождество — translate(0, 0)): react-native-svg на Fabric при снятии

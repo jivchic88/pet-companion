@@ -17,7 +17,7 @@
 }
 
 /* Ленточки: виден надетый аксессуар (общее правило pet.css прячет все .cat-acc). */
-.cat-art[data-kind='bunny'][data-acc='ribbon'] [data-acc-part='ribbon'],
+.cat-art[data-kind='bunny'][data-acc='scarf'] [data-acc-part='scarf'],
 .cat-art[data-kind='bunny'][data-acc='bow'] [data-acc-part='bow'],
 .cat-art[data-kind='bunny'][data-acc='clover'] [data-acc-part='clover'] {
   display: inline;
@@ -64,22 +64,22 @@
 }
 
 .cat-art[data-kind='bunny'] .bunny-brow-l {
-  transform-origin: 79px 64px;
+  transform-origin: 81px 73px;
   transform: translateY(var(--bn-brow-y, 0)) rotate(var(--bn-brow-l, 0deg));
 }
 
 .cat-art[data-kind='bunny'] .bunny-brow-r {
-  transform-origin: 121px 64px;
+  transform-origin: 119px 73px;
   transform: translateY(var(--bn-brow-y, 0)) rotate(var(--bn-brow-r, 0deg));
 }
 
 .cat-art[data-kind='bunny'] .bunny-ear-l {
-  transform-origin: 86px 58px;
+  transform-origin: 79px 63px;
   transform: rotate(var(--bn-ear-l, 0deg));
 }
 
 .cat-art[data-kind='bunny'] .bunny-ear-r {
-  transform-origin: 134px 58px;
+  transform-origin: 121px 63px;
   transform: rotate(var(--bn-ear-r, 8deg));
 }
 
@@ -145,7 +145,7 @@
   --bn-lid-up: 1px;
   --bn-lid-down: -1px;
   --bn-ear-l: -2deg;
-  --bn-ear-r: 10deg;
+  --bn-ear-r: 5deg;
 }
 
 /* Внимание (экраны практики, ввод): уши торчком и вперёд, глаза шире, брови вверх, лёгкий наклон головы. */
@@ -170,7 +170,7 @@
   --bn-tail: -6deg;
 }
 
-/* Радость после сохранения: глаза-дуги, улыбка с зубками, уши врозь, подпрыгивает на месте. */
+/* Радость после сохранения: глаза-дуги, улыбка, уши врозь, подпрыгивает на месте. */
 .cat-art[data-kind='bunny'][data-pose='joy'] {
   --bn-lid-up: 24px;
   --bn-happy: 1;
@@ -944,10 +944,10 @@
   opacity: 0.9;
 }
 
-/* Образцы ленточек в уголке (кнопки выбора аксессуара). */
-.cat-swatch-ribbon {
-  background: #6aa7d8;
-  border-color: #3f6f99;
+/* Образцы аксессуаров в уголке (кнопки выбора): платок, бантик, клевер. */
+.cat-swatch-scarf {
+  background: #cf6741;
+  border-color: #9e4528;
 }
 
 .cat-swatch-bow {

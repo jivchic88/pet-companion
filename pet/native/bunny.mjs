@@ -1,31 +1,33 @@
 // Натив: штатный набор кролика bunnyNative (с 0.4.0; docs/ARCHITECTURE.md § 7.4, § 12.2). Рисунок Пуха веб-набора
-// (bunny-art.mjs: высокие уши, чёлка, пухлые щёки, круглые глаза с бровями, зубки, хвост-помпон, ленточка с бантиком)
-// перенесён в элементы react-native-svg в тех же единицах 220×204; позы — таблица суставов из bunny.css (веки, уши, брови,
-// голова, взгляд, хвост, левая лапка, ленточка, «сидит» / «лежит»), облики — палитры и отметины BUNNY_COATS, надетый
-// аксессуар — одна из трёх ленточек. Набор не решает, какую позу показать: Figure получает позу, облик и аксессуар из снимка.
+// (bunny-art.mjs, по эталону владельца: длинные стоячие уши, широкая голова с пушистыми щеками и хохолком, небольшие карие
+// глаза с тёмной линией века, маленький нос, рот «w», тонкие усы за контуром, пушистая грудка, хвост-помпон, терракотовый
+// платок с узлом сбоку) перенесён в элементы react-native-svg в тех же единицах 220×204; позы — таблица суставов из
+// bunny.css (веки, уши, брови, голова, взгляд, хвост, левая лапка, аксессуар, «сидит» / «лежит»), облики — палитры и
+// отметины BUNNY_COATS, надетый аксессуар — платок, бантик или клевер. Набор не решает, какую позу показать: Figure получает
+// позу, облик и аксессуар из снимка.
 
 import { Circle, ClipPath, Defs, Ellipse, G, Path } from 'react-native-svg';
-import { bodyShift, bowl, grow, h, idPrefix, linear, move, radial, sharedDefs, stretchY, tf, turn } from './svg.mjs';
+import { bodyShift, bowl, grow, h, idPrefix, linear, move, radial, SCARF, sharedDefs, stretchY, tf, turn } from './svg.mjs';
 
-// Ленточки — общие для всех обликов.
-const RIBBON = Object.freeze({ blue: '#6aa7d8', blueLight: '#9cc5e8', blueDark: '#3f6f99', pink: '#e07a97', pinkLight: '#f2a7bc', pinkDark: '#9e4a62', green: '#6fae73', greenLight: '#9dcb9f', greenDark: '#3f7444' });
+// Бантик и клевер — общие для всех обликов; платок — общий с котом и собакой (svg.mjs, SCARF).
+const RIBBON = Object.freeze({ pink: '#e07a97', pinkLight: '#f2a7bc', pinkDark: '#9e4a62', green: '#6fae73', greenLight: '#9dcb9f', greenDark: '#3f7444' });
 
-// Палитры обликов (bunny-art.mjs, BUNNY_COATS): smoke — тёмные штрихи меха, ear — наружная сторона ушей, marks — отметины.
+// Палитры обликов (bunny-art.mjs, BUNNY_COATS): smoke — штрихи меха, ear — наружная сторона ушей, marks — отметины.
 const COATS = Object.freeze({
   fawn: {
-    furLight: '#f6e0bd', fur: '#e4c293', furDark: '#c49c66', line: '#6a4a2c', headHi: '#faeacf', lid: '#eed4a8', headEdge: '#cfa771', ear: '#e4c293', earLine: '#6a4a2c',
-    earIn: '#f4bcc3', earDeep: '#e3a0ab', smoke: '#b58a56', sheen: '#fdf1e0', sheenSoft: '#f4e2c5', cream: '#fff7ea', creamHi: '#fffdf8', creamShade: '#efdfc4', bibTop: '#f9eedd', bibBottom: '#f3e3cb', bibSheen: '#fffaf2',
-    paw: '#f9ecd8', toe: '#b79a76', tuft: '#fff5e3', tail: '#fff7ec', tailShade: '#e8d2b2', nose: '#e8a0ac', noseLine: '#b06672', whisker: '#eadfca', blush: '#f0a39f', brow: '#a67f4e', eyeLine: '#2b2420', lidLine: '#7d5c38', patch: '', marks: '',
+    furLight: '#fffaf2', fur: '#f7ecdb', furDark: '#e6d1b0', line: '#4a3326', headHi: '#fffbf5', lid: '#faf1e3', headEdge: '#ecdabd', ear: '#f7ecdb', earLine: '#4a3326',
+    earIn: '#f6c3b8', earDeep: '#ec9f96', smoke: '#dcc3a0', sheen: '#ffffff', cream: '#fffaf3', creamHi: '#ffffff', creamShade: '#f3e6d2', bibTop: '#fdf6ec', bibBottom: '#f6ebdc',
+    paw: '#fcf4e8', toe: '#9c7f62', tuft: '#ffffff', tail: '#fffaf3', tailShade: '#eadcc6', nose: '#ec9a9a', noseLine: '#b8686c', whisker: '#6b5240', blush: '#f4b8ae', brow: '#c4a37e', eyeLine: '#2a1d16', patch: '', marks: '',
   },
   snow: {
-    furLight: '#ffffff', fur: '#f0ece5', furDark: '#d3cbbe', line: '#6b6358', headHi: '#ffffff', lid: '#f3efe8', headEdge: '#d8d1c5', ear: '#f0ece5', earLine: '#6b6358',
-    earIn: '#f4bcc6', earDeep: '#e5a0ae', smoke: '#c6bdae', sheen: '#ffffff', sheenSoft: '#f7f3ec', cream: '#fff9f2', creamHi: '#ffffff', creamShade: '#ebe2d4', bibTop: '#f6f0e6', bibBottom: '#efe6d7', bibSheen: '#ffffff',
-    paw: '#f8f3ea', toe: '#b9ad9d', tuft: '#ffffff', tail: '#ffffff', tailShade: '#e4ded4', nose: '#e8a0ac', noseLine: '#b06672', whisker: '#d9d1c4', blush: '#f0a9b2', brow: '#b3a893', eyeLine: '#2b2420', lidLine: '#5c544b', patch: '', marks: '',
+    furLight: '#ffffff', fur: '#f0ece5', furDark: '#d3cbbe', line: '#5a5249', headHi: '#ffffff', lid: '#f6f3ee', headEdge: '#d8d1c5', ear: '#f0ece5', earLine: '#5a5249',
+    earIn: '#f4bcc6', earDeep: '#e5a0ae', smoke: '#c6bdae', sheen: '#ffffff', cream: '#fff9f2', creamHi: '#ffffff', creamShade: '#ebe2d4', bibTop: '#f8f4ee', bibBottom: '#efe8dd',
+    paw: '#f8f3ea', toe: '#9d9284', tuft: '#ffffff', tail: '#ffffff', tailShade: '#e4ded4', nose: '#e8a0ac', noseLine: '#b06672', whisker: '#5a5249', blush: '#f0a9b2', brow: '#b3a893', eyeLine: '#2b2420', patch: '', marks: '',
   },
   spot: {
-    furLight: '#ffffff', fur: '#f0ece5', furDark: '#d3cbbe', line: '#5f4a3b', headHi: '#ffffff', lid: '#f3efe8', headEdge: '#d8d1c5', ear: '#8a5a3c', earLine: '#5f4a3b',
-    earIn: '#efb1bb', earDeep: '#dd96a3', smoke: '#c6bdae', sheen: '#ffffff', sheenSoft: '#f7f3ec', cream: '#fff9f2', creamHi: '#ffffff', creamShade: '#ebe2d4', bibTop: '#f6f0e6', bibBottom: '#efe6d7', bibSheen: '#ffffff',
-    paw: '#f8f3ea', toe: '#b9ad9d', tuft: '#ffffff', tail: '#ffffff', tailShade: '#e4ded4', nose: '#e8a0ac', noseLine: '#b06672', whisker: '#d9d1c4', blush: '#f0a9b2', brow: '#8a5a3c', eyeLine: '#2b2420', lidLine: '#5c544b', patch: '#8a5a3c', marks: 'patch',
+    furLight: '#ffffff', fur: '#f0ece5', furDark: '#d3cbbe', line: '#4f3d30', headHi: '#ffffff', lid: '#f6f3ee', headEdge: '#d8d1c5', ear: '#8a5a3c', earLine: '#4f3d30',
+    earIn: '#efb1bb', earDeep: '#dd96a3', smoke: '#c6bdae', sheen: '#ffffff', cream: '#fff9f2', creamHi: '#ffffff', creamShade: '#ebe2d4', bibTop: '#f8f4ee', bibBottom: '#efe8dd',
+    paw: '#f8f3ea', toe: '#9d9284', tuft: '#ffffff', tail: '#ffffff', tailShade: '#e4ded4', nose: '#e8a0ac', noseLine: '#b06672', whisker: '#4f3d30', blush: '#f0a9b2', brow: '#8a5a3c', eyeLine: '#2b2420', patch: '#8a5a3c', marks: 'patch',
   },
 });
 
@@ -35,7 +37,7 @@ const BASE = Object.freeze({
   collarY: 0, collarS: 1, sitS: 1, sit: 1, lie: 0, allX: 0, allY: 0, mouth: 'calm', bowl: '', wash: 0,
 });
 const POSES = Object.freeze({
-  calm: { lidUp: 1, lidDown: -1, earL: -2, earR: 10 },
+  calm: { lidUp: 1, lidDown: -1, earL: -2, earR: 5 },
   attentive: { lidUp: -1, pupil: 1.08, headR: -4, headY: -2, earL: 4, earR: -4, browY: -2 },
   greet: { lidUp: 24, happy: 1, headY: -3, headR: 4, earL: -8, earR: 14, tail: -6, mouth: 'smile' },
   joy: { lidUp: 24, happy: 1, headY: -3, headR: -4, earL: -12, earR: 18, tail: -8, mouth: 'smile' },
@@ -66,13 +68,46 @@ const params = (pose, toward) => {
   return { ...BASE, ...own, ...turned };
 };
 
-const EYE_Y = 82;
-const EYE_R = 9.6;
-const EYES = { l: 80, r: 120 };
-const SIDE_PATCH = 'M126 136C136 130 152 136 156 148C159 158 150 167 139 165C129 163 122 154 123 145C123.3 141.5 124.3 138.5 126 136Z';
+// Геометрия — та же, что в bunny-art.mjs; правая половина — зеркало левой по x = 100.
+const mirror = (d) => d.replace(/(\d*\.?\d+) (\d*\.?\d+)/g, (_, x, y) => `${+(200 - Number(x)).toFixed(2)} ${y}`);
+const side = (d, l) => (l ? d : mirror(d));
+
+const EYE_Y = 88;
+const EYE_RX = 7.6;
+const EYE_RY = 8.8;
+const EYES = { l: 82, r: 118 };
+const TAIL = 'M145 160C148 153.5 158 152.5 162.5 158C167 163.5 165.5 173 158.5 176C152.5 178.5 146 176 144.5 170C143.8 166.5 144 163 145 160Z';
+const SIDE_PATCH = 'M124 140C132 135 143 139 146 148C148.5 156 143 163 135 162C127 161 121 154 121.5 147C121.7 144 122.6 141.8 124 140Z';
 const LIE_PATCH = 'M152 150C162 146 176 151 179 161C181 169 173 175 164 174C155 173 149 166 149.5 159C149.7 155.5 150.5 152.5 152 150Z';
-const HIP_PATCH = 'M48 162C54 156 64 158 66 166C67.5 172 62 177 56 176C50 175 46 169 47 165Z';
-const EYE_PATCH = 'M107 67C113 60 128 60 133 69C137 75 136 88 130 93C124 98 111 97 107.5 91C103.5 85 103 72 107 67Z';
+const HIP_PATCH = 'M52 164C57 159 65 161 67 168C68.5 173 64 178 58.5 177C53 176 50 171 51 167Z';
+const TORSO = 'M75 117C63 127 56 141 56 156C47 162 44.5 175 50 183.5C53 187.5 58 188 64 188L136 188C142 188 147 187.5 150 183.5C155.5 175 153 162 144 156C144 141 137 127 125 117Z';
+const CHEST = 'M100 127C112 127 121.5 139 121.5 153C121.5 166 112 174 100 174C88 174 78.5 166 78.5 153C78.5 139 88 127 100 127Z';
+const HAUNCH_L = 'M57 156C66.5 159.5 74 168 76.5 179.5';
+const FOOT_L = 'M52.5 184.5Q52.5 177.5 65.5 177.5Q78.5 177.5 78.5 184.5Q78.5 190.5 65.5 190.5Q52.5 190.5 52.5 184.5Z';
+const FOOT_TOES_L = 'M62 186.5L62 189.8M68.5 186.5L68.5 189.8';
+const LEG = {
+  fill: 'M80.5 150C79.5 161 79.5 171 80.5 181.5L100 181.5L100 154C94 152 87 151 80.5 150Z',
+  side: 'M80 160C79.6 167 79.8 174 80.5 181',
+  inner: 'M100 163L100 181',
+  paw: 'M78.5 184Q78.5 177.5 89.5 177.5Q100.5 177.5 100.5 184Q100.5 190.5 89.5 190.5Q78.5 190.5 78.5 184Z',
+  toes: 'M86.5 186L86.5 189.6M92.5 186L92.5 189.6',
+};
+const SCARF_BAND = 'M66.5 119.5C82 128 118 128 133.5 119.5L134.5 126.5C118 135 82 135 65.5 126.5Z';
+const SCARF_TIP = 'M71 125C85 131.5 115 131.5 129 125C122 137 111 148 100 157C89 148 78 137 71 125Z';
+const SCARF_TAILS = 'M131.5 129.5Q138.5 134.5 142.5 146Q136.5 144.5 130.5 137ZM127.5 131Q131.5 139 131.5 149.5Q126.5 145 125.5 136.5Z';
+const SCARF_KNOT = 'M124.5 125Q128.5 119.5 134 122.5Q137.5 127 134 131.5Q128.5 133.5 125.5 130Z';
+const EYE_PATCH = 'M106 76C111 69 126 69 131 77C134 83 133 95 127 99C121 103 110 102 106.5 96C103 90 103 81 106 76Z';
+const EAR_L = 'M68 66C58 50 51.5 29 55 15C57 7 60.5 3 64.5 3.2C70 3.5 77 12 82 22C87.5 33 90.5 46 90 62Z';
+const EAR_IN_L = 'M71.5 60C64 46 59.5 29 61 18C62 12 64.5 9 67.5 9.8C71.5 11 76 18 79.5 26C84 36 86 48 85.5 60Z';
+const EAR_FUR_L = 'M57.5 31Q57 22 60 14';
+const BROW_L = 'M75 75Q81 71.5 87.5 74';
+const SKULL = 'M100 53.5C121 53.5 136.5 63 141.5 79C144.5 90 145.5 101 141 110C134 120 118 124.5 100 124.5C82 124.5 66 120 59 110C54.5 101 55.5 90 58.5 79C63.5 63 79 53.5 100 53.5Z';
+const CHEEK_EDGE_L = 'M57.5 88Q52 91 53 95.5Q48.5 98.5 51.2 103Q48 107.5 53.5 110.5Q53.5 114.8 59.5 114';
+const CHEEK_FILL_L = `${CHEEK_EDGE_L}L62.5 108L60.5 99L59.5 88Z`;
+const TUFT_EDGE = 'M92.5 58Q91.5 50.5 96 47Q96 51.5 98.8 53.5Q99 47 103.5 44Q102.8 49.5 105.5 52Q108 49.5 111.5 50Q108.5 53.5 109 58';
+const MUZZLE = 'M86 101C91 96 96 97.5 100 101C104 97.5 109 96 114 101C122 106 121 117 111 119.5C106 120.8 94 120.8 89 119.5C79 117 78 106 86 101Z';
+const WHISKERS_L = 'M68 101.5Q55 99.8 41.5 100.6M68 105Q55 106 42.5 109.8M70.5 108.5Q60 113 49.5 120';
+
 const stroke = (color, width, extra = {}) => ({ fill: 'none', stroke: color, strokeWidth: width, strokeLinecap: 'round', ...extra });
 const outline = (fill, color, width) => ({ fill, stroke: color, strokeWidth: width, strokeLinejoin: 'round' });
 
@@ -80,20 +115,19 @@ function defs(p, c) {
   return h(
     Defs,
     null,
-    linear(`${p}-fur`, { gradientUnits: 'userSpaceOnUse', x1: 60, y1: 104, x2: 150, y2: 192 }, [['0', c.furLight], ['0.5', c.fur], ['1', c.furDark]]),
-    radial(`${p}-head`, { gradientUnits: 'userSpaceOnUse', cx: 100, cy: 74, r: 60 }, [['0', c.headHi], ['0.45', c.lid], ['0.8', c.fur], ['1', c.headEdge]]),
-    linear(`${p}-ear`, { x1: '0%', y1: '0%', x2: '0%', y2: '100%' }, [['0', c.earDeep], ['1', c.earIn]]),
+    linear(`${p}-fur`, { gradientUnits: 'userSpaceOnUse', x1: 60, y1: 110, x2: 150, y2: 192 }, [['0', c.furLight], ['0.5', c.fur], ['1', c.furDark]]),
+    radial(`${p}-head`, { gradientUnits: 'userSpaceOnUse', cx: 100, cy: 84, r: 54 }, [['0', c.headHi], ['0.5', c.lid], ['0.82', c.fur], ['1', c.headEdge]]),
+    linear(`${p}-ear`, { x1: '0%', y1: '0%', x2: '0%', y2: '100%' }, [['0', c.earDeep], ['0.7', c.earIn], ['1', c.earIn, 0.6]]),
     linear(`${p}-ear-out`, { x1: '0%', y1: '0%', x2: '40%', y2: '100%' }, [['0', c.ear], ['1', c.furDark]]),
-    radial(`${p}-cream`, { cx: '50%', cy: '42%', r: '62%' }, [['0', c.creamHi], ['0.7', c.cream], ['1', c.creamShade]]),
-    linear(`${p}-bib`, { x1: '0%', y1: '0%', x2: '0%', y2: '100%' }, [['0', c.bibTop], ['0.35', c.cream], ['1', c.bibBottom]]),
+    radial(`${p}-cream`, { cx: '50%', cy: '42%', r: '62%' }, [['0', c.creamHi], ['0.7', c.cream], ['1', c.creamShade, 0]]),
+    linear(`${p}-bib`, { x1: '0%', y1: '0%', x2: '0%', y2: '100%' }, [['0', c.bibTop], ['0.45', c.cream], ['1', c.bibBottom]]),
     radial(`${p}-tail`, { cx: '40%', cy: '35%', r: '70%' }, [['0', c.tail], ['1', c.tailShade]]),
-    radial(`${p}-iris`, { cx: '42%', cy: '38%', r: '70%' }, [['0', '#b8743a'], ['0.5', '#6a3a16'], ['1', '#2d170a']]),
-    linear(`${p}-ribbon`, { x1: '0%', y1: '0%', x2: '40%', y2: '100%' }, [['0', RIBBON.blueLight], ['0.55', RIBBON.blue], ['1', RIBBON.blueDark]]),
+    radial(`${p}-iris`, { cx: '45%', cy: '62%', r: '62%' }, [['0', '#b8793c'], ['0.5', '#7a4520'], ['1', '#331b0b']]),
     linear(`${p}-bow`, { x1: '0%', y1: '0%', x2: '40%', y2: '100%' }, [['0', RIBBON.pinkLight], ['0.55', RIBBON.pink], ['1', RIBBON.pinkDark]]),
     linear(`${p}-clover`, { x1: '0%', y1: '0%', x2: '40%', y2: '100%' }, [['0', RIBBON.greenLight], ['0.55', RIBBON.green], ['1', RIBBON.greenDark]]),
     ...sharedDefs(p),
-    h(ClipPath, { id: `${p}-eye-l` }, h(Circle, { cx: EYES.l, cy: EYE_Y, r: EYE_R })),
-    h(ClipPath, { id: `${p}-eye-r` }, h(Circle, { cx: EYES.r, cy: EYE_Y, r: EYE_R })),
+    h(ClipPath, { id: `${p}-eye-l` }, h(Ellipse, { cx: EYES.l, cy: EYE_Y, rx: EYE_RX, ry: EYE_RY })),
+    h(ClipPath, { id: `${p}-eye-r` }, h(Ellipse, { cx: EYES.r, cy: EYE_Y, rx: EYE_RX, ry: EYE_RY })),
   );
 }
 
@@ -102,49 +136,47 @@ function tail(p, c, P) {
   return h(
     G,
     { transform: tf(turn(P.tail, 150, 164)) },
-    h(Path, { d: 'M150 152C157 143 171 143 177 151C182 158 179 169 169 171C160 173 150 168 149 159C148.8 156 149.3 153.5 150 152Z', ...outline(`url(#${p}-tail)`, c.line, 1.7) }),
-    h(Path, { d: 'M156 151q4-4 9-2M171 152q4 4 4 8M155 163q2 4 6 5', ...stroke(c.tailShade, 1.5, { opacity: 0.8 }) }),
+    h(Path, { d: TAIL, ...outline(`url(#${p}-tail)`, c.line, 1.7) }),
+    h(Path, { d: 'M150 157.5Q154 155 158.5 156.5M161.5 162Q164 165.5 163.5 170', ...stroke(c.tailShade, 1.4, { opacity: 0.9 }) }),
   );
 }
 
-function leg(p, c, side, P) {
-  const l = side === 'l';
-  const x = l ? 0 : 19;
+function leg(p, c, s, P) {
+  const l = s === 'l';
   return h(
     G,
-    { key: side, transform: tf(l ? turn(P.leg, 92, 162) : '') },
-    h(Path, { d: `M${85 + x} 152C${83.5 + x} 162 ${84 + x} 172 ${85 + x} 182L${98 + x} 182C${98 + x} 172 ${98.5 + x} 162 ${99.5 + x} 154Z`, ...outline(`url(#${p}-fur)`, c.line, 1.7) }),
-    h(Path, { d: `M${l ? 95.5 : 104.5} 163C${l ? 95.5 : 104.5} 167 ${l ? 95.2 : 104.8} 170 ${l ? 95 : 105} 174`, ...stroke(c.furDark, 1.6, { opacity: 0.45 }) }),
-    h(Path, { d: `M${81.5 + x} 184Q${81.5 + x} 177 ${91.5 + x} 177Q${101.5 + x} 177 ${101.5 + x} 184Q${101.5 + x} 191 ${91.5 + x} 191Q${81.5 + x} 191 ${81.5 + x} 184Z`, fill: c.paw, stroke: c.line, strokeWidth: 1.5 }),
-    h(Path, { d: `M${87.5 + x} 185.5v4.2M${91.5 + x} 185v5M${95.5 + x} 185.5v4.2`, ...stroke(c.toe, 1.2) }),
+    { key: s, transform: tf(l ? turn(P.leg, 92, 162) : '') },
+    h(Path, { d: side(LEG.fill, l), fill: `url(#${p}-bib)` }),
+    h(Path, { d: `${side(LEG.side, l)}${LEG.inner}`, ...stroke(c.line, 1.7) }),
+    h(Path, { d: side(LEG.paw, l), fill: c.paw, stroke: c.line, strokeWidth: 1.6 }),
+    h(Path, { d: side(LEG.toes, l), ...stroke(c.toe, 1.2) }),
   );
 }
 
-function foot(c, x) {
+function foot(c, l) {
   return [
-    h(Path, { key: `f${x}`, d: `M${x} 187Q${x} 180 ${x + 14} 180Q${x + 28} 180 ${x + 28} 187Q${x + 28} 193.5 ${x + 14} 193.5Q${x} 193.5 ${x} 187Z`, fill: c.paw, stroke: c.line, strokeWidth: 1.5 }),
-    h(Path, { key: `t${x}`, d: `M${x + 9} 188v4.2M${x + 14} 187.5v5.2M${x + 19} 188v4.2`, ...stroke(c.toe, 1.2) }),
+    h(Path, { key: `f${l}`, d: side(FOOT_L, l), fill: c.paw, stroke: c.line, strokeWidth: 1.6 }),
+    h(Path, { key: `t${l}`, d: side(FOOT_TOES_L, l), ...stroke(c.toe, 1.2) }),
   ];
 }
 
+// Сидя: туловище-груша, светлая грудка, линии бёдер, большие задние ступни и две передние лапки.
 function sittingBody(p, c, P) {
   return h(
     G,
-    { transform: tf(stretchY(P.sitS, 102, 188)) },
+    { transform: tf(stretchY(P.sitS, 104, 188)) },
     tail(p, c, P),
-    h(Path, { d: 'M82 112C66 120 56 136 54 152C42 157 34 172 40 182C44 187 52 188 62 188L138 188C148 188 156 187 160 182C166 172 158 157 146 152C144 136 134 120 118 112Z', ...outline(`url(#${p}-fur)`, c.line, 1.8) }),
+    h(Path, { d: TORSO, ...outline(`url(#${p}-fur)`, c.line, 1.8) }),
     c.patch ? h(Path, { d: SIDE_PATCH, fill: c.patch, opacity: 0.9 }) : null,
     c.patch ? h(Path, { d: HIP_PATCH, fill: c.patch, opacity: 0.9 }) : null,
-    h(Path, { d: 'M56 154C66 158 72 168 73 180M144 154C134 158 128 168 127 180', ...stroke(c.furDark, 2, { opacity: 0.45 }) }),
-    h(Path, { d: 'M46 166C44 173 46 180 52 185M60 128Q56 134 56 140M174 166C176 173 174 180 168 185', ...stroke(c.sheen, 2, { opacity: 0.6 }) }),
-    h(Path, { d: 'M48 176q3-6 9-7M51 182q3-4 7-5M152 176q-3-6-9-7M149 182q-3-4-7-5', ...stroke(c.sheenSoft, 1.4, { opacity: 0.6 }) }),
-    foot(c, 42),
-    foot(c, 130),
+    h(Path, { d: CHEST, fill: `url(#${p}-bib)`, opacity: 0.95 }),
+    h(Path, { d: 'M60 139Q57 147 57.5 154M140 139Q143 147 142.5 154', ...stroke(c.furDark, 1.8, { opacity: 0.55 }) }),
+    h(Path, { d: `${HAUNCH_L}${mirror(HAUNCH_L)}`, ...stroke(c.line, 1.6, { opacity: 0.9 }) }),
+    foot(c, true),
+    foot(c, false),
     leg(p, c, 'r', P),
     leg(p, c, 'l', P),
-    h(Path, { d: 'M86 116C80 128 78 142 80 156Q85 158 88 164Q92 159 96 165Q100 159 104 165Q108 159 112 164Q115 158 120 156C122 142 120 128 114 116Z', fill: `url(#${p}-bib)` }),
-    h(Path, { d: 'M91 132q3.5 4 .5 9M109 130q-3.5 4-.5 9M100 142q2 4 0 8', ...stroke(c.bibSheen, 1.4, { opacity: 0.9 }) }),
-    h(Ellipse, { cx: 100, cy: 121, rx: 31, ry: 8, fill: '#2a2d33', opacity: 0.14 }),
+    h(Path, { d: 'M81.5 140q3 3 3 7.5M118.5 140q-3 3-3 7.5M86.5 150q2 2.5 1.5 6M113.5 150q-2 2.5-1.5 6M61 132q-2.5 3-2 6.5M139 132q2.5 3 2 6.5', ...stroke(c.furDark, 1.3, { opacity: 0.6 }) }),
   );
 }
 
@@ -164,13 +196,13 @@ function lyingBody(p, c) {
 function lyingFront(p, c) {
   const paw = (x) => [
     h(Path, { key: `p${x}`, d: `M${x} 186Q${x} 179 ${x + 11} 179Q${x + 22} 179 ${x + 22} 186Q${x + 22} 193 ${x + 11} 193Q${x} 193 ${x} 186Z`, fill: c.paw, stroke: c.line, strokeWidth: 1.6 }),
-    h(Path, { key: `t${x}`, d: `M${x + 7} 187.5v3.8M${x + 11} 187v4.6M${x + 15} 187.5v3.8`, ...stroke(c.toe, 1.2) }),
+    h(Path, { key: `t${x}`, d: `M${x + 8} 187.5v3.8M${x + 14} 187.5v3.8`, ...stroke(c.toe, 1.2) }),
   ];
   return h(
     G,
     null,
     h(Path, { d: 'M150 176C166 174 186 176 196 182C201 186 198 192 190 192Q166 192 146 189Z', ...outline(`url(#${p}-fur)`, c.line, 1.6) }),
-    h(Path, { d: 'M176 183v6M183 183.5v6M190 184.5v5', ...stroke(c.toe, 1.2) }),
+    h(Path, { d: 'M179 184v5.5M186 184.5v5.5', ...stroke(c.toe, 1.2) }),
     paw(78),
     paw(100),
   );
@@ -189,110 +221,104 @@ function bow(fill, dark, cx, cy, s) {
   );
 }
 
-// Ленточка на шее: виден только надетый аксессуар (ribbon, bow или clover).
+// Аксессуар на шее: виден только надетый — платок (scarf), бантик (bow) или клевер (clover).
 function collar(p, accessory, P) {
-  const kinds = { ribbon: [`url(#${p}-ribbon)`, RIBBON.blueDark], bow: [`url(#${p}-bow)`, RIBBON.pinkDark], clover: [`url(#${p}-clover)`, RIBBON.greenDark] };
-  if (!Object.hasOwn(kinds, accessory)) return null;
-  const [fill, dark] = kinds[accessory];
+  if (!['scarf', 'bow', 'clover'].includes(accessory)) return null;
+  const band = (fill, dark) => [
+    h(Path, { key: 'band', d: 'M68 116C82 128 118 128 132 116L133.5 124C118 137 82 137 66.5 124Z', ...outline(fill, dark, 1.5) }),
+    h(Path, { key: 'shine', d: 'M86 125Q99 129 112 127', ...stroke('#ffffff', 1.3, { opacity: 0.5 }) }),
+  ];
+  const scarf = [
+    h(Path, { key: 'band', d: SCARF_BAND, ...outline(`url(#${p}-scarf)`, SCARF.dark, 1.5) }),
+    h(Path, { key: 'tip', d: SCARF_TIP, ...outline(`url(#${p}-scarf)`, SCARF.dark, 1.5) }),
+    h(Path, { key: 'folds', d: 'M90 134Q95.5 142 99.5 150M84 131Q88.5 136 92 140', ...stroke(SCARF.dark, 1.2, { opacity: 0.5 }) }),
+    h(Path, { key: 'shine', d: 'M79 128.5Q94 132.5 112 131', ...stroke('#f3b08b', 1.3, { opacity: 0.6 }) }),
+    h(Path, { key: 'tails', d: SCARF_TAILS, ...outline(`url(#${p}-scarf)`, SCARF.dark, 1.4) }),
+    h(Path, { key: 'knot', d: SCARF_KNOT, ...outline(SCARF.scarf, SCARF.dark, 1.4) }),
+  ];
   return h(
     G,
     { transform: tf(move(0, P.collarY), stretchY(P.collarS, 100, 112)) },
-    h(Path, { d: 'M68 112C82 125 118 125 132 112L133.5 120.5C118 134 82 134 66.5 120.5Z', ...outline(fill, dark, 1.5) }),
-    h(Path, { d: 'M86 120.5Q99 125 112 123', ...stroke('#ffffff', 1.3, { opacity: 0.5 }) }),
-    accessory === 'ribbon' ? bow(RIBBON.blue, RIBBON.blueDark, 72, 120, 0.8) : null,
-    accessory === 'bow' ? bow(RIBBON.pink, RIBBON.pinkDark, 100, 124, 1.05) : null,
+    accessory === 'scarf' ? scarf : null,
+    accessory === 'bow' ? [...band(`url(#${p}-bow)`, RIBBON.pinkDark), h(G, { key: 'b' }, bow(RIBBON.pink, RIBBON.pinkDark, 100, 128, 1.05))] : null,
     accessory === 'clover'
-      ? h(
-          G,
-          { transform: tf(move(100, 126)) },
-          h(Circle, { cx: 0, cy: 0, r: 6.8, fill: '#f7f1e6', stroke: '#8b6f5e', strokeWidth: 1.2 }),
-          h(Circle, { cx: -2.6, cy: -1, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
-          h(Circle, { cx: 2.6, cy: -1, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
-          h(Circle, { cx: 0, cy: -3.6, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
-          h(Circle, { cx: 0, cy: 1.8, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
-          h(Path, { d: 'M0 2v4', ...stroke('#2f5f33', 1) }),
-        )
+      ? [
+          ...band(`url(#${p}-clover)`, RIBBON.greenDark),
+          h(
+            G,
+            { key: 'c', transform: tf(move(100, 130)) },
+            h(Circle, { cx: 0, cy: 0, r: 6.8, fill: '#f7f1e6', stroke: '#8b6f5e', strokeWidth: 1.2 }),
+            h(Circle, { cx: -2.6, cy: -1, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
+            h(Circle, { cx: 2.6, cy: -1, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
+            h(Circle, { cx: 0, cy: -3.6, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
+            h(Circle, { cx: 0, cy: 1.8, r: 2.3, fill: '#4f9a55', stroke: '#2f5f33', strokeWidth: 0.8 }),
+            h(Path, { d: 'M0 2v4', ...stroke('#2f5f33', 1) }),
+          ),
+        ]
       : null,
   );
 }
 
-function eye(p, side, c, P) {
-  const cx = EYES[side];
+// Глаз: верхнее веко — дугой по форме глаза с тёмной линией (в покое — над глазом), нижнее — дугой снизу.
+const lidUpPath = (cx, y) => `M${cx - 14} ${y - 40}L${cx + 14} ${y - 40}L${cx + 14} ${y + 0.5}L${cx + 9} ${y + 0.5}C${cx + 9} ${y - 12} ${cx - 9} ${y - 12} ${cx - 9} ${y + 0.5}L${cx - 14} ${y + 0.5}Z`;
+const lashPath = (cx, y) => `M${cx - 9} ${y + 0.5}C${cx - 9} ${y - 12} ${cx + 9} ${y - 12} ${cx + 9} ${y + 0.5}`;
+const lidDownPath = (cx, y) => `M${cx - 14} ${y + 40}L${cx + 14} ${y + 40}L${cx + 14} ${y - 0.5}L${cx + 9} ${y - 0.5}C${cx + 9} ${y + 12} ${cx - 9} ${y + 12} ${cx - 9} ${y - 0.5}L${cx - 14} ${y - 0.5}Z`;
+
+function eye(p, s, c, P) {
+  const cx = EYES[s];
   const y = EYE_Y;
   return h(
     G,
     null,
     h(
       G,
-      { clipPath: `url(#${p}-eye-${side})` },
-      h(Circle, { cx, cy: y, r: EYE_R, fill: `url(#${p}-iris)` }),
-      h(Circle, { cx, cy: y, r: EYE_R, fill: 'none', stroke: '#2d170a', strokeWidth: 2.6, opacity: 0.8 }),
-      h(G, { transform: tf(move(P.lookX, P.lookY)) }, h(Circle, { cx, cy: y + 0.5, r: 5, fill: '#120904', transform: tf(grow(P.pupil, P.pupil, cx, y + 0.5)) })),
-      h(Circle, { cx: cx + 3.2, cy: y - 3.8, r: 2.8, fill: '#fff' }),
-      h(Circle, { cx: cx - 3, cy: y + 3.6, r: 1.2, fill: '#fff', opacity: 0.8 }),
-      h(
-        G,
-        { transform: tf(move(0, P.lidDown)) },
-        h(Path, { d: `M${cx - 13} ${y + 11}Q${cx} ${y + 6} ${cx + 13} ${y + 11}L${cx + 13} ${y + 30}L${cx - 13} ${y + 30}Z`, fill: c.lid }),
-        h(Path, { d: `M${cx - 8} ${y + 9.2}Q${cx} ${y + 6} ${cx + 8} ${y + 9.2}`, ...stroke(c.lidLine, 1.2, { opacity: 0.5 }) }),
-      ),
-      h(
-        G,
-        { transform: tf(move(0, P.lidUp)) },
-        h(Path, { d: `M${cx - 13} ${y - 36}L${cx + 13} ${y - 36}L${cx + 13} ${y - 9.6}Q${cx} ${y - 5} ${cx - 13} ${y - 9.6}Z`, fill: c.lid }),
-        h(Path, { d: `M${cx - 13} ${y - 9.6}Q${cx} ${y - 5} ${cx + 13} ${y - 9.6}`, fill: 'none', stroke: c.eyeLine, strokeWidth: 1.8 }),
-      ),
+      { clipPath: `url(#${p}-eye-${s})` },
+      h(Ellipse, { cx, cy: y, rx: EYE_RX, ry: EYE_RY, fill: `url(#${p}-iris)` }),
+      h(Ellipse, { cx, cy: y, rx: EYE_RX, ry: EYE_RY, fill: 'none', stroke: '#24130a', strokeWidth: 2.4, opacity: 0.85 }),
+      h(G, { transform: tf(move(P.lookX, P.lookY)) }, h(Ellipse, { cx, cy: y - 0.4, rx: 3.9, ry: 4.7, fill: '#160b05', transform: tf(grow(P.pupil, P.pupil, cx, y - 0.4)) })),
+      h(Circle, { cx: cx + 2.4, cy: y - 3.4, r: 2.6, fill: '#fff' }),
+      h(Circle, { cx: cx - 2.6, cy: y + 3.6, r: 1.1, fill: '#fff', opacity: 0.85 }),
+      h(G, { transform: tf(move(0, P.lidDown)) }, h(Path, { d: lidDownPath(cx, y), fill: c.lid })),
+      h(G, { transform: tf(move(0, P.lidUp)) }, h(Path, { d: lidUpPath(cx, y), fill: c.lid }), h(Path, { d: lashPath(cx, y), ...stroke(c.eyeLine, 3) })),
     ),
-    P.happy ? h(Path, { d: `M${cx - 9} ${y + 2.5}Q${cx} ${y - 7.5} ${cx + 9} ${y + 2.5}`, ...stroke(c.eyeLine, 2.6, { opacity: P.happy }) }) : null,
-    P.sleep ? h(Path, { d: `M${cx - 8.5} ${y + 0.5}Q${cx} ${y + 7.5} ${cx + 8.5} ${y + 0.5}`, ...stroke(c.eyeLine, 2.4, { opacity: P.sleep }) }) : null,
+    P.happy ? h(Path, { d: `M${cx - 7.5} ${y + 2}Q${cx} ${y - 6.5} ${cx + 7.5} ${y + 2}`, ...stroke(c.eyeLine, 2.6, { opacity: P.happy }) }) : null,
+    P.sleep ? h(Path, { d: `M${cx - 7.5} ${y}Q${cx} ${y + 6.5} ${cx + 7.5} ${y}`, ...stroke(c.eyeLine, 2.4, { opacity: P.sleep }) }) : null,
   );
 }
 
-function ear(p, side, c, P) {
-  const l = side === 'l';
-  const outer = l ? 'M74 60C62 44 62 16 73 6C82 -1 93 8 95 26C96 40 93 52 89 61Z' : 'M146 60C158 44 158 16 147 6C138 -1 127 8 125 26C124 40 127 52 131 61Z';
-  const inner = l ? 'M79 56C71 42 71 22 78 13C83 8 89 15 89.5 28C90 40 87.5 50 85 56.5Z' : 'M141 56C149 42 149 22 142 13C137 8 131 15 130.5 28C130 40 132.5 50 135 56.5Z';
-  const lines = l ? 'M72 40Q71 26 76 14M68 48Q67 38 69 30' : 'M148 40Q149 26 144 14M152 48Q153 38 151 30';
+function ear(p, s, c, P) {
+  const l = s === 'l';
   return h(
     G,
-    { transform: tf(turn(l ? P.earL : P.earR, l ? 86 : 134, 58)) },
-    h(Path, { d: outer, ...outline(`url(#${p}-ear-out)`, c.earLine, 1.8) }),
-    h(Path, { d: inner, fill: `url(#${p}-ear)` }),
-    h(Path, { d: lines, ...stroke(c.tuft, 1.2, { opacity: 0.75 }) }),
+    { transform: tf(turn(l ? P.earL : P.earR, l ? 79 : 121, 63)) },
+    h(Path, { d: side(EAR_L, l), ...outline(`url(#${p}-ear-out)`, c.earLine, 1.8) }),
+    h(Path, { d: side(EAR_IN_L, l), fill: `url(#${p}-ear)` }),
+    h(Path, { d: side(EAR_FUR_L, l), ...stroke(c.tuft, 1.3, { opacity: 0.8 }) }),
   );
 }
 
-// Брови — дуги над глазами: подъём и наклон по позе.
-function brow(side, c, P) {
-  const l = side === 'l';
-  return h(G, { transform: tf(move(0, P.browY), turn(l ? P.browL : P.browR, l ? 79 : 121, 64)) }, h(Path, { d: l ? 'M70 66Q79 61 88 65' : 'M112 65Q121 61 130 66', ...stroke(c.brow, 2.6, { opacity: 0.65 }) }));
+// Брови — едва заметные дуги над глазами: подъём и наклон по позе.
+function brow(s, c, P) {
+  const l = s === 'l';
+  return h(G, { transform: tf(move(0, P.browY), turn(l ? P.browL : P.browR, l ? 81 : 119, 73)) }, h(Path, { d: side(BROW_L, l), ...stroke(c.brow, 1.9, { opacity: 0.8 }) }));
 }
 
-const teeth = (y) => [
-  h(Path, { key: 'teeth', d: `M97.2 ${y}h5.6v3.5q-2.8 1.3-5.6 0z`, fill: '#ffffff', stroke: '#8a7f80', strokeWidth: 0.8, strokeLinejoin: 'round' }),
-  h(Path, { key: 'gap', d: `M100 ${y + 0.2}v3.3`, stroke: '#b9afb0', strokeWidth: 0.8 }),
-];
-
-function mouth(kind) {
-  const line = { fill: 'none', stroke: '#4a4045', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' };
-  if (kind === 'smile')
-    return h(
-      G,
-      null,
-      h(Path, { d: 'M94 112.5Q100 120 106 112.5Q100 114.8 94 112.5Z', fill: '#8a3f45' }),
-      h(Path, { d: 'M100 107.5V111.5M91.5 112Q96 117.5 100 112.2Q104 117.5 108.5 112', ...line }),
-      ...teeth(113.2),
-    );
+function mouth(kind, c) {
+  const line = { fill: 'none', stroke: c.eyeLine, strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  if (kind === 'smile') return h(G, null, h(Path, { d: 'M95 108.5Q100 115 105 108.5Q100 110.6 95 108.5Z', fill: '#8a3f45' }), h(Path, { d: 'M100 105.6V108M92.5 108Q96.5 113 100 108.3Q103.5 113 107.5 108', ...line }));
   if (kind === 'yawn')
     return h(
       G,
       null,
-      h(Path, { d: 'M93 111Q100 107.5 107 111Q109.5 122 100 125Q90.5 122 93 111Z', fill: '#5b2a31', stroke: '#4a4045', strokeWidth: 1.3 }),
-      h(Path, { d: 'M95.2 119.5Q100 116.5 104.8 119.5Q103 123.8 100 124.1Q97 123.8 95.2 119.5Z', fill: '#d77b80' }),
-      h(Path, { d: 'M97 111.6h6v3.4q-3 1.2-6 0z', fill: '#ffffff' }),
+      h(Path, { d: 'M93.5 108Q100 104.8 106.5 108Q109 119 100 121.5Q91 119 93.5 108Z', fill: '#5b2a31', stroke: c.eyeLine, strokeWidth: 1.3 }),
+      h(Path, { d: 'M95.5 116Q100 113 104.5 116Q103 120 100 120.4Q97 120 95.5 116Z', fill: '#d77b80' }),
     );
-  return h(G, null, h(Path, { d: 'M100 107.5V111M93 113Q97 116 100 111Q103 116 107 113', ...line }), ...teeth(113.6));
+  return h(G, null, h(Path, { d: 'M100 105.6V107.6M93.5 108.2Q96.8 111.8 100 107.6Q103.2 111.8 106.5 108.2', ...line }));
 }
+
+// Пушистая щека или хохолок: заливка замкнутого контура тем же градиентом закрывает обводку головы под пучком, обводятся
+// только наружные зубцы.
+const fluff = (p, c, fillD, edgeD, width) => [h(Path, { key: 'fill', d: fillD, fill: `url(#${p}-head)` }), h(Path, { key: 'edge', d: edgeD, ...stroke(c.line, width, { strokeLinejoin: 'round' }) })];
 
 function head(p, c, P) {
   return h(
@@ -300,37 +326,30 @@ function head(p, c, P) {
     { transform: tf(move(P.headX, P.headY), turn(P.headR, 100, 118)) },
     ear(p, 'l', c, P),
     ear(p, 'r', c, P),
-    h(Path, {
-      d: 'M100 44C126 44 144 58 147 80C149 94 144 108 134 116C126 122 114 126 100 126C86 126 74 122 66 116C56 108 51 94 53 80C56 58 74 44 100 44Z',
-      ...outline(`url(#${p}-head)`, c.line, 1.8),
-    }),
-    h(Path, { d: 'M142 70C144 78 145 86 143 94M58 70C56 78 55 86 57 94', ...stroke(c.sheen, 2, { opacity: 0.55 }) }),
-    h(Path, { d: 'M62 100q-7 2-11 7M64 108q-6 3-8 8M138 100q7 2 11 7M136 108q6 3 8 8M84 54Q82 59 83 64M116 54Q118 59 117 64', ...stroke(c.smoke, 2.1, { opacity: 0.55 }) }),
+    h(Path, { d: SKULL, ...outline(`url(#${p}-head)`, c.line, 1.9) }),
+    h(G, { key: 'cheek-l' }, ...fluff(p, c, CHEEK_FILL_L, CHEEK_EDGE_L, 1.8)),
+    h(G, { key: 'cheek-r' }, ...fluff(p, c, mirror(CHEEK_FILL_L), mirror(CHEEK_EDGE_L), 1.8)),
+    h(Path, { d: 'M135.5 72C138.5 79 139.8 86 139.5 92M64.5 72C61.5 79 60.2 86 60.5 92', ...stroke(c.sheen, 2, { opacity: 0.55 }) }),
     c.marks === 'patch' ? h(Path, { d: EYE_PATCH, fill: c.patch, opacity: 0.9 }) : null,
-    h(Path, { d: 'M84 98C90 92 96 94 100 99C104 94 110 92 116 98C126 104 124 118 112 121C106 122.5 94 122.5 88 121C76 118 74 104 84 98Z', fill: `url(#${p}-cream)` }),
-    h(
-      G,
-      null,
-      h(Path, { d: 'M88 52C92 42 102 38 112 44C108 44 105 48 105 52C102 46 98 47 96 53C95 47 91 48 88 52Z', ...outline(`url(#${p}-head)`, c.line, 1.2) }),
-      h(Path, { d: 'M92 48Q96 43 101 42M98 49Q100 45 104 44', ...stroke(c.tuft, 1, { opacity: 0.85 }) }),
-    ),
+    h(Path, { d: MUZZLE, fill: `url(#${p}-cream)` }),
+    h(G, null, ...fluff(p, c, `${TUFT_EDGE}Z`, TUFT_EDGE, 1.6), h(Path, { d: 'M95 52Q96.5 49 97.5 47.5M101.5 50Q102.5 47 103.5 45.5', ...stroke(c.smoke, 1, { opacity: 0.8 }) })),
     brow('l', c, P),
     brow('r', c, P),
     eye(p, 'l', c, P),
     eye(p, 'r', c, P),
-    h(Circle, { cx: 70, cy: 104, r: 7, fill: c.blush, opacity: 0.4 }),
-    h(Circle, { cx: 130, cy: 104, r: 7, fill: c.blush, opacity: 0.4 }),
-    h(Path, { d: 'M95 99.5Q100 97 105 99.5Q104.5 105 100 107.5Q95.5 105 95 99.5Z', ...outline(c.nose, c.noseLine, 1) }),
-    h(Path, { d: 'M97.4 100.2Q100 99.4 102.6 100.2', ...stroke('#ffffff', 0.9, { opacity: 0.55 }) }),
-    mouth(P.mouth),
-    h(Path, { d: 'M85 104Q66 98 44 99M85 107Q64 106 42 109M86 110Q66 113 46 119M115 104Q134 98 156 99M115 107Q136 106 158 109M114 110Q134 113 154 119', ...stroke(c.whisker, 0.95, { opacity: 0.95 }) }),
+    h(Ellipse, { cx: 70.5, cy: 103.5, rx: 6.5, ry: 4.5, fill: c.blush, opacity: 0.35 }),
+    h(Ellipse, { cx: 129.5, cy: 103.5, rx: 6.5, ry: 4.5, fill: c.blush, opacity: 0.35 }),
+    h(Path, { d: 'M95.5 99.5Q100 97.6 104.5 99.5Q104 103.8 100 105.6Q96 103.8 95.5 99.5Z', ...outline(c.nose, c.noseLine, 1) }),
+    h(Path, { d: 'M97.6 100.1Q100 99.4 102.4 100.1', ...stroke('#ffffff', 0.9, { opacity: 0.6 }) }),
+    mouth(P.mouth, c),
+    h(Path, { d: `${WHISKERS_L}${mirror(WHISKERS_L)}`, ...stroke(c.whisker, 0.85, { opacity: 0.5 }) }),
   );
 }
 
 // Рисунок кролика: поза, облик (неизвестный — палевый, как веб), надетый аксессуар; toward — сторона предмета; prefix —
 // префикс id градиентов экземпляра; room — рисунок в сцене комнаты уголка ({ feed } — сдвиг к миске, своей миски нет).
 // Только элементы — корневой <Svg viewBox="0 0 220 204"> ставит отображение.
-function BunnyFigure({ pose = 'calm', coat = 'fawn', accessory = 'ribbon', toward = '', prefix = '', room = null } = {}) {
+function BunnyFigure({ pose = 'calm', coat = 'fawn', accessory = 'scarf', toward = '', prefix = '', room = null } = {}) {
   const c = Object.hasOwn(COATS, coat) ? COATS[coat] : COATS.fawn;
   const p = idPrefix(prefix, 'bunny');
   const P = params(pose, toward);
@@ -339,7 +358,7 @@ function BunnyFigure({ pose = 'calm', coat = 'fawn', accessory = 'ribbon', towar
     G,
     null,
     defs(p, c),
-    h(Ellipse, { cx: 102, cy: 189, rx: 72, ry: 7.5, fill: `url(#${p}-ground)` }),
+    h(Ellipse, { cx: 100, cy: 189, rx: 64, ry: 7, fill: `url(#${p}-ground)` }),
     h(
       G,
       { transform: tf(move(x, y)) },
@@ -349,7 +368,7 @@ function BunnyFigure({ pose = 'calm', coat = 'fawn', accessory = 'ribbon', towar
       head(p, c, P),
       P.lie ? lyingFront(p, c) : null,
       // «Умывается»: капли у мордочки.
-      P.wash ? h(G, { key: 'wash', fill: '#9cc5e8', opacity: 0.9 }, h(Circle, { cx: 70, cy: 92, r: 1.8 }), h(Circle, { cx: 64, cy: 102, r: 1.3 }), h(Circle, { cx: 76, cy: 85, r: 1.2 })) : null,
+      P.wash ? h(G, { key: 'wash', fill: '#9cc5e8', opacity: 0.9 }, h(Circle, { cx: 70, cy: 96, r: 1.8 }), h(Circle, { cx: 64, cy: 106, r: 1.3 }), h(Circle, { cx: 76, cy: 89, r: 1.2 })) : null,
     ),
     P.bowl && !room ? bowl(P.bowl === 'full') : null,
   );
@@ -390,7 +409,7 @@ export const bunnyNative = Object.freeze({
   poses: Object.freeze(['calm', 'attentive', 'rest', 'content', 'wait', 'joy', 'support', 'unlock', 'greet', 'pet', 'feed', 'fed', 'sniff', 'watch', 'ball', 'paw', 'yawn', 'hop', 'wash']),
   substitutes: Object.freeze({ settle: 'content' }),
   coats: Object.freeze(Object.keys(COATS)),
-  accessories: Object.freeze(['ribbon', 'bow', 'clover']),
+  accessories: Object.freeze(['scarf', 'bow', 'clover']),
   Figure: BunnyFigure,
   room: true,
   items: Object.freeze(['carrot', 'hay']),

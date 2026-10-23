@@ -1,7 +1,7 @@
 // Кролик — штатный питомец с 0.4.0 (README, «Кролик»; docs/ARCHITECTURE.md § 7.1): определение формата 1 (все обязательные
 // позы, лапка в «Поиграть» без «Дай лапу», зевок и «устроился», две сценки — «прыгает» и в портрете, «умывается» — только
 // целиком, морковка сразу и пучок сена со ступени «Наш ритуал»), веб-набор bunnyWeb (принят kitProblem против своего
-// определения, рисунок — svg класса cat-art с data-kind='bunny', у всех обликов те же части, рамка и опора, ленточки
+// определения, рисунок — svg класса cat-art с data-kind='bunny', у всех обликов те же части, рамка и опора, аксессуары
 // всех трёх видов, вещи и маленькое сено, стили набора — pet/bunny.css), стили (каждая поза, движение и сценка — своим
 // правилом только для data-kind='bunny'; только transform, opacity, display и анимации; образцы ленточек), области
 // попадания и лапа «Поиграть» против рисунка, комната (исходная расстановка допустима на всех ступенях, сено не
@@ -30,7 +30,7 @@ const css = (await readFile(new URL('../pet/bunny.css', import.meta.url), 'utf8'
 test('определение: штатный ID без точки, все обязательные позы и лапка (без «Дай лапу»), зевок и «устроился», две сценки, вещи и игрушки, запасной показ — кот', () => {
   assert.deepEqual([bunny.id, bunny.title, bunny.forms, bunny.names.default, bunny.names.offer, bunny.fallback], ['bunny', 'Кролик', { gen: 'кролика', acc: 'кролика' }, 'Пух', 'Морковкин', 'cat']);
   assert.deepEqual([BUILTIN_KINDS, LEGACY_KINDS], [['cat', 'dog', 'bunny'], ['cat', 'dog']], 'кролик — штатный, но не ключ 0.1.4');
-  assert.deepEqual(ownHome('bunny'), { key: 'ext', path: ['pets', 'bunny'] }, 'имя и ленточка кролика — в ext:v1, как у стороннего питомца');
+  assert.deepEqual(ownHome('bunny'), { key: 'ext', path: ['pets', 'bunny'] }, 'имя и аксессуар кролика — в ext:v1, как у стороннего питомца');
   assert.ok(Object.isFrozen(bunny) && Object.isFrozen(bunny.room) && Object.isFrozen(bunny.scenes[0]), 'глубоко заморожено');
   for (const pose of [...REQUIRED_POSES, PAW_POSE, ...OPTIONAL_POSES]) assert.ok(bunny.poses.includes(pose), pose);
   assert.deepEqual(bunny.poseFallback, undefined, 'замен нет — всё нарисовано');
@@ -40,7 +40,7 @@ test('определение: штатный ID без точки, все обя
     [['hop', 'hop', 'any', true], ['wash', 'wash', 'full', true]],
   );
   assert.deepEqual(bunny.coats.map((coat) => [coat.id, coat.title]), [['fawn', 'Палевый'], ['snow', 'Белый'], ['spot', 'Пятнистый']]);
-  assert.deepEqual(bunny.accessories.map((item) => [item.id, item.stage]), [['ribbon', 0], ['bow', 1], ['clover', 4]]);
+  assert.deepEqual(bunny.accessories.map((item) => [item.id, item.stage]), [['scarf', 0], ['bow', 1], ['clover', 4]]);
   assert.deepEqual(bunny.room.toys.map((toy) => [toy.id, toy.stage, toy.home]), [['carrot', 0, [40, 232]], ['hay', 2, [280, 236]]]);
   const hay = bunny.items.list.find((item) => item.id === 'hay');
   assert.deepEqual([hay.stage, hay.mini, bunny.items.list.indexOf(hay)], [2, 0, bunny.items.list.findIndex((item) => item.id === 'notebook') + 1], 'сено — вещь ступени «Наш ритуал», первым рядом с питомцем');
@@ -60,7 +60,7 @@ test('веб-набор: принят против своего определе
   assert.equal(kitProblem(dogWeb, all), '');
   assert.ok(kitNeeds(bunny).poses.includes('paw'), 'лапа — обязательная поза набора');
   assert.deepEqual(kitScenes(bunnyWeb, bunny), ['hop', 'wash']);
-  assert.deepEqual([bunnyWeb.pet, bunnyWeb.coats, bunnyWeb.accessories, bunnyWeb.items], ['bunny', ['fawn', 'snow', 'spot'], ['ribbon', 'bow', 'clover'], ['carrot', 'hay']]);
+  assert.deepEqual([bunnyWeb.pet, bunnyWeb.coats, bunnyWeb.accessories, bunnyWeb.items], ['bunny', ['fawn', 'snow', 'spot'], ['scarf', 'bow', 'clover'], ['carrot', 'hay']]);
   assert.ok(bunnyWeb.styles.length === 1 && bunnyWeb.styles[0].endsWith('/pet/bunny.css') && new URL(bunnyWeb.styles[0]).href === bunnyWeb.styles[0], bunnyWeb.styles[0]);
   // Без позы сценки набор не принимается, без лапы — тоже.
   const without = (list, ...ids) => list.filter((id) => !ids.includes(id));
@@ -72,12 +72,12 @@ test('веб-набор: принят против своего определе
 const classes = (svg) => [...svg.matchAll(/class="([^"]+)"/g)].map(([, value]) => value).sort((a, b) => a.localeCompare(b));
 const geometry = (svg) => ({ viewBox: /viewBox="([^"]+)"/.exec(svg)[1], place: /<svg[^>]*?( x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+")/.exec(svg)?.[1] ?? '' });
 
-test('рисунок: svg класса cat-art с data-kind=bunny, те же части, рамка и опора у всех обликов, ленточки всех видов, без внешних ресурсов, id с префиксом; вещи и маленькое сено', () => {
+test('рисунок: svg класса cat-art с data-kind=bunny, те же части, рамка и опора у всех обликов, аксессуары всех видов, без внешних ресурсов, id с префиксом; вещи и маленькое сено', () => {
   assert.deepEqual(Object.keys(BUNNY_COATS), bunny.coats.map((coat) => coat.id));
   assert.equal(BUNNY_PALETTE.fur, BUNNY_COATS.fawn.fur);
   for (const view of ['full', 'portrait']) {
     const base = bunnySvg({ id: 'b', view });
-    assert.match(base, /^\s*<svg class="cat-art" data-kind="bunny" data-view="(full|portrait)" data-coat="fawn" data-pose="calm" data-acc="ribbon" viewBox="/);
+    assert.match(base, /^\s*<svg class="cat-art" data-kind="bunny" data-view="(full|portrait)" data-coat="fawn" data-pose="calm" data-acc="scarf" viewBox="/);
     assert.equal(/viewBox="([^"]+)"/.exec(base)[1], view === 'full' ? '0 0 220 204' : '36 -2 128 128');
     for (const coat of Object.keys(BUNNY_COATS)) {
       const shown = bunnySvg({ id: 'b', view, coat });
@@ -91,11 +91,11 @@ test('рисунок: svg класса cat-art с data-kind=bunny, те же ч�
       for (const id of ids) assert.ok(id.startsWith('b-'), `${coat}: id ${id} без префикса экземпляра`);
     }
   }
-  // Целиком — тело, лёжа и сидя, ступни, лапки, хвост-помпон, зубки; портрет — только голова с ушами и ленточка.
+  // Целиком — тело, лёжа и сидя, ступни, лапки, хвост-помпон; портрет — только голова с ушами и аксессуар.
   const full = bunnySvg({ id: 'f' });
   for (const part of ['bunny-all', 'bunny-sit', 'bunny-lie', 'bunny-lie-front', 'bunny-tail', 'bunny-leg-l', 'bunny-leg-r', 'bunny-head', 'bunny-ear-l', 'bunny-ear-r', 'bunny-brow-l', 'bunny-brow-r', 'bunny-collar', 'bunny-nose', 'bunny-mouth-smile', 'bunny-mouth-yawn', 'bunny-wash']) assert.ok(full.includes(`class="${part}`) || full.includes(` ${part}"`) || full.includes(` ${part} `), part);
   const portrait = bunnySvg({ id: 'p', view: 'portrait' });
-  assert.ok(!portrait.includes('bunny-sit') && !portrait.includes('bunny-lie') && portrait.includes('bunny-head') && portrait.includes('bunny-collar'), 'портрет — голова и ленточка');
+  assert.ok(!portrait.includes('bunny-sit') && !portrait.includes('bunny-lie') && portrait.includes('bunny-head') && portrait.includes('bunny-collar'), 'портрет — голова и аксессуар');
   assert.ok(full.includes('url(#f-ground)') && !portrait.includes('-ground)'), 'тень под лапами — только целиком');
   // Место в сцене и коробка — общие (без прыжков при смене облика); пятнистый — отметины без новых классов.
   for (const stage of [0, 3]) assert.equal(new Set(Object.keys(BUNNY_COATS).map((coat) => geometry(bunnySvg({ id: 's', box: sceneCatBox(stage), coat })).place)).size, 1, `ступень ${stage}`);
@@ -105,7 +105,7 @@ test('рисунок: svg класса cat-art с data-kind=bunny, те же ч�
   assert.equal(bunnyWeb.item('carrot'), carrotArt());
   assert.equal(bunnyWeb.item('hay', { fresh: true }), hayArt({ fresh: true }));
   assert.deepEqual([bunnyWeb.item('yarn'), bunnyWeb.mini('carrot'), bunnyWeb.mini('hay')], ['', '', hayMiniSvg()]);
-  assert.equal(bunnyWeb.art({ id: 'a', view: 'portrait', coat: 'snow', accessory: 'bow' }), bunnySvg({ id: 'a', view: 'portrait', coat: 'snow' }).replace('data-acc="ribbon"', 'data-acc="bow"'));
+  assert.equal(bunnyWeb.art({ id: 'a', view: 'portrait', coat: 'snow', accessory: 'bow' }), bunnySvg({ id: 'a', view: 'portrait', coat: 'snow' }).replace('data-acc="scarf"', 'data-acc="bow"'));
 });
 
 test('стили: каждая поза, движение и сценка — своим правилом только для data-kind=bunny; только transform, opacity, display и анимации; образцы ленточек', () => {
@@ -126,7 +126,7 @@ test('стили: каждая поза, движение и сценка — с
   };
   for (const rule of own) {
     const selectors = split(rule.selector);
-    for (const one of selectors) assert.ok(/\.cat-art\[data-kind='bunny'\]|^\.cat-swatch-(ribbon|bow|clover)$/.test(one), `чужое правило: ${one}`);
+    for (const one of selectors) assert.ok(/\.cat-art\[data-kind='bunny'\]|^\.cat-swatch-(scarf|bow|clover)$/.test(one), `чужое правило: ${one}`);
     const props = [...rule.body.matchAll(/(^|;|\n)\s*([a-z-]+)\s*:/g)].map(([, , name]) => name);
     for (const name of props) assert.ok(/^(--bn-|transform|transition|animation|opacity|display|scale|background|border-color)/.test(name), `${rule.selector}: ${name}`);
     if (/background|border-color/.test(rule.body)) assert.match(rule.selector, /^\.cat-swatch-/, rule.selector);
