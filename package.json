@@ -1,6 +1,6 @@
 {
   "name": "pet-companion",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A calm cat or dog companion for web pages and React Native: reacts to activities your site confirms. ES modules + CSS, no dependencies, no build step. / Кот или собака рядом со страницей: спокойный спутник, который радуется подтверждённым занятиям сайта.",
   "keywords": [
     "pet",
